@@ -3,9 +3,9 @@ from utterplan import PlannerConfig, UtterancePlanner
 
 def main() -> None:
     plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
-        'Hello [Bonjour]{lang="fr"}.'
+        "Hello ...s world"
     )
-    print([(run.language, run.spoken_start, run.spoken_end) for run in plan.languages])
+    print(plan.to_json())
 
 
 if __name__ == "__main__":
