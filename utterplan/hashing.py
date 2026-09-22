@@ -4,6 +4,7 @@ import hashlib
 import json
 from typing import Any
 
+UNIT_HASH_SCHEMA = "utterplan-unit-v2"
 
 def canonical_json(value: Any) -> str:
     return json.dumps(
@@ -27,8 +28,21 @@ def unit_hash_payload(unit: Any) -> dict[str, Any]:
             markers.append(value)
         else:
             markers.append(marker)
+
+    tokens = [
+        {
+            "text": token.text,
+            "language": token.language,
+            "lemma": token.lemma,
+            "pos": token.pos,
+            "tag": token.tag,
+            "morph": token.morph,
+        }
+        for segment in unit.segments
+        for token in (unit.tokens[index] for index in segment.token_indices)
+    ]
     return {
-        "hash_schema": "utterplan-unit-v1",
+        "hash_schema": UNIT_HASH_SCHEMA,
         "segments": [
             {
                 "text": segment.text,
@@ -40,4 +54,5 @@ def unit_hash_payload(unit: Any) -> dict[str, Any]:
             for segment in unit.segments
         ],
         "markers": markers,
+        "tokens": tokens,
     }

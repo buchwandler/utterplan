@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from .config import LinguisticsConfig
 from .language import LanguageRun
@@ -19,7 +19,10 @@ class RunAnalysis:
     end: int
     tokens: tuple[TokenAnnotation, ...]
     provider_doc: object | None = None
+    provider: Literal["spacy", "fallback"] = "fallback"
     model_name: str | None = None
+    provider_version: str | None = None
+    model_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,7 +30,10 @@ class LinguisticAnalysis:
     language: str
     text: str
     tokens: tuple[TokenAnnotation, ...]
+    provider: Literal["spacy", "fallback"] = "fallback"
     model_name: str | None = None
+    provider_version: str | None = None
+    model_version: str | None = None
     provider_doc: object | None = None
 
 
@@ -87,44 +93,68 @@ class LinguisticResourcePool:
             pipeline = self.pipeline(model, require=config.require_spacy)
             if pipeline is not None:
                 doc = pipeline(text)
+                provider_version = _spacy_version()
+                model_version = _model_version(pipeline)
                 return LinguisticAnalysis(
-                    run.language,
-                    text,
-                    tuple(
+                    language=run.language,
+                    text=text,
+                    tokens=tuple(
                         TokenAnnotation(
-                            int(token.idx),
-                            int(token.idx + len(token.text)),
-                            str(token.text),
-                            getattr(token, "pos_", None) or None,
-                            getattr(token, "tag_", None) or None,
-                            getattr(token, "lemma_", None) or None,
-                            run.language,
-                            f"token-{i}",
+                            spoken_start=int(token.idx),
+                            spoken_end=int(token.idx + len(token.text)),
+                            text=str(token.text),
+                            pos=getattr(token, "pos_", None) or None,
+                            tag=getattr(token, "tag_", None) or None,
+                            lemma=getattr(token, "lemma_", None) or None,
+                            language=run.language,
+                            id=f"token-{i}",
+                            morph=str(getattr(token, "morph", "") or "") or None,
                         )
                         for i, token in enumerate(doc)
                         if token.text
                     ),
-                    model,
-                    doc,
+                    provider="spacy",
+                    model_name=model,
+                    provider_version=provider_version,
+                    model_version=model_version,
+                    provider_doc=doc,
                 )
             if config.require_spacy:
                 raise RuntimeError("spaCy is required but no local model is available")
         return LinguisticAnalysis(
-            run.language, text, _fallback_tokens(text, run.language), None, None
+            language=run.language,
+            text=text,
+            tokens=_fallback_tokens(text, run.language),
+            provider="fallback",
         )
+
+
+def _spacy_version() -> str | None:
+    try:
+        import spacy
+    except ImportError:
+        return None
+    value = getattr(spacy, "__version__", None)
+    return str(value) if value else None
+
+
+def _model_version(pipeline: Any) -> str | None:
+    metadata = getattr(pipeline, "meta", None)
+    if isinstance(metadata, dict):
+        value = metadata.get("version")
+        return str(value) if value else None
+    return None
 
 
 def _fallback_tokens(text: str, language: str) -> tuple[TokenAnnotation, ...]:
     return tuple(
         TokenAnnotation(
-            match.start(),
-            match.end(),
-            match.group(0),
-            None,
-            None,
-            match.group(0).lower(),
-            language,
-            f"token-{i}",
+            spoken_start=match.start(),
+            spoken_end=match.end(),
+            text=match.group(0),
+            lemma=match.group(0).lower(),
+            language=language,
+            id=f"token-{i}",
         )
         for i, match in enumerate(re.finditer(r"\S+", text))
     )
@@ -140,27 +170,32 @@ def analyze_run_analyses(
     for run in runs:
         local = text[run.spoken_start : run.spoken_end]
         analysis = pool.analyze(local, run, config)
+        offset = run.spoken_start
         tokens = tuple(
             TokenAnnotation(
-                token.spoken_start + run.spoken_start,
-                token.spoken_end + run.spoken_start,
-                token.text,
-                token.pos,
-                token.tag,
-                token.lemma,
-                token.language,
-                f"token-{sum(len(item.tokens) for item in analyses) + i}",
+                spoken_start=token.spoken_start + offset,
+                spoken_end=token.spoken_end + offset,
+                text=token.text,
+                pos=token.pos,
+                tag=token.tag,
+                lemma=token.lemma,
+                language=token.language,
+                id=f"token-{sum(len(item.tokens) for item in analyses) + i}",
+                morph=token.morph,
             )
             for i, token in enumerate(analysis.tokens)
         )
         analyses.append(
             RunAnalysis(
-                run.language,
-                run.spoken_start,
-                run.spoken_end,
-                tokens,
-                analysis.provider_doc,
-                analysis.model_name,
+                language=run.language,
+                start=run.spoken_start,
+                end=run.spoken_end,
+                tokens=tokens,
+                provider_doc=analysis.provider_doc,
+                provider=analysis.provider,
+                model_name=analysis.model_name,
+                provider_version=analysis.provider_version,
+                model_version=analysis.model_version,
             )
         )
     return tuple(analyses)

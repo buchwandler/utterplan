@@ -36,7 +36,7 @@ def test_schema_and_determinism():
 
 def test_unsupported_schema():
     value = plan().to_dict()
-    value["schema_version"] = 2
+    value["schema_version"] = 3
     with pytest.raises(UnsupportedSchemaError):
         UtterancePlan.from_dict(value)
 
@@ -48,6 +48,12 @@ def test_semantic_corruption_is_rejected():
         UtterancePlan.from_dict(value)
 
 
+def test_token_text_must_match_spoken_slice():
+    value = plan().to_dict()
+    value["tokens"][0]["text"] = "wrong"
+    with pytest.raises(PlanValidationError, match="token.range_mismatch"):
+        UtterancePlan.from_dict(value)
+
 def test_compact_optional_fields_are_omitted():
     value = plan().to_dict()
     assert value["segments"]
@@ -57,6 +63,7 @@ def test_compact_optional_fields_are_omitted():
     assert all("pos" not in item for item in value["tokens"])
     assert all("tag" not in item for item in value["tokens"])
 
+    assert all(item["morph"] is None for item in value["tokens"])
 
 def test_json_is_plain_data():
     value = json.loads(plan().to_json())

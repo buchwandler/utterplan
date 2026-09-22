@@ -85,23 +85,39 @@
       "spoken_start": 0
     }
   ],
+  "linguistic_runs": [
+    {
+      "language_run_id": "lang-0",
+      "model": null,
+      "model_version": null,
+      "provider": "fallback",
+      "provider_version": null,
+      "token_end": 1,
+      "token_start": 0
+    }
+  ],
   "markers": [],
-  "plan_id": "sha256:8f9e0342d77491f1dfa04ba406705cbd33105e03abb34ffed30ac286c7d107b8",
+  "plan_id": "sha256:84f39cda7fbbc17d4501d0a52ea20519b715350ebf52d7604a1e1c15e5e10c6e",
   "preparation": {
     "backend": "spokenform",
-    "languages": ["en-us"],
+    "languages": [
+      "en-us"
+    ],
     "replacements": [],
-    "version": "0.4.4.dev0+g71feb9cb4.d19800101",
+    "version": "0.4.5",
     "warnings": []
   },
   "producer": {
     "name": "utterplan",
-    "version": "0.1.0"
+    "version": "0.1.3"
   },
-  "schema_version": 1,
+  "schema_version": 2,
   "segments": [
     {
-      "annotation_ids": ["annotation-000000", "annotation-000001"],
+      "annotation_ids": [
+        "annotation-000000",
+        "annotation-000001"
+      ],
       "clause": 0,
       "directives": {
         "emphasis": {
@@ -128,7 +144,9 @@
       "spoken_end": 4,
       "spoken_start": 0,
       "text": "fast",
-      "token_indices": [0]
+      "token_indices": [
+        0
+      ]
     }
   ],
   "source": {
@@ -144,6 +162,7 @@
       "id": "token-0",
       "language": "en-us",
       "lemma": "fast",
+      "morph": null,
       "spoken_end": 4,
       "spoken_start": 0,
       "text": "fast"
@@ -151,12 +170,15 @@
   ],
   "units": [
     {
-      "content_hash": "sha256:b8518cae5461facce58d37b8105ad7b76cc6d2b766015520ba579ae2ba42651f",
+      "content_hash": "sha256:93e17e4c1016b739d6790e5e8a29c22afc95f6231f93f4ecb3ec788646fb5c01",
+      "content_hash_schema": "utterplan-unit-v2",
       "id": "unit-0000",
       "index": 0,
       "kind": "paragraph",
       "marker_ids": [],
-      "segment_ids": ["seg-000000"],
+      "segment_ids": [
+        "seg-000000"
+      ],
       "spoken_end": 4,
       "spoken_start": 0
     }

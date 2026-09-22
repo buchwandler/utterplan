@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/buchwandler/utterplan/schema/v1",
+  "$id": "https://github.com/buchwandler/utterplan/schema/v2",
   "title": "UtterPlan schema",
   "type": "object",
   "required": [
@@ -13,6 +13,7 @@
     "texts",
     "preparation",
     "languages",
+    "linguistic_runs",
     "annotations",
     "boundaries",
     "tokens",
@@ -24,7 +25,7 @@
   ],
   "properties": {
     "format": { "const": "utterplan" },
-    "schema_version": { "const": 1 },
+    "schema_version": { "const": 2 },
     "producer": {
       "type": "object",
       "required": ["name", "version"],
@@ -48,6 +49,7 @@
     },
     "preparation": { "$ref": "#/$defs/preparation" },
     "languages": { "type": "array", "items": { "$ref": "#/$defs/language" } },
+    "linguistic_runs": { "type": "array", "items": { "$ref": "#/$defs/linguistic_run" } },
     "annotations": {
       "type": "array",
       "items": { "$ref": "#/$defs/annotation" }
@@ -118,6 +120,20 @@
       },
       "additionalProperties": false
     },
+    "linguistic_run": {
+      "type": "object",
+      "required": ["language_run_id", "provider", "token_start", "token_end", "model", "provider_version", "model_version"],
+      "properties": {
+        "language_run_id": { "type": "string" },
+        "provider": { "enum": ["spacy", "fallback", "unknown"] },
+        "token_start": { "type": "integer", "minimum": 0 },
+        "token_end": { "type": "integer", "minimum": 0 },
+        "model": { "type": ["string", "null"] },
+        "provider_version": { "type": ["string", "null"] },
+        "model_version": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
     "annotation": {
       "type": "object",
       "required": [
@@ -165,7 +181,8 @@
         "pos": { "type": ["string", "null"] },
         "tag": { "type": ["string", "null"] },
         "lemma": { "type": ["string", "null"] },
-        "language": { "type": ["string", "null"] }
+        "language": { "type": ["string", "null"] },
+        "morph": { "type": ["string", "null"] }
       },
       "additionalProperties": false
     },
@@ -238,7 +255,8 @@
         "spoken_end",
         "segment_ids",
         "marker_ids",
-        "content_hash"
+        "content_hash",
+        "content_hash_schema"
       ],
       "properties": {
         "id": { "type": "string" },
@@ -248,7 +266,8 @@
         "spoken_end": { "$ref": "#/$defs/range" },
         "segment_ids": { "type": "array", "items": { "type": "string" } },
         "marker_ids": { "type": "array", "items": { "type": "string" } },
-        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "content_hash_schema": { "const": "utterplan-unit-v2" }
       },
       "additionalProperties": false
     },

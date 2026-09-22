@@ -82,6 +82,17 @@
       "spoken_start": 0
     }
   ],
+  "linguistic_runs": [
+    {
+      "language_run_id": "lang-0",
+      "model": null,
+      "model_version": null,
+      "provider": "fallback",
+      "provider_version": null,
+      "token_end": 2,
+      "token_start": 0
+    }
+  ],
   "markers": [
     {
       "attrs": {
@@ -92,29 +103,35 @@
       "spoken_position": 4
     }
   ],
-  "plan_id": "sha256:6ce544f215dd98369140ad9c66ebee113201692e976e42f76e13d3dc1ac2f6c6",
+  "plan_id": "sha256:34c05e37d217f835934ae069311f33c396889580a9690e138f75fdac591e3f8d",
   "preparation": {
     "backend": "spokenform",
-    "languages": ["en-us"],
+    "languages": [
+      "en-us"
+    ],
     "replacements": [],
-    "version": "0.4.4.dev0+g71feb9cb4.d19800101",
+    "version": "0.4.5",
     "warnings": []
   },
   "producer": {
     "name": "utterplan",
-    "version": "0.1.0"
+    "version": "0.1.3"
   },
-  "schema_version": 1,
+  "schema_version": 2,
   "segments": [
     {
-      "annotation_ids": ["annotation-000000"],
+      "annotation_ids": [
+        "annotation-000000"
+      ],
       "clause": 0,
       "directives": {},
       "id": "seg-000000",
       "language": "en-us",
       "paragraph": 0,
       "pause_after": {
-        "events": ["boundary-000000"],
+        "events": [
+          "boundary-000000"
+        ],
         "seconds": 0.6
       },
       "pause_before": {
@@ -125,10 +142,14 @@
       "spoken_end": 4,
       "spoken_start": 0,
       "text": "One.",
-      "token_indices": [0]
+      "token_indices": [
+        0
+      ]
     },
     {
-      "annotation_ids": ["annotation-000000"],
+      "annotation_ids": [
+        "annotation-000000"
+      ],
       "clause": 0,
       "directives": {},
       "id": "seg-000001",
@@ -146,7 +167,9 @@
       "spoken_end": 9,
       "spoken_start": 5,
       "text": "Two.",
-      "token_indices": [1]
+      "token_indices": [
+        1
+      ]
     }
   ],
   "source": {
@@ -162,6 +185,7 @@
       "id": "token-0",
       "language": "en-us",
       "lemma": "one.",
+      "morph": null,
       "spoken_end": 4,
       "spoken_start": 0,
       "text": "One."
@@ -170,6 +194,7 @@
       "id": "token-1",
       "language": "en-us",
       "lemma": "two.",
+      "morph": null,
       "spoken_end": 9,
       "spoken_start": 5,
       "text": "Two."
@@ -177,22 +202,30 @@
   ],
   "units": [
     {
-      "content_hash": "sha256:2331e548d1b1d34f1b4538cd689a80596b7939d64cd37ae858304fc6bc657148",
+      "content_hash": "sha256:4a40a8aee266a392cfa6e809581d542782a9673ef8680326e2fd1dffa12caafd",
+      "content_hash_schema": "utterplan-unit-v2",
       "id": "unit-0000",
       "index": 0,
       "kind": "sentence",
       "marker_ids": [],
-      "segment_ids": ["seg-000000"],
+      "segment_ids": [
+        "seg-000000"
+      ],
       "spoken_end": 4,
       "spoken_start": 0
     },
     {
-      "content_hash": "sha256:16846267be8586f05733916c94416ab1573c4ae66320674f27f9928b1f742618",
+      "content_hash": "sha256:10fef7b29c73b0afd593da4567df4d2e1219ee3d39549cf0864a0a901f60e7a2",
+      "content_hash_schema": "utterplan-unit-v2",
       "id": "unit-0001",
       "index": 1,
       "kind": "sentence",
-      "marker_ids": ["marker-000000"],
-      "segment_ids": ["seg-000001"],
+      "marker_ids": [
+        "marker-000000"
+      ],
+      "segment_ids": [
+        "seg-000001"
+      ],
       "spoken_end": 9,
       "spoken_start": 5
     }

@@ -155,14 +155,15 @@ def _format_speech_plan(plan: UtterancePlan, lines: list[str], *, details: bool)
         _format_markers(unit, markers_by_id, lines, details=details)
         for segment_number, segment_id in enumerate(unit.segment_ids, start=1):
             segment = segments_by_id[segment_id]
-            lines.extend(
-                _format_segment(
-                    segment,
-                    segment_number,
-                    boundaries_by_id,
-                    details=details,
-                )
+            formatted_segment = _format_segment(
+                segment,
+                segment_number,
+                boundaries_by_id,
+                details=details,
             )
+            lines.extend(formatted_segment)
+            if details:
+                lines.extend(_format_segment_tokens(plan, segment))
         if details:
             lines.append(f"    id: {unit.id}")
             lines.append(f"    spoken: {unit.spoken_start}:{unit.spoken_end}")
@@ -222,6 +223,19 @@ def _format_segment(
             result.append(f"       structural: {segment.structural_start}:{segment.structural_end}")
     return result
 
+
+def _format_segment_tokens(plan: UtterancePlan, segment: PlanSegment) -> list[str]:
+    if not segment.token_indices:
+        return ["       tokens: none"]
+    lines = ["       tokens:"]
+    for index in segment.token_indices:
+        token = plan.tokens[index]
+        lines.append(
+            f"         {_quote(token.text)}  lang={token.language or '-'}  "
+            f"lemma={token.lemma or '-'}  pos={token.pos or '-'}  "
+            f"tag={token.tag or '-'}  morph={token.morph or '-'}"
+        )
+    return lines
 
 def _format_pause(
     pause: ResolvedPause,
@@ -316,14 +330,23 @@ def _format_audio(directive: AudioDirective) -> str:
 
 def _format_language_runs(plan: UtterancePlan, lines: list[str]) -> None:
     lines.extend(["Language runs"])
+    analysis_by_language = {item.language_run_id: item for item in plan.linguistic_runs}
     if not plan.languages:
         lines.append("  None.")
     else:
         for run in plan.languages:
+            analysis = analysis_by_language.get(run.id)
+            if analysis is None:
+                provider = "unknown"
+                model = "-"
+            else:
+                provider = analysis.provider
+                model = analysis.model or "-"
             lines.append(
                 f"  {run.language}  spoken {run.spoken_start}:{run.spoken_end}"
                 f"  source: {run.source}"
             )
+            lines.append(f"    analysis: provider={provider}, model={model}")
     lines.append("")
 
 

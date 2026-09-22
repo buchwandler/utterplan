@@ -6,6 +6,8 @@ an in-process consumer does not need to serialize and reload a plan.
 
 The Python defaults are deliberately spaCy-free: `PlannerConfig` uses `spokenform` text preparation, and `PauseConfig().mode` is `"tts"`. The CLI additionally defaults to the `spacy off` linguistic-resource policy, which uses deterministic fallback tokenization and analysis without requiring an installed spaCy model.
 
+
+For an explicit contextual-G2P configuration, use `LinguisticsConfig(use_spacy=True, spacy_model="en_core_web_sm", require_spacy=True)`. The resulting plan records final pass-B token provenance in `linguistic_runs`; no provider document is retained.
 spaCy enrichment is opt-in through the CLI's `--spacy auto` policy or an explicit `LinguisticsConfig` with a compatible local model. It may provide richer tokenization, POS tags, lemmas, and tags, but UtterPlan never downloads a model implicitly.
 
 ## Planner configuration
@@ -55,6 +57,8 @@ spaCy enrichment is opt-in through the CLI's `--spacy auto` policy or an explici
 The public model also exposes `languages`, `annotations`, `boundaries`,
 `tokens`, `markers`, `document_metadata`, and resolved segment pauses. See the
 [consumer guide](consumer-guide) for how a renderer uses these fields.
+
+`TokenAnnotation` contains `text`, `language`, `lemma`, `pos`, `tag`, and `morph`. Token text and offsets address `texts.spoken`; `morph` is a compact provider string such as `Tense=Pres|VerbForm=Fin`. `LinguisticRun` records whether those facts came from spaCy, fallback tokenization, or unknown legacy provenance.
 
 `TextPreparationInfo` exposes serializable provenance only. Exact source-to-spoken mapping is transient planner state and is not part of `UtterancePlan` or its JSON contract.
 

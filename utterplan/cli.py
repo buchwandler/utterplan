@@ -328,9 +328,18 @@ def _inspect(plan: UtterancePlan, args: argparse.Namespace) -> None:
             )
     if args.tokens:
         print("\nTokens")
-        for token in plan.tokens:
+        if plan.linguistic_runs:
+            for linguistic_run in plan.linguistic_runs:
+                model = linguistic_run.model or "-"
+                print(f"  provider: {linguistic_run.provider}, model={model}")
+        else:
+            print("  provider: unknown, model=-")
+        for index, token in enumerate(plan.tokens):
+            token_id = token.id or f"token-{index}"
             print(
-                f"  {token.spoken_start}:{token.spoken_end} {token.text!r} {token.language or ''}"
+                f"  {token_id}  {token.spoken_start}:{token.spoken_end}  {token.text!r}  "
+                f"lang={token.language or '-'}  lemma={token.lemma or '-'}  "
+                f"pos={token.pos or '-'}  tag={token.tag or '-'}  morph={token.morph or '-'}"
             )
     if args.unit is not None:
         unit = plan.units[args.unit]

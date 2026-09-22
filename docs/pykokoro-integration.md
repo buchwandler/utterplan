@@ -35,6 +35,16 @@ A future adapter can use only public UtterancePlan fields:
 - resolved segment pauses and typed directives.
 
 It should pass `PlanSegment.text` and `PlanSegment.language` to the next
+
+For contextual pronunciation, pass the segment token snapshot to G2P:
+```python
+segment_tokens = plan.tokens_for_segment(segment)
+if linguistic_run.provider != "spacy":
+    # Fail clearly or use the consumer's documented non-contextual fallback.
+    ...
+phonemizer(segment.text, segment.language, segment_tokens)
+```
+The renderer must not rerun spaCy or infer missing POS/tag values.
 frontend stage. No JSON serialization is required for in-process use.
 
 ## Pause behavior

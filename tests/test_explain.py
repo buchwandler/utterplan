@@ -95,13 +95,18 @@ def test_details_include_technical_identity_and_correlated_ids() -> None:
     output = format_explanation(_load("parenthetical.utterplan.json"), details=True)
 
     assert "plan id: sha256:" in output
-    assert "schema: 1" in output
+    assert "schema: 2" in output
     assert "id: seg-000001" in output
     assert "spoken: 19:53" in output
     assert "content hash: sha256:" in output
     assert "events: boundary-000000" in output
     assert "origin phrasplit" in output
     assert "planning.complete [info]" in output
+    assert "analysis: provider=fallback" in output
+    assert "lemma=the" in output
+    assert "pos=-" in output
+    assert "tag=-" in output
+    assert "morph=-" in output
 
 
 def test_explanation_is_deterministic() -> None:

@@ -57,20 +57,33 @@
       "spoken_start": 0
     }
   ],
+  "linguistic_runs": [
+    {
+      "language_run_id": "lang-0",
+      "model": null,
+      "model_version": null,
+      "provider": "fallback",
+      "provider_version": null,
+      "token_end": 1,
+      "token_start": 0
+    }
+  ],
   "markers": [],
-  "plan_id": "sha256:0a3c2581aff7210c99852fe32d2ce8225ff6b1a20329a05e923c49ef8735313a",
+  "plan_id": "sha256:5fae7217f085545848ec2e6480a79a93d1c89ba2eb6a66234b1363b737f57881",
   "preparation": {
     "backend": "spokenform",
-    "languages": ["en-us"],
+    "languages": [
+      "en-us"
+    ],
     "replacements": [],
-    "version": "0.4.4.dev0+g71feb9cb4.d19800101",
+    "version": "0.4.5",
     "warnings": []
   },
   "producer": {
     "name": "utterplan",
-    "version": "0.1.0"
+    "version": "0.1.3"
   },
-  "schema_version": 1,
+  "schema_version": 2,
   "segments": [
     {
       "annotation_ids": [],
@@ -91,7 +104,9 @@
       "spoken_end": 6,
       "spoken_start": 0,
       "text": "Hello.",
-      "token_indices": [0]
+      "token_indices": [
+        0
+      ]
     }
   ],
   "source": {
@@ -107,6 +122,7 @@
       "id": "token-0",
       "language": "en-us",
       "lemma": "hello.",
+      "morph": null,
       "spoken_end": 6,
       "spoken_start": 0,
       "text": "Hello."
@@ -114,12 +130,15 @@
   ],
   "units": [
     {
-      "content_hash": "sha256:d2e984b4fd0eadb63bf24b795630cc4e898f7aef010b58bbe43c1023319c8d71",
+      "content_hash": "sha256:621a8948092b5cd08f0e8b70c69c8018b7756c432a74db3e3f9341f3170bd30e",
+      "content_hash_schema": "utterplan-unit-v2",
       "id": "unit-0000",
       "index": 0,
       "kind": "paragraph",
       "marker_ids": [],
-      "segment_ids": ["seg-000000"],
+      "segment_ids": [
+        "seg-000000"
+      ],
       "spoken_end": 6,
       "spoken_start": 0
     }

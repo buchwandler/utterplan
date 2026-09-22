@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 
 import pytest
@@ -31,8 +32,8 @@ def _step(target: int):
 def test_current_plan_migration_is_deterministic_noop() -> None:
     original = _current_data()
     result = migrate_plan_data(original)
-    assert result.source_version == 1
-    assert result.target_version == 1
+    assert result.source_version == 2
+    assert result.target_version == 2
     assert result.steps == ()
     assert not result.changed
     assert result.data == original
@@ -47,8 +48,8 @@ def test_migration_does_not_mutate_input() -> None:
 
 
 def test_migrate_json_roundtrips_current_plan() -> None:
-    result = migrate_plan_json('{"format": "utterplan", "schema_version": 1}')
-    assert '"schema_version": 1' in result
+    result = migrate_plan_json(json.dumps(_current_data()))
+    assert '"schema_version": 2' in result
     assert '"format": "utterplan"' in result
 
 
@@ -114,7 +115,7 @@ def test_mutating_step_is_rejected() -> None:
 
 def test_future_schema_is_not_migrated() -> None:
     data = _current_data()
-    data["schema_version"] = 2
+    data["schema_version"] = 3
     with pytest.raises(UnsupportedSchemaError):
         migrate_plan_data(data)
 

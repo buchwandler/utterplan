@@ -8,6 +8,8 @@ source / SSMD -> document.utterplan.json -> renderer diagnostics -> audio
 
 `utterplan explain FILE` shows prepared wording, render units, languages, resolved pauses, directives, markers, and warnings together. Use `utterplan inspect` when you need raw tokens, boundaries, coordinates, or a specific segment.
 
+Use `inspect --tokens` to distinguish unavailable fallback fields (`pos=-`, `tag=-`, `morph=-`) from actual values. `explain --details` shows the final linguistic run provider/model and each segment's token snapshot.
+
 If spoken wording is wrong, inspect `texts.spoken` and `preparation`. If language is wrong, inspect `languages` and annotation provenance. If a pause is missing, inspect `boundaries` and segment pause event IDs. If the plan is correct but G2P or audio is wrong, the issue belongs to the renderer or acoustic runtime, not the planning boundary.
 
 `utterplan inspect FILE --boundaries --tokens` is intentionally human-readable and does not require a renderer.

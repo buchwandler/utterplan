@@ -59,8 +59,7 @@ Explain an existing compiled plan as a human-readable speech narrative:
 utterplan explain chapter.utterplan.json
 utterplan explain chapter.utterplan.json --details
 ```
-
-The default output shows the prepared wording, render units, ordered segments, languages, resolved pauses, directives, markers, and warnings. Add `--details` for IDs, offsets, provenance, hashes, and plan identity information. Use `inspect` instead when you need raw fields such as tokens, boundaries, or a specific segment.
+The default output shows the prepared wording, render units, ordered segments, languages, resolved pauses, directives, markers, and warnings. Add `--details` for IDs, offsets, provenance, hashes, plan identity, and token analysis beneath each segment. Use `inspect --tokens` for a compact token/provenance view.
 
 ## Planning controls
 
@@ -70,8 +69,7 @@ The default output shows the prepared wording, render units, ordered segments, l
 - `--spacy off|auto|sm|md|lg|trf` selects deterministic fallback, automatic
   spaCy use, or a required model tier.
 
-The default spaCy policy is `off`, so the CLI does not depend on whichever
-optional model happens to be installed.
+The default spaCy policy is `off`, so the CLI does not depend on whichever optional model happens to be installed.
 
 The complete defaults are `--text-preparation spokenform`, `--pause-mode tts`, and `--spacy off`. `spokenform` is the default text-preparation backend, while `tts` is the default pause mode. `--spacy off` uses UtterPlan's deterministic fallback tokenizer and analysis and does not require an installed spaCy model.
 

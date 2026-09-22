@@ -39,6 +39,7 @@ utterplan = "utterplan.cli:main"
 [project.optional-dependencies]
 dev = ["build", "jsonschema", "mypy", "pytest", "ruff"]
 docs = ["sphinx>=7.0", "sphinx-rtd-theme>=2.0", "myst-parser>=2.0"]
+spacy = ["spacy>=3.5,<4"]
 [tool.setuptools.packages.find]
 include = ["utterplan*"]
 

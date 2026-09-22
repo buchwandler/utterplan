@@ -13,6 +13,7 @@ from .model import (
     AnnotationSpan,
     BoundaryEvent,
     Diagnostic,
+    LinguisticRun,
     Marker,
     PlanSegment,
     PlanSource,
@@ -83,6 +84,7 @@ class UtterancePlanner:
         )
         pass_b = analyze_run_analyses(spoken, runs, config.linguistics, self._resources)
         tokens = tuple(token for analysis in pass_b for token in analysis.tokens)
+        linguistic_runs = _linguistic_runs(runs, pass_b)
         boundaries = list(prepared.boundaries)
         boundaries.extend(_linguistic_boundaries(spoken, runs, config, start_id=len(boundaries)))
         segments = _segment(
@@ -94,7 +96,7 @@ class UtterancePlanner:
         segments = resolve_pauses(segments, boundaries, pause_config)
         markers = tuple(_map_marker(marker, prepared.source_map) for marker in parsed.markers)
         segment_tuple = tuple(segments)
-        units = make_units(segment_tuple, markers, selected_unit)
+        units = make_units(segment_tuple, markers, tokens, selected_unit)
         metadata = dict(parsed.metadata)
         metadata["planning"] = {
             "linguistic_passes": 2,
@@ -117,6 +119,7 @@ class UtterancePlanner:
             preparation=prepared.info,
             languages=runs,
             annotations=prepared.annotations,
+            linguistic_runs=linguistic_runs,
             boundaries=tuple(boundaries),
             tokens=tokens,
             segments=segment_tuple,
@@ -182,6 +185,28 @@ def _config_dict(config: PlannerConfig) -> dict[str, Any]:
     if result.get("ssmd", {}).get("pause_defaults") is not None:
         result["ssmd"]["pause_defaults"] = dict(config.ssmd.pause_defaults or {})
     return result
+
+def _linguistic_runs(
+    runs: tuple[Any, ...], analyses: tuple[Any, ...]
+) -> tuple[LinguisticRun, ...]:
+    token_start = 0
+    result: list[LinguisticRun] = []
+    for run, analysis in zip(runs, analyses, strict=True):
+        token_end = token_start + len(analysis.tokens)
+        result.append(
+            LinguisticRun(
+                language_run_id=run.id,
+                provider=analysis.provider,
+                token_start=token_start,
+                token_end=token_end,
+                model=analysis.model_name,
+                provider_version=analysis.provider_version,
+                model_version=analysis.model_version,
+            )
+        )
+        token_start = token_end
+    return tuple(result)
+
 
 
 def _segment(

@@ -41,9 +41,11 @@ result convenient for shell pipelines:
 
 ## Defaults and linguistic resources
 
-The default compile policy is `spokenform` for text preparation, `tts` for pause mode, and `spacy off` for linguistic resources. The `spacy off` path uses UtterPlan's deterministic fallback tokenizer and analysis, so the default planner does not require an installed spaCy model.
+The default compile policy is `spokenform` for text preparation, `tts` for pause mode, and `spacy off` for linguistic resources. The fallback path records `linguistic_runs[*].provider = "fallback"` and leaves POS, tag, and morph unavailable. It does not require an installed spaCy model.
 
-`--spacy auto` is an explicit opt-in. With a compatible local model, it may provide richer tokenization, POS tags, lemmas, and tags. It is not the default, and UtterPlan does not download models automatically.
+`--spacy auto` is an explicit opt-in. With a compatible local model, final pass-B tokens may contain POS, tag, lemma, and morphology, and the plan records the actual provider, model, and known versions. `sm`, `md`, `lg`, and `trf` require the requested local model. UtterPlan never downloads models automatically.
+Install the optional library with `python -m pip install 'utterplan[spacy]'` when needed. Language model packages remain explicit environment dependencies and are never downloaded by UtterPlan.
+
 
 ```bash
 utterplan compile "Hello world." --lang en-us | jq '.segments'

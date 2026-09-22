@@ -29,7 +29,11 @@ Use these public fields:
 - `plan.units` groups segments for paragraph or sentence rendering.
 - `plan.document_metadata` contains document-level metadata such as logical
   voice bindings.
+Consumers may rely on these plan-level fields: `texts.spoken`, `preparation`, `languages`, `linguistic_runs`, `tokens`, `annotations`, `boundaries`, `segments`, `units`, `markers`, and `document_metadata`. Each segment additionally provides its ID, spoken text range, language, paragraph/sentence/clause ownership, resolved pauses, typed directives, token indices, and annotation IDs.
 
+`TokenAnnotation` stores the exact spoken slice plus normalized language, lemma, coarse POS, fine-grained tag, and compact morphology. `LinguisticRun` records actual provider/model provenance.
+
+`plan.linguistic_runs` records the actual final pass-B analysis for each language run. `provider` is `spacy`, `fallback`, or `unknown`; model and version fields are provenance, not renderer inputs. A contextual G2P consumer should use `plan.tokens_for_segment(segment)` (or `segment.token_indices`) and must explicitly fail or use a documented fallback when the relevant provider is not `spacy`.
 All segment ranges and renderer-facing ranges are spoken-text coordinates.
 
 Preparation provenance is diagnostic metadata for consumers. Do not depend on a serialized coordinate map. All structural-to-spoken conversion has already been resolved by the planner.
@@ -63,6 +67,8 @@ for unit in plan.units:
         segment = next(item for item in plan.segments if item.id == segment_id)
         prepared_text = segment.text
         language = segment.language
+        segment_tokens = plan.tokens_for_segment(segment)
+        # Pass segment_tokens to contextual G2P without rerunning spaCy.
         pause_before = segment.pause_before.seconds
         pause_after = segment.pause_after.seconds
         # G2P and backend-specific rendering start here.

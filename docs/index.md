@@ -27,4 +27,4 @@ changelog
 
 The package version and the UtterPlan schema version are independent. The first
 public package release is `0.1.0` and the current interchange schema is
-version `1`.
+version `2`.

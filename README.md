@@ -97,9 +97,9 @@ renderer repository rather than UtterPlan's test suite.
 
 The package version is dynamically derived from Git tags by setuptools-scm. The
 first public alpha package release is `0.1.0`. The package version and
-UtterPlan `schema_version` are independent: this release uses schema version `1`.
+UtterPlan `schema_version` is independent from the package version. Current plans use schema version `2`; schema v1 remains frozen and supported through a pure v1-to-v2 migration.
 
-Schema v1 is frozen and packaged under a versioned schema-history path. UtterPlan can inspect and migrate supported historical plan JSON before constructing the current `UtterancePlan`; migration is representation conversion, not replanning. The `utterplan migrate` command supports `--check` and refuses output overwrite unless `--force` is supplied.
+Schema v2 persists final pass-B token facts, including optional POS, tag, lemma, and morphology, plus per-language-run provider provenance. Unit hashes use `utterplan-unit-v2` and include pronunciation-relevant token semantics. Migration is representation conversion only and never reruns planning or linguistic analysis.
 
 ## Development
 

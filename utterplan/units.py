@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from .hashing import semantic_hash, unit_hash_payload
+from .hashing import UNIT_HASH_SCHEMA, semantic_hash, unit_hash_payload
 from .model import Marker, PlanSegment, PlanUnit
 
 
 def make_units(
-    segments: tuple[PlanSegment, ...], markers: tuple[Marker, ...], kind: str
+    segments: tuple[PlanSegment, ...],
+    markers: tuple[Marker, ...],
+    tokens: tuple[object, ...],
+    kind: str,
 ) -> tuple[PlanUnit, ...]:
     if not segments:
         return ()
@@ -51,8 +54,9 @@ def make_units(
             replace(
                 provisional,
                 content_hash=semantic_hash(
-                    unit_hash_payload(_UnitView(group, marker_ids, marker_values))
+                    unit_hash_payload(_UnitView(group, marker_ids, marker_values, tokens))
                 ),
+                content_hash_schema=UNIT_HASH_SCHEMA,
             )
         )
     return tuple(units)
@@ -75,7 +79,9 @@ class _UnitView:
         segments: list[PlanSegment],
         marker_ids: tuple[str, ...],
         marker_values: tuple[Marker, ...],
+        tokens: tuple[object, ...],
     ) -> None:
         self.segments = tuple(segments)
         self.marker_ids = marker_ids
         self.marker_values = marker_values
+        self.tokens = tokens

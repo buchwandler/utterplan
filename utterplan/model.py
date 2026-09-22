@@ -4,12 +4,12 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from ._version import __version__
 from .config import semantic_config
 from .exceptions import PlanFormatError, PlanValidationError, UnsupportedSchemaError
-from .hashing import semantic_hash, unit_hash_payload
+from .hashing import UNIT_HASH_SCHEMA, semantic_hash, unit_hash_payload
 from .language import LanguageRun
 from .migration import migrate_plan_data
 from .versioning import FORMAT, SCHEMA_VERSION
@@ -106,6 +106,7 @@ class TokenAnnotation:
     language: str | None = None
     id: str | None = None
 
+    morph: str | None = None
     @property
     def start(self) -> int:
         return self.spoken_start
@@ -125,13 +126,36 @@ class TokenAnnotation:
             ("tag", self.tag),
             ("lemma", self.lemma),
             ("language", self.language),
+            ("morph", self.morph),
         ):
             if value is not None:
                 result[key] = value
         if self.id is not None:
             result["id"] = self.id
+        result["morph"] = self.morph
         return result
 
+
+@dataclass(frozen=True, slots=True)
+class LinguisticRun:
+    language_run_id: str
+    provider: Literal["spacy", "fallback", "unknown"]
+    token_start: int
+    token_end: int
+    model: str | None = None
+    provider_version: str | None = None
+    model_version: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "language_run_id": self.language_run_id,
+            "provider": self.provider,
+            "token_start": self.token_start,
+            "token_end": self.token_end,
+            "model": self.model,
+            "provider_version": self.provider_version,
+            "model_version": self.model_version,
+        }
 
 @dataclass(frozen=True, slots=True)
 class BoundaryEvent:
@@ -348,6 +372,7 @@ class PlanUnit:
     segment_ids: tuple[str, ...]
     marker_ids: tuple[str, ...] = ()
     content_hash: str = ""
+    content_hash_schema: str = UNIT_HASH_SCHEMA
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -359,6 +384,7 @@ class PlanUnit:
             "segment_ids": list(self.segment_ids),
             "marker_ids": list(self.marker_ids),
             "content_hash": self.content_hash,
+            "content_hash_schema": self.content_hash_schema,
         }
 
 
@@ -386,6 +412,7 @@ class UtterancePlan:
     preparation: TextPreparationInfo
     languages: tuple[LanguageRun, ...] = ()
     annotations: tuple[AnnotationSpan, ...] = ()
+    linguistic_runs: tuple[LinguisticRun, ...] = ()
     boundaries: tuple[BoundaryEvent, ...] = ()
     tokens: tuple[TokenAnnotation, ...] = ()
     segments: tuple[PlanSegment, ...] = ()
@@ -426,6 +453,7 @@ class UtterancePlan:
             "texts": self.texts.to_dict(),
             "preparation": self.preparation.to_dict(),
             "languages": [_plain(x) for x in self.languages],
+            "linguistic_runs": [_plain(x) for x in self.linguistic_runs],
             "annotations": [_plain(x) for x in self.annotations],
             "boundaries": [_plain(x) for x in self.boundaries],
             "tokens": [_plain(x) for x in self.tokens],
@@ -476,6 +504,11 @@ class UtterancePlan:
     def validate(self) -> None:
         validate_plan(self)
 
+    def tokens_for_segment(self, segment: PlanSegment | str) -> tuple[TokenAnnotation, ...]:
+        if isinstance(segment, str):
+            segment = next(item for item in self.segments if item.id == segment)
+        return tuple(self.tokens[index] for index in segment.token_indices)
+
 
 def _replace_plan(plan: UtterancePlan, **changes: Any) -> UtterancePlan:
     values = {field: getattr(plan, field) for field in plan.__dataclass_fields__}
@@ -498,6 +531,7 @@ def _check_shape(data: Mapping[str, Any]) -> None:
         "texts",
         "preparation",
         "languages",
+        "linguistic_runs",
         "annotations",
         "boundaries",
         "tokens",
@@ -513,7 +547,7 @@ def _check_shape(data: Mapping[str, Any]) -> None:
         raise PlanFormatError(f"unknown top-level fields: {sorted(unknown)}", code="field.unknown")
     if data.get("schema_version") != SCHEMA_VERSION:
         raise UnsupportedSchemaError(data.get("schema_version"))
-    for key in ("source", "config", "texts", "preparation", "segments", "units"):
+    for key in ("source", "config", "texts", "preparation", "segments", "units", "linguistic_runs"):
         if key not in data:
             raise PlanFormatError(
                 f"required field {key!r} is missing", code="field.required", path=f"$.{key}"
@@ -549,6 +583,7 @@ def _check_nested_types(data: Mapping[str, Any]) -> None:
         "annotations",
         "boundaries",
         "tokens",
+        "linguistic_runs",
         "segments",
         "units",
         "markers",
@@ -562,6 +597,17 @@ def _check_nested_types(data: Mapping[str, Any]) -> None:
         _expect(value.get("spoken_start"), int, f"$.languages[{index}].spoken_start")
         _expect(value.get("spoken_end"), int, f"$.languages[{index}].spoken_end")
         _expect(value.get("language"), str, f"$.languages[{index}].language")
+
+    for index, item in enumerate(data["linguistic_runs"]):
+        value = _expect(item, Mapping, f"$.linguistic_runs[{index}]")
+        for key in ("language_run_id", "provider"):
+            _expect(value.get(key), str, f"$.linguistic_runs[{index}].{key}")
+        for key in ("token_start", "token_end"):
+            _expect(value.get(key), int, f"$.linguistic_runs[{index}].{key}")
+        for key in ("model", "provider_version", "model_version"):
+            if value.get(key) is not None:
+                _expect(value.get(key), str, f"$.linguistic_runs[{index}].{key}")
+
     for index, item in enumerate(data["annotations"]):
         value = _expect(item, Mapping, f"$.annotations[{index}]")
         for key in ("id", "kind"):
@@ -572,6 +618,15 @@ def _check_nested_types(data: Mapping[str, Any]) -> None:
             if value.get(key) is not None:
                 _expect(value.get(key), int, f"$.annotations[{index}].{key}")
         _expect(value.get("attrs"), Mapping, f"$.annotations[{index}].attrs")
+    for index, item in enumerate(data["tokens"]):
+        value = _expect(item, Mapping, f"$.tokens[{index}]")
+        for key in ("spoken_start", "spoken_end"):
+            _expect(value.get(key), int, f"$.tokens[{index}].{key}")
+        _expect(value.get("text"), str, f"$.tokens[{index}].text")
+        for key in ("pos", "tag", "lemma", "language", "morph"):
+            if value.get(key) is not None:
+                _expect(value.get(key), str, f"$.tokens[{index}].{key}")
+
     for index, item in enumerate(data["segments"]):
         value = _expect(item, Mapping, f"$.segments[{index}]")
         _expect(value.get("text"), str, f"$.segments[{index}].text")
@@ -582,7 +637,7 @@ def _check_nested_types(data: Mapping[str, Any]) -> None:
             _expect(value.get(key), list, f"$.segments[{index}].{key}")
     for index, item in enumerate(data["units"]):
         value = _expect(item, Mapping, f"$.units[{index}]")
-        for key in ("id", "kind", "content_hash"):
+        for key in ("id", "kind", "content_hash", "content_hash_schema"):
             _expect(value.get(key), str, f"$.units[{index}].{key}")
         _expect(value.get("segment_ids"), list, f"$.units[{index}].segment_ids")
         _expect(value.get("marker_ids"), list, f"$.units[{index}].marker_ids")
@@ -671,6 +726,18 @@ def _from_current_dict(data: Mapping[str, Any]) -> UtterancePlan:
             )
             for x in data.get("languages", ())
         ),
+        linguistic_runs=tuple(
+            LinguisticRun(
+                language_run_id=str(x["language_run_id"]),
+                provider=cast(Literal["spacy", "fallback", "unknown"], str(x["provider"])),
+                token_start=int(x["token_start"]),
+                token_end=int(x["token_end"]),
+                model=x.get("model"),
+                provider_version=x.get("provider_version"),
+                model_version=x.get("model_version"),
+            )
+            for x in data.get("linguistic_runs", ())
+        ),
         annotations=tuple(
             AnnotationSpan(
                 id=str(x.get("id", f"annotation-{i:06d}")),
@@ -705,6 +772,7 @@ def _from_current_dict(data: Mapping[str, Any]) -> UtterancePlan:
                 x.get("lemma"),
                 x.get("language"),
                 x.get("id"),
+                x.get("morph"),
             )
             for x in data.get("tokens", ())
         ),
@@ -738,6 +806,7 @@ def _from_current_dict(data: Mapping[str, Any]) -> UtterancePlan:
                 tuple(x.get("segment_ids", ())),
                 tuple(x.get("marker_ids", ())),
                 str(x.get("content_hash", "")),
+                str(x.get("content_hash_schema", UNIT_HASH_SCHEMA)),
             )
             for x in data.get("units", ())
         ),
@@ -789,8 +858,8 @@ def validate_plan(plan: UtterancePlan) -> None:
                 raise PlanValidationError(f"duplicate id {item_id}", code="id.duplicate")
             if item_id is not None:
                 ids.add(item_id)
-    previous = 0
     boundary_ids = {event.id for event in plan.boundaries}
+    previous_segment_end = 0
     for segment in plan.segments:
         if not (0 <= segment.spoken_start <= segment.spoken_end <= len(text)):
             raise PlanValidationError(
@@ -800,9 +869,9 @@ def validate_plan(plan: UtterancePlan) -> None:
             raise PlanValidationError(
                 "segment text does not match spoken range", code="segment.range_mismatch"
             )
-        if segment.spoken_start < previous:
+        if segment.spoken_start < previous_segment_end:
             raise PlanValidationError("segments are not sorted", code="segment.order")
-        previous = segment.spoken_end
+        previous_segment_end = segment.spoken_end
         for pause in (segment.pause_before, segment.pause_after):
             if not math.isfinite(pause.seconds) or pause.seconds < 0:
                 raise PlanValidationError(
@@ -841,33 +910,109 @@ def validate_plan(plan: UtterancePlan) -> None:
                 "annotation spoken range must be both null or both present",
                 code="annotation.spoken_range",
             )
-        spoken_start = annotation.spoken_start
-        spoken_end = annotation.spoken_end
         if (
-            spoken_start is not None
-            and spoken_end is not None
-            and not (0 <= spoken_start <= spoken_end <= len(text))
+            annotation.spoken_start is not None
+            and annotation.spoken_end is not None
+            and not (0 <= annotation.spoken_start <= annotation.spoken_end <= len(text))
         ):
             raise PlanValidationError(
-                "annotation spoken range is outside spoken text",
-                code="annotation.spoken_range",
+                "annotation spoken range is outside spoken text", code="annotation.spoken_range"
             )
+    language_runs = {run.id: run for run in plan.languages}
     for run in plan.languages:
         if not (0 <= run.spoken_start <= run.spoken_end <= len(text)):
             raise PlanValidationError(
                 "language range is outside spoken text", code="language.out_of_range"
             )
+    previous_token_key: tuple[int, int] | None = None
     for token in plan.tokens:
         if not (0 <= token.spoken_start <= token.spoken_end <= len(text)):
             raise PlanValidationError(
                 "token range is outside spoken text", code="token.out_of_range"
             )
+        if token.text != text[token.spoken_start : token.spoken_end]:
+            raise PlanValidationError(
+                "token text does not match spoken range", code="token.range_mismatch"
+            )
+        token_key = (token.spoken_start, token.spoken_end)
+        if previous_token_key is not None and token_key < previous_token_key:
+            raise PlanValidationError("tokens are not sorted", code="token.order")
+        previous_token_key = token_key
+        for field_name in ("pos", "tag", "lemma", "language", "morph"):
+            value = getattr(token, field_name)
+            if value is not None and not isinstance(value, str):
+                raise PlanValidationError(
+                    f"token {field_name} must be a string", code="token.field_type"
+                )
+    seen_run_ids: set[str] = set()
+    previous_run_end = 0
+    for linguistic_run in plan.linguistic_runs:
+        if linguistic_run.language_run_id in seen_run_ids:
+            raise PlanValidationError(
+                f"duplicate linguistic run {linguistic_run.language_run_id}",
+                code="linguistic_run.duplicate",
+            )
+        seen_run_ids.add(linguistic_run.language_run_id)
+        language_run = language_runs.get(linguistic_run.language_run_id)
+        if language_run is None:
+            raise PlanValidationError(
+                "linguistic run references unknown language run",
+                code="linguistic_run.unknown_language",
+            )
+        if linguistic_run.provider not in {"spacy", "fallback", "unknown"}:
+            raise PlanValidationError(
+                "linguistic run provider is invalid", code="linguistic_run.provider"
+            )
+        if not (0 <= linguistic_run.token_start <= linguistic_run.token_end <= len(plan.tokens)):
+            raise PlanValidationError(
+                "linguistic run token range is invalid", code="linguistic_run.token_range"
+            )
+        if linguistic_run.token_start < previous_run_end:
+            raise PlanValidationError(
+                "linguistic runs overlap or are not ordered", code="linguistic_run.order"
+            )
+        previous_run_end = linguistic_run.token_end
+        if linguistic_run.provider == "fallback" and linguistic_run.model is not None:
+            raise PlanValidationError(
+                "fallback linguistic run cannot claim a model",
+                code="linguistic_run.model",
+            )
+        for field_name in ("model", "provider_version", "model_version"):
+            value = getattr(linguistic_run, field_name)
+            if value is not None and not isinstance(value, str):
+                raise PlanValidationError(
+                    f"linguistic run {field_name} must be a string",
+                    code="linguistic_run.field_type",
+                )
+        for token in plan.tokens[linguistic_run.token_start : linguistic_run.token_end]:
+            if not (
+                language_run.spoken_start <= token.spoken_start
+                and token.spoken_end <= language_run.spoken_end
+            ):
+                raise PlanValidationError(
+                    "linguistic run tokens are outside language range",
+                    code="linguistic_run.token_membership",
+                )
     segment_ids = {segment.id for segment in plan.segments}
     token_count = len(plan.tokens)
     for segment in plan.segments:
         if any(index < 0 or index >= token_count for index in segment.token_indices):
             raise PlanValidationError(
                 "segment references unknown token", code="segment.unknown_token"
+            )
+        if len(segment.token_indices) != len(set(segment.token_indices)):
+            raise PlanValidationError(
+                "segment references a token more than once", code="segment.token_membership"
+            )
+        if any(
+            not (
+                plan.tokens[index].spoken_start < segment.spoken_end
+                and plan.tokens[index].spoken_end > segment.spoken_start
+            )
+            for index in segment.token_indices
+        ):
+            raise PlanValidationError(
+                "segment token is outside segment range", code="segment.token_membership"
             )
         if any(annotation_id not in annotation_ids for annotation_id in segment.annotation_ids):
             raise PlanValidationError(
@@ -886,6 +1031,7 @@ def validate_plan(plan: UtterancePlan) -> None:
         if unit.spoken_start < previous_unit_end:
             raise PlanValidationError("units must not overlap", code="unit.overlap")
         previous_unit_end = unit.spoken_end
+    segment_by_id = {segment.id: segment for segment in plan.segments}
     for unit in plan.units:
         if not all(segment_id in segment_ids for segment_id in unit.segment_ids):
             raise PlanValidationError(
@@ -895,10 +1041,16 @@ def validate_plan(plan: UtterancePlan) -> None:
             raise PlanValidationError("unit references unknown marker", code="unit.unknown_marker")
         if not (0 <= unit.spoken_start <= unit.spoken_end <= len(text)):
             raise PlanValidationError("unit range is outside spoken text", code="unit.out_of_range")
-        unit_segments = [segment for segment in plan.segments if segment.id in unit.segment_ids]
+        if unit.content_hash_schema != UNIT_HASH_SCHEMA:
+            raise PlanValidationError(
+                "unsupported unit content hash schema", code="unit.hash_schema"
+            )
+        unit_segments = [segment_by_id[segment_id] for segment_id in unit.segment_ids]
         marker_values = tuple(marker for marker in plan.markers if marker.id in unit.marker_ids)
         if unit.content_hash != semantic_hash(
-            unit_hash_payload(_HashUnit(unit_segments, unit.marker_ids, marker_values))
+            unit_hash_payload(
+                _HashUnit(unit_segments, unit.marker_ids, marker_values, plan.tokens)
+            )
         ):
             raise PlanValidationError(
                 "unit content hash does not match semantics", code="unit.hash_mismatch"
@@ -936,7 +1088,9 @@ class _HashUnit:
         segments: list[PlanSegment],
         marker_ids: tuple[str, ...],
         marker_values: tuple[Marker, ...],
+        tokens: tuple[TokenAnnotation, ...],
     ) -> None:
         self.segments = segments
         self.marker_ids = marker_ids
         self.marker_values = marker_values
+        self.tokens = tokens

@@ -6,4 +6,4 @@ UtterPlan uses explicit coordinate names. `spoken_start`, `spoken_end`, and `spo
 
 When written-to-spoken preparation changes text, the planner uses an exact transient source-to-spoken map to resolve annotations, boundaries, and markers. The serialized plan stores only preparation provenance and resolved coordinates. Renderers must use `AnnotationSpan.spoken_start` and `spoken_end` when mapping annotations into `PlanSegment.text`; structural offsets must not be used to slice prepared text.
 
-Linguistic token fields (`spoken_start`, `spoken_end`, `text`, `pos`, `tag`, `lemma`, and `language`) are self-contained and refer to prepared text. Provider documents are not part of the public plan.
+Linguistic token fields (`spoken_start`, `spoken_end`, `text`, `language`, `lemma`, `pos`, `tag`, and `morph`) are self-contained and refer to prepared text. `text` must equal the corresponding slice of `texts.spoken`. `segment.token_indices` is the stable membership relation, and `UtterancePlan.tokens_for_segment()` exposes it without retokenization. Provider documents are not part of the public plan.
