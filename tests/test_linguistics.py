@@ -76,7 +76,10 @@ def test_spacy_auto_uses_fake_compatible_local_model(monkeypatch):
     assert analysis.provider_doc is pipeline.last_doc
     assert analysis.tokens[0].pos == "NOUN"
 
-def _fake_spacy_plan(monkeypatch, *, tag: str = "VBP", morph: str = "Tense=Pres|VerbForm=Fin") -> UtterancePlan:
+
+def _fake_spacy_plan(
+    monkeypatch, *, tag: str = "VBP", morph: str = "Tense=Pres|VerbForm=Fin"
+) -> UtterancePlan:
     class Pipeline:
         def __call__(self, text):
             values = (
@@ -98,13 +101,13 @@ def _fake_spacy_plan(monkeypatch, *, tag: str = "VBP", morph: str = "Tense=Pres|
             ]
 
     monkeypatch.setitem(sys.modules, "spacy", SimpleNamespace(__version__="3.7.0"))
-    monkeypatch.setattr(LinguisticResourcePool, "pipeline", lambda self, model, require=False: Pipeline())
+    monkeypatch.setattr(
+        LinguisticResourcePool, "pipeline", lambda self, model, require=False: Pipeline()
+    )
     config = PlannerConfig(
         language="en-us",
         text_preparation="identity",
-        linguistics=LinguisticsConfig(
-            use_spacy=True, spacy_model="fake_model", require_spacy=True
-        ),
+        linguistics=LinguisticsConfig(use_spacy=True, spacy_model="fake_model", require_spacy=True),
     )
     return UtterancePlanner(config).plan("I live here.")
 
@@ -132,7 +135,9 @@ def test_fallback_provenance_is_explicit():
     plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("I live here.")
     assert plan.linguistic_runs[0].provider == "fallback"
     assert plan.linguistic_runs[0].model is None
-    assert all(token.pos is None and token.tag is None and token.morph is None for token in plan.tokens)
+    assert all(
+        token.pos is None and token.tag is None and token.morph is None for token in plan.tokens
+    )
 
 
 def test_token_semantics_change_unit_hash_but_provenance_does_not(monkeypatch):

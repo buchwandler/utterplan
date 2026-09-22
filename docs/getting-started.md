@@ -46,7 +46,6 @@ The default compile policy is `spokenform` for text preparation, `tts` for pause
 `--spacy auto` is an explicit opt-in. With a compatible local model, final pass-B tokens may contain POS, tag, lemma, and morphology, and the plan records the actual provider, model, and known versions. `sm`, `md`, `lg`, and `trf` require the requested local model. UtterPlan never downloads models automatically.
 Install the optional library with `python -m pip install 'utterplan[spacy]'` when needed. Language model packages remain explicit environment dependencies and are never downloaded by UtterPlan.
 
-
 ```bash
 utterplan compile "Hello world." --lang en-us | jq '.segments'
 ```

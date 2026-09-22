@@ -129,11 +129,7 @@
   "plan_id": "sha256:c4b143453e35138e8a6e89761cc33bad3ec99d8340bf23c0f6b6a90f6c9d08cf",
   "preparation": {
     "backend": "spokenform",
-    "languages": [
-      "en-us",
-      "fr",
-      "en-us"
-    ],
+    "languages": ["en-us", "fr", "en-us"],
     "replacements": [],
     "version": "0.4.5",
     "warnings": []
@@ -145,9 +141,7 @@
   "schema_version": 2,
   "segments": [
     {
-      "annotation_ids": [
-        "annotation-000000"
-      ],
+      "annotation_ids": ["annotation-000000"],
       "clause": 0,
       "directives": {},
       "id": "seg-000000",
@@ -165,15 +159,10 @@
       "spoken_end": 5,
       "spoken_start": 0,
       "text": "Hello",
-      "token_indices": [
-        0
-      ]
+      "token_indices": [0]
     },
     {
-      "annotation_ids": [
-        "annotation-000000",
-        "annotation-000001"
-      ],
+      "annotation_ids": ["annotation-000000", "annotation-000001"],
       "clause": 0,
       "directives": {},
       "id": "seg-000001",
@@ -191,14 +180,10 @@
       "spoken_end": 13,
       "spoken_start": 6,
       "text": "Bonjour",
-      "token_indices": [
-        1
-      ]
+      "token_indices": [1]
     },
     {
-      "annotation_ids": [
-        "annotation-000000"
-      ],
+      "annotation_ids": ["annotation-000000"],
       "clause": 0,
       "directives": {},
       "id": "seg-000002",
@@ -216,9 +201,7 @@
       "spoken_end": 14,
       "spoken_start": 13,
       "text": ".",
-      "token_indices": [
-        2
-      ]
+      "token_indices": [2]
     }
   ],
   "source": {
@@ -266,11 +249,7 @@
       "index": 0,
       "kind": "paragraph",
       "marker_ids": [],
-      "segment_ids": [
-        "seg-000000",
-        "seg-000001",
-        "seg-000002"
-      ],
+      "segment_ids": ["seg-000000", "seg-000001", "seg-000002"],
       "spoken_end": 14,
       "spoken_start": 0
     }

@@ -71,10 +71,20 @@ def _legacy_tokens_by_language(
 
     result: list[dict[str, Any]] = []
     for language_index, (_start, _end) in enumerate(ranges):
-        indices = [index for index, assignment in enumerate(assignments) if assignment == language_index]
-        token_start = indices[0] if indices else next(
-            (index for index, assignment in enumerate(assignments) if assignment is not None and assignment > language_index),
-            len(tokens),
+        indices = [
+            index for index, assignment in enumerate(assignments) if assignment == language_index
+        ]
+        token_start = (
+            indices[0]
+            if indices
+            else next(
+                (
+                    index
+                    for index, assignment in enumerate(assignments)
+                    if assignment is not None and assignment > language_index
+                ),
+                len(tokens),
+            )
         )
         token_end = indices[-1] + 1 if indices else token_start
         language = languages[language_index]
@@ -151,7 +161,11 @@ def migrate_v1_to_v2(data: Mapping[str, Any]) -> Mapping[str, Any]:
     segments = result.get("segments")
     units = result.get("units")
     markers = result.get("markers")
-    if not isinstance(segments, list) or not isinstance(units, list) or not isinstance(markers, list):
+    if (
+        not isinstance(segments, list)
+        or not isinstance(units, list)
+        or not isinstance(markers, list)
+    ):
         raise _error("v1 segments, units, and markers must be arrays")
     segment_map: dict[str, Mapping[str, Any]] = {}
     for segment in segments:

@@ -72,9 +72,7 @@
   "plan_id": "sha256:fd2dba4376a87419ed91bc3c29a7801122787eeb6cf32ceb95788e7180be2a56",
   "preparation": {
     "backend": "spokenform",
-    "languages": [
-      "en-us"
-    ],
+    "languages": ["en-us"],
     "replacements": [
       {
         "kind": "abbreviation",
@@ -138,16 +136,7 @@
       "spoken_end": 53,
       "spoken_start": 0,
       "text": "Doctor Smith bought five kilograms on January fourth.",
-      "token_indices": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7
-      ]
+      "token_indices": [0, 1, 2, 3, 4, 5, 6, 7]
     }
   ],
   "source": {
@@ -240,9 +229,7 @@
       "index": 0,
       "kind": "paragraph",
       "marker_ids": [],
-      "segment_ids": [
-        "seg-000000"
-      ],
+      "segment_ids": ["seg-000000"],
       "spoken_end": 53,
       "spoken_start": 0
     }

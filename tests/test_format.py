@@ -54,6 +54,7 @@ def test_token_text_must_match_spoken_slice():
     with pytest.raises(PlanValidationError, match="token.range_mismatch"):
         UtterancePlan.from_dict(value)
 
+
 def test_compact_optional_fields_are_omitted():
     value = plan().to_dict()
     assert value["segments"]
@@ -64,6 +65,7 @@ def test_compact_optional_fields_are_omitted():
     assert all("tag" not in item for item in value["tokens"])
 
     assert all(item["morph"] is None for item in value["tokens"])
+
 
 def test_json_is_plain_data():
     value = json.loads(plan().to_json())

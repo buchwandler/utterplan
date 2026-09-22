@@ -107,6 +107,7 @@ class TokenAnnotation:
     id: str | None = None
 
     morph: str | None = None
+
     @property
     def start(self) -> int:
         return self.spoken_start
@@ -156,6 +157,7 @@ class LinguisticRun:
             "provider_version": self.provider_version,
             "model_version": self.model_version,
         }
+
 
 @dataclass(frozen=True, slots=True)
 class BoundaryEvent:
@@ -1048,9 +1050,7 @@ def validate_plan(plan: UtterancePlan) -> None:
         unit_segments = [segment_by_id[segment_id] for segment_id in unit.segment_ids]
         marker_values = tuple(marker for marker in plan.markers if marker.id in unit.marker_ids)
         if unit.content_hash != semantic_hash(
-            unit_hash_payload(
-                _HashUnit(unit_segments, unit.marker_ids, marker_values, plan.tokens)
-            )
+            unit_hash_payload(_HashUnit(unit_segments, unit.marker_ids, marker_values, plan.tokens))
         ):
             raise PlanValidationError(
                 "unit content hash does not match semantics", code="unit.hash_mismatch"

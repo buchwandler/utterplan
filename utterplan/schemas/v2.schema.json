@@ -49,7 +49,10 @@
     },
     "preparation": { "$ref": "#/$defs/preparation" },
     "languages": { "type": "array", "items": { "$ref": "#/$defs/language" } },
-    "linguistic_runs": { "type": "array", "items": { "$ref": "#/$defs/linguistic_run" } },
+    "linguistic_runs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/linguistic_run" }
+    },
     "annotations": {
       "type": "array",
       "items": { "$ref": "#/$defs/annotation" }
@@ -122,7 +125,15 @@
     },
     "linguistic_run": {
       "type": "object",
-      "required": ["language_run_id", "provider", "token_start", "token_end", "model", "provider_version", "model_version"],
+      "required": [
+        "language_run_id",
+        "provider",
+        "token_start",
+        "token_end",
+        "model",
+        "provider_version",
+        "model_version"
+      ],
       "properties": {
         "language_run_id": { "type": "string" },
         "provider": { "enum": ["spacy", "fallback", "unknown"] },
@@ -266,7 +277,10 @@
         "spoken_end": { "$ref": "#/$defs/range" },
         "segment_ids": { "type": "array", "items": { "type": "string" } },
         "marker_ids": { "type": "array", "items": { "type": "string" } },
-        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
         "content_hash_schema": { "const": "utterplan-unit-v2" }
       },
       "additionalProperties": false

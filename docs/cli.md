@@ -59,6 +59,7 @@ Explain an existing compiled plan as a human-readable speech narrative:
 utterplan explain chapter.utterplan.json
 utterplan explain chapter.utterplan.json --details
 ```
+
 The default output shows the prepared wording, render units, ordered segments, languages, resolved pauses, directives, markers, and warnings. Add `--details` for IDs, offsets, provenance, hashes, plan identity, and token analysis beneath each segment. Use `inspect --tokens` for a compact token/provenance view.
 
 ## Planning controls

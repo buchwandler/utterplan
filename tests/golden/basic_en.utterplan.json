@@ -72,9 +72,7 @@
   "plan_id": "sha256:5fae7217f085545848ec2e6480a79a93d1c89ba2eb6a66234b1363b737f57881",
   "preparation": {
     "backend": "spokenform",
-    "languages": [
-      "en-us"
-    ],
+    "languages": ["en-us"],
     "replacements": [],
     "version": "0.4.5",
     "warnings": []
@@ -104,9 +102,7 @@
       "spoken_end": 6,
       "spoken_start": 0,
       "text": "Hello.",
-      "token_indices": [
-        0
-      ]
+      "token_indices": [0]
     }
   ],
   "source": {
@@ -136,9 +132,7 @@
       "index": 0,
       "kind": "paragraph",
       "marker_ids": [],
-      "segment_ids": [
-        "seg-000000"
-      ],
+      "segment_ids": ["seg-000000"],
       "spoken_end": 6,
       "spoken_start": 0
     }

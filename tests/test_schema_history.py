@@ -33,7 +33,9 @@ def test_v1_fixtures_validate_before_migration_and_remain_immutable() -> None:
         assert result.data["producer"]["migration"]["original_plan_id"] == value["plan_id"]
         assert all(run["provider"] == "unknown" for run in result.data["linguistic_runs"])
         assert all(token["morph"] is None for token in result.data["tokens"])
-        assert all(unit["content_hash_schema"] == "utterplan-unit-v2" for unit in result.data["units"])
+        assert all(
+            unit["content_hash_schema"] == "utterplan-unit-v2" for unit in result.data["units"]
+        )
         plan = UtterancePlan.from_dict(value)
         assert plan.schema_version == 2
         assert plan.plan_id == result.data["plan_id"]

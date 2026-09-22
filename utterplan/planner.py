@@ -186,9 +186,8 @@ def _config_dict(config: PlannerConfig) -> dict[str, Any]:
         result["ssmd"]["pause_defaults"] = dict(config.ssmd.pause_defaults or {})
     return result
 
-def _linguistic_runs(
-    runs: tuple[Any, ...], analyses: tuple[Any, ...]
-) -> tuple[LinguisticRun, ...]:
+
+def _linguistic_runs(runs: tuple[Any, ...], analyses: tuple[Any, ...]) -> tuple[LinguisticRun, ...]:
     token_start = 0
     result: list[LinguisticRun] = []
     for run, analysis in zip(runs, analyses, strict=True):
@@ -206,7 +205,6 @@ def _linguistic_runs(
         )
         token_start = token_end
     return tuple(result)
-
 
 
 def _segment(

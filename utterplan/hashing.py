@@ -6,6 +6,7 @@ from typing import Any
 
 UNIT_HASH_SCHEMA = "utterplan-unit-v2"
 
+
 def canonical_json(value: Any) -> str:
     return json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False

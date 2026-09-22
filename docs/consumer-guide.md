@@ -29,7 +29,7 @@ Use these public fields:
 - `plan.units` groups segments for paragraph or sentence rendering.
 - `plan.document_metadata` contains document-level metadata such as logical
   voice bindings.
-Consumers may rely on these plan-level fields: `texts.spoken`, `preparation`, `languages`, `linguistic_runs`, `tokens`, `annotations`, `boundaries`, `segments`, `units`, `markers`, and `document_metadata`. Each segment additionally provides its ID, spoken text range, language, paragraph/sentence/clause ownership, resolved pauses, typed directives, token indices, and annotation IDs.
+  Consumers may rely on these plan-level fields: `texts.spoken`, `preparation`, `languages`, `linguistic_runs`, `tokens`, `annotations`, `boundaries`, `segments`, `units`, `markers`, and `document_metadata`. Each segment additionally provides its ID, spoken text range, language, paragraph/sentence/clause ownership, resolved pauses, typed directives, token indices, and annotation IDs.
 
 `TokenAnnotation` stores the exact spoken slice plus normalized language, lemma, coarse POS, fine-grained tag, and compact morphology. `LinguisticRun` records actual provider/model provenance.
 

@@ -205,6 +205,7 @@ def test_inspect_tokens_shows_linguistic_fields(
     assert "tag=-" in captured.out
     assert "morph=-" in captured.out
 
+
 def test_inspect_preparation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     output = tmp_path / "plan.utterplan.json"
     assert main(["compile", "Dr. bought 5 kg.", "--lang", "en-us", "-o", str(output)]) == 0

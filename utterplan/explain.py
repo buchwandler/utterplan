@@ -237,6 +237,7 @@ def _format_segment_tokens(plan: UtterancePlan, segment: PlanSegment) -> list[st
         )
     return lines
 
+
 def _format_pause(
     pause: ResolvedPause,
     boundaries_by_id: Mapping[str, BoundaryEvent],
