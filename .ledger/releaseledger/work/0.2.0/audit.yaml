@@ -1,0 +1,135 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.2.0
+git_base_ref: v0.1.3
+git_base_sha: 35a631ed89a676484546d62bccf08203f93b01e9
+git_head_ref: HEAD
+git_head_sha: 9637182acbf51763706e1047283b6df27def4bb8
+git_range: 35a631ed89a676484546d62bccf08203f93b01e9..9637182acbf51763706e1047283b6df27def4bb8
+commit_count: 3
+rows:
+  - sha: e49a6ddc97c789574098a635fc823da885b48439
+    source_ref: git:e49a6ddc97c789574098a635fc823da885b48439
+    short_sha: e49a6dd
+    changed_paths:
+      - .gitignore
+      - examples/basic.py
+      - examples/chapter.ssmd
+      - examples/compile_file.py
+      - examples/inspect_plan.py
+      - examples/multilingual.py
+      - examples/ssmd.py
+      - examples/ssmd_example.py
+    stats:
+      files_changed: 8
+      insertions: 93
+      deletions: 19
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "fix: examples"
+  - sha: c52aa684cc872d348d90972001a8c5194ae7c7f8
+    source_ref: git:c52aa684cc872d348d90972001a8c5194ae7c7f8
+    short_sha: c52aa68
+    changed_paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/coordinate-spaces.md
+      - docs/debugging.md
+      - docs/format.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/pykokoro-integration.md
+      - docs/python-api.md
+      - pyproject.toml
+      - spec/schemas/v2.schema.json
+      - spec/utterplan.schema.json
+      - tests/golden/basic_en.utterplan.json
+      - tests/golden/directives.utterplan.json
+      - tests/golden/markers.utterplan.json
+      - tests/golden/multilingual.utterplan.json
+      - tests/golden/parenthetical.utterplan.json
+      - tests/golden/spokenform_offsets.utterplan.json
+      - tests/golden/ssmd_breaks.utterplan.json
+      - tests/test_cli.py
+      - tests/test_explain.py
+      - tests/test_format.py
+      - tests/test_linguistics.py
+      - tests/test_migration_framework.py
+      - tests/test_public_identity.py
+      - tests/test_schema_history.py
+      - tests/test_schema_registry.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/explain.py
+      - utterplan/hashing.py
+      - utterplan/linguistics.py
+      - utterplan/migrations/__init__.py
+      - utterplan/migrations/registry.py
+      - utterplan/migrations/v1_to_v2.py
+      - utterplan/model.py
+      - utterplan/planner.py
+      - utterplan/schema_registry.py
+      - utterplan/schemas/v2.schema.json
+      - utterplan/units.py
+      - utterplan/utterplan.schema.json
+      - utterplan/versioning.py
+    stats:
+      files_changed: 44
+      insertions: 1714
+      deletions: 215
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: add v2 with spacy tokens embedded"
+  - sha: 9637182acbf51763706e1047283b6df27def4bb8
+    source_ref: git:9637182acbf51763706e1047283b6df27def4bb8
+    short_sha: "9637182"
+    changed_paths:
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/getting-started.md
+      - docs/pykokoro-integration.md
+      - docs/python-api.md
+      - spec/schemas/v2.schema.json
+      - spec/utterplan.schema.json
+      - tests/golden/basic_en.utterplan.json
+      - tests/golden/directives.utterplan.json
+      - tests/golden/markers.utterplan.json
+      - tests/golden/multilingual.utterplan.json
+      - tests/golden/parenthetical.utterplan.json
+      - tests/golden/spokenform_offsets.utterplan.json
+      - tests/golden/ssmd_breaks.utterplan.json
+      - tests/test_cli.py
+      - tests/test_format.py
+      - tests/test_linguistics.py
+      - tests/test_schema_history.py
+      - utterplan/explain.py
+      - utterplan/hashing.py
+      - utterplan/migrations/v1_to_v2.py
+      - utterplan/model.py
+      - utterplan/planner.py
+      - utterplan/schemas/v2.schema.json
+      - utterplan/utterplan.schema.json
+    stats:
+      files_changed: 25
+      insertions: 159
+      deletions: 193
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "chore: pre-commit"

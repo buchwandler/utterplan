@@ -1,9 +1,14 @@
+import re
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from utterplan import LinguisticsConfig, PlannerConfig, UtterancePlan, UtterancePlanner
+from utterplan.exceptions import PlanningError
 from utterplan.language import LanguageRun
 from utterplan.linguistics import LinguisticResourcePool, analyze_run_analyses
+from utterplan.planner import _split_run
 
 
 def test_run_analysis_is_lightweight_and_request_local():
@@ -75,6 +80,67 @@ def test_spacy_auto_uses_fake_compatible_local_model(monkeypatch):
     assert analysis.model_name == "en_core_web_sm"
     assert analysis.provider_doc is pipeline.last_doc
     assert analysis.tokens[0].pos == "NOUN"
+
+
+def test_spacy_enrichment_does_not_collapse_sentence_topology(monkeypatch):
+    class Pipeline:
+        def __call__(self, text):
+            return [
+                SimpleNamespace(
+                    idx=match.start(),
+                    text=match.group(0),
+                    pos_="NOUN",
+                    tag_="NN",
+                    lemma_=match.group(0).lower(),
+                    morph="",
+                )
+                for match in re.finditer(r"\S+", text)
+            ]
+
+    monkeypatch.setitem(sys.modules, "spacy", SimpleNamespace(__version__="3.7.0"))
+    monkeypatch.setattr(
+        LinguisticResourcePool, "pipeline", lambda self, model, require=False: Pipeline()
+    )
+    config = PlannerConfig(
+        language="en-us",
+        document_format="plain",
+        text_preparation="identity",
+        unit="sentence",
+        linguistics=LinguisticsConfig(use_spacy=True, spacy_model="fake_model", require_spacy=True),
+    )
+
+    plan = UtterancePlanner(config).plan(
+        "One sentence. Two sentences. Three sentences.", unit="sentence"
+    )
+
+    assert [segment.text for segment in plan.segments] == [
+        "One sentence.",
+        "Two sentences.",
+        "Three sentences.",
+    ]
+    assert [(segment.paragraph, segment.sentence) for segment in plan.segments] == [
+        (0, 0),
+        (0, 1),
+        (0, 2),
+    ]
+    assert len(plan.units) == 3
+    assert [token.pos for token in plan.tokens] == ["NOUN"] * 6
+
+
+def test_segmentation_type_error_is_not_a_whole_document_fallback(monkeypatch):
+    import phrasplit
+
+    def broken_split(*args, **kwargs):
+        raise TypeError("invalid nlp integration")
+
+    monkeypatch.setattr(phrasplit, "split_with_offsets", broken_split)
+    with pytest.raises(PlanningError, match="sentence segmentation integration failed"):
+        _split_run(
+            "One sentence. Two sentences.",
+            "en-us",
+            PlannerConfig(language="en-us"),
+            SimpleNamespace(provider_doc=object()),
+        )
 
 
 def _fake_spacy_plan(

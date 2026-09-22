@@ -1,0 +1,178 @@
+ .gitignore               |  3 +++
+ examples/basic.py        | 20 +++++++++++++++-----
+ examples/chapter.ssmd    |  1 +
+ examples/compile_file.py | 28 +++++++++++++++++++++++++---
+ examples/inspect_plan.py | 30 +++++++++++++++++++++++++++---
+ examples/multilingual.py | 12 ++++++++++--
+ examples/ssmd.py         |  6 ------
+ examples/ssmd_example.py | 12 ++++++++++++
+ 8 files changed, 93 insertions(+), 19 deletions(-)
+
+diff --git a/.gitignore b/.gitignore
+index ada79cf..a84ce8f 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -219,3 +219,6 @@ __marimo__/
+ context_utterplan*.*
+
+ utterplan/_version.py
++
++# Generated outputs from the runnable examples
++examples/*.utterplan.json
+diff --git a/examples/basic.py b/examples/basic.py
+index d705e0b..dae1704 100644
+--- a/examples/basic.py
++++ b/examples/basic.py
+@@ -1,7 +1,17 @@
++from pathlib import Path
++
+ from utterplan import PlannerConfig, UtterancePlanner
+
+-plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="plain")).plan(
+-    "Doctor Smith bought 5 kg of apples."
+-)
+-plan.save("example.utterplan.json")
+-print(plan.plan_id)
++OUTPUT = Path(__file__).with_name("example.utterplan.json")
++
++
++def main() -> None:
++    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="plain")).plan(
++        "Doctor Smith bought 5 kg of apples."
++    )
++    plan.save(OUTPUT)
++    print(f"{plan.plan_id}\nSaved {OUTPUT}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/chapter.ssmd b/examples/chapter.ssmd
+new file mode 100644
+index 0000000..80e1f1e
+--- /dev/null
++++ b/examples/chapter.ssmd
+@@ -0,0 +1 @@
++[Hello]{lang="en-us"} ...s [Bonjour]{lang="fr"}.
+diff --git a/examples/compile_file.py b/examples/compile_file.py
+index a8d94f9..3b89de8 100644
+--- a/examples/compile_file.py
++++ b/examples/compile_file.py
+@@ -1,7 +1,29 @@
++import argparse
+ from pathlib import Path
+
+ from utterplan import PlannerConfig, UtterancePlanner
+
+-source = Path("chapter.ssmd").read_text(encoding="utf-8")
+-plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(source)
+-plan.save("chapter.utterplan.json")
++DEFAULT_SOURCE = Path(__file__).with_name("chapter.ssmd")
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(description="Compile an SSMD file to an UtterancePlan.")
++    parser.add_argument(
++        "source",
++        nargs="?",
++        type=Path,
++        default=DEFAULT_SOURCE,
++        help=f"SSMD input file (default: {DEFAULT_SOURCE})",
++    )
++    parser.add_argument("-o", "--output", type=Path, help="output plan path")
++    args = parser.parse_args()
++
++    source = args.source.read_text(encoding="utf-8")
++    output = args.output or args.source.with_suffix(".utterplan.json")
++    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(source)
++    plan.save(output)
++    print(f"Saved {output}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/inspect_plan.py b/examples/inspect_plan.py
+index 8a1c26d..b9c21d0 100644
+--- a/examples/inspect_plan.py
++++ b/examples/inspect_plan.py
+@@ -1,5 +1,29 @@
++import argparse
++from pathlib import Path
++
+ from utterplan import UtterancePlan
+
+-plan = UtterancePlan.load("example.utterplan.json")
+-for segment in plan.segments:
+-    print(segment.text, segment.language, segment.pause_before, segment.pause_after)
++DEFAULT_PLAN = Path(__file__).with_name("example.utterplan.json")
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(description="Inspect an UtterancePlan file.")
++    parser.add_argument(
++        "plan",
++        nargs="?",
++        type=Path,
++        default=DEFAULT_PLAN,
++        help=f"plan file (default: {DEFAULT_PLAN}; run basic.py first)",
++    )
++    args = parser.parse_args()
++
++    if not args.plan.exists():
++        parser.error(f"plan file not found: {args.plan}; run basic.py first or provide a path")
++
++    plan = UtterancePlan.load(args.plan)
++    for segment in plan.segments:
++        print(segment.text, segment.language, segment.pause_before, segment.pause_after)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/multilingual.py b/examples/multilingual.py
+index ea5054c..4c685b3 100644
+--- a/examples/multilingual.py
++++ b/examples/multilingual.py
+@@ -1,4 +1,12 @@
+ from utterplan import PlannerConfig, UtterancePlanner
+
+-plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello.")
+-print([(run.language, run.spoken_start, run.spoken_end) for run in plan.languages])
++
++def main() -> None:
++    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
++        'Hello [Bonjour]{lang="fr"}.'
++    )
++    print([(run.language, run.spoken_start, run.spoken_end) for run in plan.languages])
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/ssmd.py b/examples/ssmd.py
+deleted file mode 100644
+index b9b25c6..0000000
+--- a/examples/ssmd.py
++++ /dev/null
+@@ -1,6 +0,0 @@
+-from utterplan import PlannerConfig, UtterancePlanner
+-
+-plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
+-    "Hello ...s world"
+-)
+-print(plan.to_json())
+diff --git a/examples/ssmd_example.py b/examples/ssmd_example.py
+new file mode 100644
+index 0000000..6a1d253
+--- /dev/null
++++ b/examples/ssmd_example.py
+@@ -0,0 +1,12 @@
++from utterplan import PlannerConfig, UtterancePlanner
++
++
++def main() -> None:
++    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
++        "Hello ...s world"
++    )
++    print(plan.to_json())
++
++
++if __name__ == "__main__":
++    main()

@@ -1,0 +1,3109 @@
+ README.md                                          |   4 +-
+ docs/architecture.md                               |   4 +-
+ docs/cli.md                                        |   6 +-
+ docs/consumer-guide.md                             |   6 +
+ docs/coordinate-spaces.md                          |   2 +-
+ docs/debugging.md                                  |   2 +
+ docs/format.md                                     |  20 +--
+ docs/getting-started.md                            |   6 +-
+ docs/index.md                                      |   2 +-
+ docs/pykokoro-integration.md                       |  10 ++
+ docs/python-api.md                                 |   4 +
+ pyproject.toml                                     |   1 +
+ .../schemas/v2.schema.json                         |  29 ++-
+ spec/utterplan.schema.json                         |  29 ++-
+ tests/golden/basic_en.utterplan.json               |  35 +++-
+ tests/golden/directives.utterplan.json             |  40 ++++-
+ tests/golden/markers.utterplan.json                |  63 +++++--
+ tests/golden/multilingual.utterplan.json           |  80 +++++++--
+ tests/golden/parenthetical.utterplan.json          |  79 ++++++--
+ tests/golden/spokenform_offsets.utterplan.json     |  49 ++++-
+ tests/golden/ssmd_breaks.utterplan.json            |  71 ++++++--
+ tests/test_cli.py                                  |  24 ++-
+ tests/test_explain.py                              |   7 +-
+ tests/test_format.py                               |   9 +-
+ tests/test_linguistics.py                          |  79 +++++++-
+ tests/test_migration_framework.py                  |  11 +-
+ tests/test_public_identity.py                      |   2 +-
+ tests/test_schema_history.py                       |  18 +-
+ tests/test_schema_registry.py                      |  20 ++-
+ utterplan/__init__.py                              |   2 +
+ utterplan/cli.py                                   |  13 +-
+ utterplan/explain.py                               |  37 +++-
+ utterplan/hashing.py                               |  17 +-
+ utterplan/linguistics.py                           | 109 +++++++----
+ utterplan/migrations/__init__.py                   |   5 +-
+ utterplan/migrations/registry.py                   |   6 +-
+ utterplan/migrations/v1_to_v2.py                   | 199 +++++++++++++++++++++
+ utterplan/model.py                                 | 186 +++++++++++++++++--
+ utterplan/planner.py                               |  27 ++-
+ utterplan/schema_registry.py                       |   5 +-
+ .../v2.schema.json}                                |  29 ++-
+ utterplan/units.py                                 |  12 +-
+ utterplan/utterplan.schema.json                    |  29 ++-
+ utterplan/versioning.py                            |   5 +-
+ 44 files changed, 1168 insertions(+), 225 deletions(-)
+
+diff --git a/README.md b/README.md
+index e7e5d17..33990ed 100644
+--- a/README.md
++++ b/README.md
+@@ -97,9 +97,9 @@ renderer repository rather than UtterPlan's test suite.
+
+ The package version is dynamically derived from Git tags by setuptools-scm. The
+ first public alpha package release is `0.1.0`. The package version and
+-UtterPlan `schema_version` are independent: this release uses schema version `1`.
++UtterPlan `schema_version` is independent from the package version. Current plans use schema version `2`; schema v1 remains frozen and supported through a pure v1-to-v2 migration.
+
+-Schema v1 is frozen and packaged under a versioned schema-history path. UtterPlan can inspect and migrate supported historical plan JSON before constructing the current `UtterancePlan`; migration is representation conversion, not replanning. The `utterplan migrate` command supports `--check` and refuses output overwrite unless `--force` is supplied.
++Schema v2 persists final pass-B token facts, including optional POS, tag, lemma, and morphology, plus per-language-run provider provenance. Unit hashes use `utterplan-unit-v2` and include pronunciation-relevant token semantics. Migration is representation conversion only and never reruns planning or linguistic analysis.
+
+ ## Development
+
+diff --git a/docs/architecture.md b/docs/architecture.md
+index c79011d..b5ffb16 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -14,9 +14,11 @@ Preparation preserves structural and spoken coordinate spaces. `spoken_start`, `
+
+ Linguistic analysis and provider documents are request-local. Returned plans contain JSON-compatible semantic results only: no live parser objects, spaCy documents, models, sessions, provider caches, phonemes, engine token IDs, or audio. A reusable planner may share sequential resource caches, but concurrent use is not promised.
+
++The persisted `linguistic_runs` collection describes final pass-B token ranges. Pass-A documents and tokens remain request-local because written-to-spoken preparation can invalidate their offsets.
++
+ Pause events retain provenance and resolved event IDs. Pause defaults are normalized to finite seconds with explicit precedence, and segments expose resolved base pauses directly. Logical voices are intent references; document `voice_bindings` metadata remains separate and no concrete engine voice is selected.
+
+-Plan identity is deterministic and renderer-independent. Unit hashes include ordered segment semantics, resolved pauses, and marker content. Diagnostics and producer metadata do not define semantic identity. Package version is derived from Git tags by setuptools-scm and is independent of the explicit UtterPlan `schema_version`.
++Plan identity is deterministic and renderer-independent. Unit hashes include ordered segment semantics, resolved pauses, marker content, and the semantic token facts referenced by each segment. Diagnostics and producer metadata do not define unit identity. Package version is derived by setuptools-scm and is independent of the explicit UtterPlan `schema_version`.
+
+ ## Persistence compatibility boundary
+
+diff --git a/docs/cli.md b/docs/cli.md
+index 60176f7..75df731 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -59,8 +59,7 @@ Explain an existing compiled plan as a human-readable speech narrative:
+ utterplan explain chapter.utterplan.json
+ utterplan explain chapter.utterplan.json --details
+ ```
+-
+-The default output shows the prepared wording, render units, ordered segments, languages, resolved pauses, directives, markers, and warnings. Add `--details` for IDs, offsets, provenance, hashes, and plan identity information. Use `inspect` instead when you need raw fields such as tokens, boundaries, or a specific segment.
++The default output shows the prepared wording, render units, ordered segments, languages, resolved pauses, directives, markers, and warnings. Add `--details` for IDs, offsets, provenance, hashes, plan identity, and token analysis beneath each segment. Use `inspect --tokens` for a compact token/provenance view.
+
+ ## Planning controls
+
+@@ -70,8 +69,7 @@ The default output shows the prepared wording, render units, ordered segments, l
+ - `--spacy off|auto|sm|md|lg|trf` selects deterministic fallback, automatic
+   spaCy use, or a required model tier.
+
+-The default spaCy policy is `off`, so the CLI does not depend on whichever
+-optional model happens to be installed.
++The default spaCy policy is `off`, so the CLI does not depend on whichever optional model happens to be installed.
+
+ The complete defaults are `--text-preparation spokenform`, `--pause-mode tts`, and `--spacy off`. `spokenform` is the default text-preparation backend, while `tts` is the default pause mode. `--spacy off` uses UtterPlan's deterministic fallback tokenizer and analysis and does not require an installed spaCy model.
+
+diff --git a/docs/consumer-guide.md b/docs/consumer-guide.md
+index 55ce565..36f5a74 100644
+--- a/docs/consumer-guide.md
++++ b/docs/consumer-guide.md
+@@ -29,7 +29,11 @@ Use these public fields:
+ - `plan.units` groups segments for paragraph or sentence rendering.
+ - `plan.document_metadata` contains document-level metadata such as logical
+   voice bindings.
++Consumers may rely on these plan-level fields: `texts.spoken`, `preparation`, `languages`, `linguistic_runs`, `tokens`, `annotations`, `boundaries`, `segments`, `units`, `markers`, and `document_metadata`. Each segment additionally provides its ID, spoken text range, language, paragraph/sentence/clause ownership, resolved pauses, typed directives, token indices, and annotation IDs.
+
++`TokenAnnotation` stores the exact spoken slice plus normalized language, lemma, coarse POS, fine-grained tag, and compact morphology. `LinguisticRun` records actual provider/model provenance.
++
++`plan.linguistic_runs` records the actual final pass-B analysis for each language run. `provider` is `spacy`, `fallback`, or `unknown`; model and version fields are provenance, not renderer inputs. A contextual G2P consumer should use `plan.tokens_for_segment(segment)` (or `segment.token_indices`) and must explicitly fail or use a documented fallback when the relevant provider is not `spacy`.
+ All segment ranges and renderer-facing ranges are spoken-text coordinates.
+
+ Preparation provenance is diagnostic metadata for consumers. Do not depend on a serialized coordinate map. All structural-to-spoken conversion has already been resolved by the planner.
+@@ -63,6 +67,8 @@ for unit in plan.units:
+         segment = next(item for item in plan.segments if item.id == segment_id)
+         prepared_text = segment.text
+         language = segment.language
++        segment_tokens = plan.tokens_for_segment(segment)
++        # Pass segment_tokens to contextual G2P without rerunning spaCy.
+         pause_before = segment.pause_before.seconds
+         pause_after = segment.pause_after.seconds
+         # G2P and backend-specific rendering start here.
+diff --git a/docs/coordinate-spaces.md b/docs/coordinate-spaces.md
+index a186e6d..1072450 100644
+--- a/docs/coordinate-spaces.md
++++ b/docs/coordinate-spaces.md
+@@ -6,4 +6,4 @@ UtterPlan uses explicit coordinate names. `spoken_start`, `spoken_end`, and `spo
+
+ When written-to-spoken preparation changes text, the planner uses an exact transient source-to-spoken map to resolve annotations, boundaries, and markers. The serialized plan stores only preparation provenance and resolved coordinates. Renderers must use `AnnotationSpan.spoken_start` and `spoken_end` when mapping annotations into `PlanSegment.text`; structural offsets must not be used to slice prepared text.
+
+-Linguistic token fields (`spoken_start`, `spoken_end`, `text`, `pos`, `tag`, `lemma`, and `language`) are self-contained and refer to prepared text. Provider documents are not part of the public plan.
++Linguistic token fields (`spoken_start`, `spoken_end`, `text`, `language`, `lemma`, `pos`, `tag`, and `morph`) are self-contained and refer to prepared text. `text` must equal the corresponding slice of `texts.spoken`. `segment.token_indices` is the stable membership relation, and `UtterancePlan.tokens_for_segment()` exposes it without retokenization. Provider documents are not part of the public plan.
+diff --git a/docs/debugging.md b/docs/debugging.md
+index 68ff3f0..7d347b2 100644
+--- a/docs/debugging.md
++++ b/docs/debugging.md
+@@ -8,6 +8,8 @@ source / SSMD -> document.utterplan.json -> renderer diagnostics -> audio
+
+ `utterplan explain FILE` shows prepared wording, render units, languages, resolved pauses, directives, markers, and warnings together. Use `utterplan inspect` when you need raw tokens, boundaries, coordinates, or a specific segment.
+
++Use `inspect --tokens` to distinguish unavailable fallback fields (`pos=-`, `tag=-`, `morph=-`) from actual values. `explain --details` shows the final linguistic run provider/model and each segment's token snapshot.
++
+ If spoken wording is wrong, inspect `texts.spoken` and `preparation`. If language is wrong, inspect `languages` and annotation provenance. If a pause is missing, inspect `boundaries` and segment pause event IDs. If the plan is correct but G2P or audio is wrong, the issue belongs to the renderer or acoustic runtime, not the planning boundary.
+
+ `utterplan inspect FILE --boundaries --tokens` is intentionally human-readable and does not require a renderer.
+diff --git a/docs/format.md b/docs/format.md
+index c2a69a4..296736a 100644
+--- a/docs/format.md
++++ b/docs/format.md
+@@ -1,15 +1,15 @@
+-# UtterPlan format v1
++# UtterPlan format v2
+
+-A plan is UTF-8 JSON with `format: "utterplan"` and `schema_version: 1`. Package version and schema version are independent. The exact caller input is retained in `source`; `texts.structural` is parsed structure and `texts.spoken` is the prepared text sent toward G2P.
++A plan is UTF-8 JSON with `format: "utterplan"` and the current `schema_version: 2`. Schema v1 remains frozen at `spec/schemas/v1.schema.json` and `utterplan/schemas/v1.schema.json`. The exact caller input is retained in `source`; `texts.structural` is parsed structure and `texts.spoken` is the prepared text sent toward G2P.
+
+-The top-level semantic categories are source, config, texts, preparation, languages, annotations, boundaries, tokens, segments, units, markers, warnings, diagnostics, and `plan_id`. Segments are the atomic engine-facing records. Their ranges are half-open offsets into `texts.spoken`. Units group segments by paragraph or sentence.
++The top-level semantic categories include source, config, texts, preparation, languages, `linguistic_runs`, annotations, boundaries, tokens, segments, units, markers, warnings, diagnostics, and `plan_id`. Segments are the atomic engine-facing records. Their ranges are half-open offsets into `texts.spoken`. Units group segments by paragraph or sentence.
+
+-`plan_id` is `sha256:` followed by the SHA-256 digest of canonical semantic JSON. Canonical JSON uses UTF-8, sorted keys, compact separators, no ASCII escaping, and excludes producer, warnings, diagnostics, and identity itself. Unit hashes use the explicit `utterplan-unit-v1` schema and contain no phonemes, models, embeddings, or audio.
++`plan_id` is `sha256:` followed by the SHA-256 digest of canonical semantic JSON. Canonical JSON uses UTF-8, sorted keys, compact separators, no ASCII escaping, and excludes producer, warnings, diagnostics, and identity itself. Unit hashes use `utterplan-unit-v2`, include each referenced token's text, language, lemma, POS, tag, and morph, and contain no phonemes, models, embeddings, or audio.
+
+ Pauses contain both resolved seconds and contributing boundary IDs. Boundary records preserve kind, origin, strength, and position so a plan can answer why a renderer should pause. Directives are typed semantic requests for voice, pronunciation, prosody, emphasis, and external audio metadata.
+
+-The `preparation` object is compact provenance rather than working memory. It contains `backend`, nullable `version`, `languages`, `replacements`, and `warnings`. Canonical structural and spoken text remain in `texts`, so `source_text`, `spoken_text`, `offset_map`, and dense lookup arrays are not serialized. Null token metadata and absent segment structural ranges are omitted; inactive segment directives serialize as `{}`.
+-Readers reject future or unavailable schema versions rather than guessing. Supported historical versions are migrated before current-model decoding. Unknown top-level semantic fields are not accepted by the v1 schema. Extensions belong in documented metadata dictionaries.
++The `preparation` object is compact provenance rather than working memory. It contains `backend`, nullable `version`, `languages`, `replacements`, and `warnings`. Canonical structural and spoken text remain in `texts`, so `source_text`, `spoken_text`, `offset_map`, and dense lookup arrays are not serialized. Optional token metadata may be null; inactive segment directives serialize as `{}`.
++Readers reject future or unavailable schema versions rather than guessing. Supported historical versions are migrated before current-model decoding. Unknown top-level semantic fields are not accepted by the current schema. Extensions belong in documented metadata dictionaries.
+
+ ## Coordinate and provenance rules
+
+@@ -20,14 +20,14 @@ The planner validates nested JSON shapes before constructing objects. It rejects
+
+ ## Schema versioning and migration
+
+-Schema version 1 is the current serialized format. The package version is independent from the plan schema version. The immutable v1 definition is retained at `spec/schemas/v1.schema.json` and `utterplan/schemas/v1.schema.json`; the unversioned schema files are current-schema aliases.
++Schema version 2 is the current serialized format. The package version is independent from the plan schema version. The immutable v1 definition is retained at `spec/schemas/v1.schema.json` and `utterplan/schemas/v1.schema.json`; `spec/utterplan.schema.json` and `utterplan/utterplan.schema.json` are current v2 aliases.
+
+-Every supported historical plan is routed by its declared schema version before current model construction. Migration is a deterministic representation conversion over plain JSON data. It does not rerun SSMD parsing, spokenform, phrasplit, linguistic analysis, planning, G2P, or rendering. Replanning from `source.text` is a separate operation and may produce different segmentation, pauses, languages, and IDs.
++Every supported historical plan is routed by its declared schema version before current model construction. The v1-to-v2 migration is deterministic representation conversion over plain JSON data. It does not rerun SSMD parsing, spokenform, phrasplit, linguistic analysis, planning, G2P, or rendering. Legacy linguistic provenance is marked `unknown`; missing POS/tag values are never inferred.
+
+ `UtterancePlan.from_dict`, `from_json`, and `load` accept supported historical plans and return the current in-memory model. Future schema versions fail with `UnsupportedSchemaError`; missing backward links fail with a migration-specific path error. Downgrades are not supported.
+
+-A migration may assign a new `plan_id` because identity is canonical to the representation and schema version. When a real migration occurs, the original schema version and plan ID are retained in non-semantic `producer.migration` provenance. Migration provenance does not affect semantic identity.
++A migration may assign a new `plan_id` because identity is canonical to the representation and schema version. When a real migration occurs, the original schema version and plan ID are retained in non-semantic `producer.migration` provenance. Migration provenance does not affect unit content hashes.
+
+-Plan schema version and unit hash schema are independent. The current unit hash identifier is `utterplan-unit-v1` and is not changed merely because a future plan schema changes.
++The current unit hash identifier is `utterplan-unit-v2`. It includes pronunciation-relevant token semantics but excludes token IDs, provider names, and package versions.
+
+ Released schema files and historical fixtures are immutable. A future schema release requires a new frozen schema resource, a sequential migration step, historical fixture coverage, deterministic migration evidence, current semantic validation, and package coverage for all supported schemas.
+diff --git a/docs/getting-started.md b/docs/getting-started.md
+index 9e02ab7..102ffd4 100644
+--- a/docs/getting-started.md
++++ b/docs/getting-started.md
+@@ -41,9 +41,11 @@ result convenient for shell pipelines:
+
+ ## Defaults and linguistic resources
+
+-The default compile policy is `spokenform` for text preparation, `tts` for pause mode, and `spacy off` for linguistic resources. The `spacy off` path uses UtterPlan's deterministic fallback tokenizer and analysis, so the default planner does not require an installed spaCy model.
++The default compile policy is `spokenform` for text preparation, `tts` for pause mode, and `spacy off` for linguistic resources. The fallback path records `linguistic_runs[*].provider = "fallback"` and leaves POS, tag, and morph unavailable. It does not require an installed spaCy model.
++
++`--spacy auto` is an explicit opt-in. With a compatible local model, final pass-B tokens may contain POS, tag, lemma, and morphology, and the plan records the actual provider, model, and known versions. `sm`, `md`, `lg`, and `trf` require the requested local model. UtterPlan never downloads models automatically.
++Install the optional library with `python -m pip install 'utterplan[spacy]'` when needed. Language model packages remain explicit environment dependencies and are never downloaded by UtterPlan.
+
+-`--spacy auto` is an explicit opt-in. With a compatible local model, it may provide richer tokenization, POS tags, lemmas, and tags. It is not the default, and UtterPlan does not download models automatically.
+
+ ```bash
+ utterplan compile "Hello world." --lang en-us | jq '.segments'
+diff --git a/docs/index.md b/docs/index.md
+index 27b1fc7..6d8075f 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -27,4 +27,4 @@ changelog
+
+ The package version and the UtterPlan schema version are independent. The first
+ public package release is `0.1.0` and the current interchange schema is
+-version `1`.
++version `2`.
+diff --git a/docs/pykokoro-integration.md b/docs/pykokoro-integration.md
+index ae27585..ebc81fa 100644
+--- a/docs/pykokoro-integration.md
++++ b/docs/pykokoro-integration.md
+@@ -35,6 +35,16 @@ A future adapter can use only public UtterancePlan fields:
+ - resolved segment pauses and typed directives.
+
+ It should pass `PlanSegment.text` and `PlanSegment.language` to the next
++
++For contextual pronunciation, pass the segment token snapshot to G2P:
++```python
++segment_tokens = plan.tokens_for_segment(segment)
++if linguistic_run.provider != "spacy":
++    # Fail clearly or use the consumer's documented non-contextual fallback.
++    ...
++phonemizer(segment.text, segment.language, segment_tokens)
++```
++The renderer must not rerun spaCy or infer missing POS/tag values.
+ frontend stage. No JSON serialization is required for in-process use.
+
+ ## Pause behavior
+diff --git a/docs/python-api.md b/docs/python-api.md
+index 72bc59b..dd96725 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -6,6 +6,8 @@ an in-process consumer does not need to serialize and reload a plan.
+
+ The Python defaults are deliberately spaCy-free: `PlannerConfig` uses `spokenform` text preparation, and `PauseConfig().mode` is `"tts"`. The CLI additionally defaults to the `spacy off` linguistic-resource policy, which uses deterministic fallback tokenization and analysis without requiring an installed spaCy model.
+
++
++For an explicit contextual-G2P configuration, use `LinguisticsConfig(use_spacy=True, spacy_model="en_core_web_sm", require_spacy=True)`. The resulting plan records final pass-B token provenance in `linguistic_runs`; no provider document is retained.
+ spaCy enrichment is opt-in through the CLI's `--spacy auto` policy or an explicit `LinguisticsConfig` with a compatible local model. It may provide richer tokenization, POS tags, lemmas, and tags, but UtterPlan never downloads a model implicitly.
+
+ ## Planner configuration
+@@ -56,6 +58,8 @@ The public model also exposes `languages`, `annotations`, `boundaries`,
+ `tokens`, `markers`, `document_metadata`, and resolved segment pauses. See the
+ [consumer guide](consumer-guide) for how a renderer uses these fields.
+
++`TokenAnnotation` contains `text`, `language`, `lemma`, `pos`, `tag`, and `morph`. Token text and offsets address `texts.spoken`; `morph` is a compact provider string such as `Tense=Pres|VerbForm=Fin`. `LinguisticRun` records whether those facts came from spaCy, fallback tokenization, or unknown legacy provenance.
++
+ `TextPreparationInfo` exposes serializable provenance only. Exact source-to-spoken mapping is transient planner state and is not part of `UtterancePlan` or its JSON contract.
+
+ ## Errors
+diff --git a/pyproject.toml b/pyproject.toml
+index 065c7dc..84f9a7d 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -39,6 +39,7 @@ utterplan = "utterplan.cli:main"
+ [project.optional-dependencies]
+ dev = ["build", "jsonschema", "mypy", "pytest", "ruff"]
+ docs = ["sphinx>=7.0", "sphinx-rtd-theme>=2.0", "myst-parser>=2.0"]
++spacy = ["spacy>=3.5,<4"]
+ [tool.setuptools.packages.find]
+ include = ["utterplan*"]
+
+diff --git a/utterplan/utterplan.schema.json b/spec/schemas/v2.schema.json
+similarity index 88%
+copy from utterplan/utterplan.schema.json
+copy to spec/schemas/v2.schema.json
+index 7637858..77356eb 100644
+--- a/utterplan/utterplan.schema.json
++++ b/spec/schemas/v2.schema.json
+@@ -1,6 +1,6 @@
+ {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+-  "$id": "https://github.com/buchwandler/utterplan/schema/v1",
++  "$id": "https://github.com/buchwandler/utterplan/schema/v2",
+   "title": "UtterPlan schema",
+   "type": "object",
+   "required": [
+@@ -13,6 +13,7 @@
+     "texts",
+     "preparation",
+     "languages",
++    "linguistic_runs",
+     "annotations",
+     "boundaries",
+     "tokens",
+@@ -24,7 +25,7 @@
+   ],
+   "properties": {
+     "format": { "const": "utterplan" },
+-    "schema_version": { "const": 1 },
++    "schema_version": { "const": 2 },
+     "producer": {
+       "type": "object",
+       "required": ["name", "version"],
+@@ -48,6 +49,7 @@
+     },
+     "preparation": { "$ref": "#/$defs/preparation" },
+     "languages": { "type": "array", "items": { "$ref": "#/$defs/language" } },
++    "linguistic_runs": { "type": "array", "items": { "$ref": "#/$defs/linguistic_run" } },
+     "annotations": {
+       "type": "array",
+       "items": { "$ref": "#/$defs/annotation" }
+@@ -118,6 +120,20 @@
+       },
+       "additionalProperties": false
+     },
++    "linguistic_run": {
++      "type": "object",
++      "required": ["language_run_id", "provider", "token_start", "token_end", "model", "provider_version", "model_version"],
++      "properties": {
++        "language_run_id": { "type": "string" },
++        "provider": { "enum": ["spacy", "fallback", "unknown"] },
++        "token_start": { "type": "integer", "minimum": 0 },
++        "token_end": { "type": "integer", "minimum": 0 },
++        "model": { "type": ["string", "null"] },
++        "provider_version": { "type": ["string", "null"] },
++        "model_version": { "type": ["string", "null"] }
++      },
++      "additionalProperties": false
++    },
+     "annotation": {
+       "type": "object",
+       "required": [
+@@ -165,7 +181,8 @@
+         "pos": { "type": ["string", "null"] },
+         "tag": { "type": ["string", "null"] },
+         "lemma": { "type": ["string", "null"] },
+-        "language": { "type": ["string", "null"] }
++        "language": { "type": ["string", "null"] },
++        "morph": { "type": ["string", "null"] }
+       },
+       "additionalProperties": false
+     },
+@@ -238,7 +255,8 @@
+         "spoken_end",
+         "segment_ids",
+         "marker_ids",
+-        "content_hash"
++        "content_hash",
++        "content_hash_schema"
+       ],
+       "properties": {
+         "id": { "type": "string" },
+@@ -248,7 +266,8 @@
+         "spoken_end": { "$ref": "#/$defs/range" },
+         "segment_ids": { "type": "array", "items": { "type": "string" } },
+         "marker_ids": { "type": "array", "items": { "type": "string" } },
+-        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
++        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
++        "content_hash_schema": { "const": "utterplan-unit-v2" }
+       },
+       "additionalProperties": false
+     },
+diff --git a/spec/utterplan.schema.json b/spec/utterplan.schema.json
+index 7637858..77356eb 100644
+--- a/spec/utterplan.schema.json
++++ b/spec/utterplan.schema.json
+@@ -1,6 +1,6 @@
+ {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+-  "$id": "https://github.com/buchwandler/utterplan/schema/v1",
++  "$id": "https://github.com/buchwandler/utterplan/schema/v2",
+   "title": "UtterPlan schema",
+   "type": "object",
+   "required": [
+@@ -13,6 +13,7 @@
+     "texts",
+     "preparation",
+     "languages",
++    "linguistic_runs",
+     "annotations",
+     "boundaries",
+     "tokens",
+@@ -24,7 +25,7 @@
+   ],
+   "properties": {
+     "format": { "const": "utterplan" },
+-    "schema_version": { "const": 1 },
++    "schema_version": { "const": 2 },
+     "producer": {
+       "type": "object",
+       "required": ["name", "version"],
+@@ -48,6 +49,7 @@
+     },
+     "preparation": { "$ref": "#/$defs/preparation" },
+     "languages": { "type": "array", "items": { "$ref": "#/$defs/language" } },
++    "linguistic_runs": { "type": "array", "items": { "$ref": "#/$defs/linguistic_run" } },
+     "annotations": {
+       "type": "array",
+       "items": { "$ref": "#/$defs/annotation" }
+@@ -118,6 +120,20 @@
+       },
+       "additionalProperties": false
+     },
++    "linguistic_run": {
++      "type": "object",
++      "required": ["language_run_id", "provider", "token_start", "token_end", "model", "provider_version", "model_version"],
++      "properties": {
++        "language_run_id": { "type": "string" },
++        "provider": { "enum": ["spacy", "fallback", "unknown"] },
++        "token_start": { "type": "integer", "minimum": 0 },
++        "token_end": { "type": "integer", "minimum": 0 },
++        "model": { "type": ["string", "null"] },
++        "provider_version": { "type": ["string", "null"] },
++        "model_version": { "type": ["string", "null"] }
++      },
++      "additionalProperties": false
++    },
+     "annotation": {
+       "type": "object",
+       "required": [
+@@ -165,7 +181,8 @@
+         "pos": { "type": ["string", "null"] },
+         "tag": { "type": ["string", "null"] },
+         "lemma": { "type": ["string", "null"] },
+-        "language": { "type": ["string", "null"] }
++        "language": { "type": ["string", "null"] },
++        "morph": { "type": ["string", "null"] }
+       },
+       "additionalProperties": false
+     },
+@@ -238,7 +255,8 @@
+         "spoken_end",
+         "segment_ids",
+         "marker_ids",
+-        "content_hash"
++        "content_hash",
++        "content_hash_schema"
+       ],
+       "properties": {
+         "id": { "type": "string" },
+@@ -248,7 +266,8 @@
+         "spoken_end": { "$ref": "#/$defs/range" },
+         "segment_ids": { "type": "array", "items": { "type": "string" } },
+         "marker_ids": { "type": "array", "items": { "type": "string" } },
+-        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
++        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
++        "content_hash_schema": { "const": "utterplan-unit-v2" }
+       },
+       "additionalProperties": false
+     },
+diff --git a/tests/golden/basic_en.utterplan.json b/tests/golden/basic_en.utterplan.json
+index 79b1a7d..b5ba595 100644
+--- a/tests/golden/basic_en.utterplan.json
++++ b/tests/golden/basic_en.utterplan.json
+@@ -57,20 +57,33 @@
+       "spoken_start": 0
+     }
+   ],
++  "linguistic_runs": [
++    {
++      "language_run_id": "lang-0",
++      "model": null,
++      "model_version": null,
++      "provider": "fallback",
++      "provider_version": null,
++      "token_end": 1,
++      "token_start": 0
++    }
++  ],
+   "markers": [],
+-  "plan_id": "sha256:0a3c2581aff7210c99852fe32d2ce8225ff6b1a20329a05e923c49ef8735313a",
++  "plan_id": "sha256:5fae7217f085545848ec2e6480a79a93d1c89ba2eb6a66234b1363b737f57881",
+   "preparation": {
+     "backend": "spokenform",
+-    "languages": ["en-us"],
++    "languages": [
++      "en-us"
++    ],
+     "replacements": [],
+-    "version": "0.4.4.dev0+g71feb9cb4.d19800101",
++    "version": "0.4.5",
+     "warnings": []
+   },
+   "producer": {
+     "name": "utterplan",
+-    "version": "0.1.0"
++    "version": "0.1.3"
+   },
+-  "schema_version": 1,
++  "schema_version": 2,
+   "segments": [
+     {
+       "annotation_ids": [],
+@@ -91,7 +104,9 @@
+       "spoken_end": 6,
+       "spoken_start": 0,
+       "text": "Hello.",
+-      "token_indices": [0]
++      "token_indices": [
++        0
++      ]
+     }
+   ],
+   "source": {
+@@ -107,6 +122,7 @@
+       "id": "token-0",
+       "language": "en-us",
+       "lemma": "hello.",
++      "morph": null,
+       "spoken_end": 6,
+       "spoken_start": 0,
+       "text": "Hello."
+@@ -114,12 +130,15 @@
+   ],
+   "units": [
+     {
+-      "content_hash": "sha256:d2e984b4fd0eadb63bf24b795630cc4e898f7aef010b58bbe43c1023319c8d71",
++      "content_hash": "sha256:621a8948092b5cd08f0e8b70c69c8018b7756c432a74db3e3f9341f3170bd30e",
++      "content_hash_schema": "utterplan-unit-v2",
+       "id": "unit-0000",
+       "index": 0,
+       "kind": "paragraph",
+       "marker_ids": [],
+-      "segment_ids": ["seg-000000"],
++      "segment_ids": [
++        "seg-000000"
++      ],
+       "spoken_end": 6,
+       "spoken_start": 0
+     }
+diff --git a/tests/golden/directives.utterplan.json b/tests/golden/directives.utterplan.json
+index d8ac441..eb5bcb2 100644
+--- a/tests/golden/directives.utterplan.json
++++ b/tests/golden/directives.utterplan.json
+@@ -85,23 +85,39 @@
+       "spoken_start": 0
+     }
+   ],
++  "linguistic_runs": [
++    {
++      "language_run_id": "lang-0",
++      "model": null,
++      "model_version": null,
++      "provider": "fallback",
++      "provider_version": null,
++      "token_end": 1,
++      "token_start": 0
++    }
++  ],
+   "markers": [],
+-  "plan_id": "sha256:8f9e0342d77491f1dfa04ba406705cbd33105e03abb34ffed30ac286c7d107b8",
++  "plan_id": "sha256:84f39cda7fbbc17d4501d0a52ea20519b715350ebf52d7604a1e1c15e5e10c6e",
+   "preparation": {
+     "backend": "spokenform",
+-    "languages": ["en-us"],
++    "languages": [
++      "en-us"
++    ],
+     "replacements": [],
+-    "version": "0.4.4.dev0+g71feb9cb4.d19800101",
++    "version": "0.4.5",
+     "warnings": []
+   },
+   "producer": {
+     "name": "utterplan",
+-    "version": "0.1.0"
++    "version": "0.1.3"
+   },
+-  "schema_version": 1,
++  "schema_version": 2,
+   "segments": [
+     {
+-      "annotation_ids": ["annotation-000000", "annotation-000001"],
++      "annotation_ids": [
++        "annotation-000000",
++        "annotation-000001"
++      ],
+       "clause": 0,
+       "directives": {
+         "emphasis": {
+@@ -128,7 +144,9 @@
+       "spoken_end": 4,
+       "spoken_start": 0,
+       "text": "fast",
+-      "token_indices": [0]
++      "token_indices": [
++        0
++      ]
+     }
+   ],
+   "source": {
+@@ -144,6 +162,7 @@
+       "id": "token-0",
+       "language": "en-us",
+       "lemma": "fast",
++      "morph": null,
+       "spoken_end": 4,
+       "spoken_start": 0,
+       "text": "fast"
+@@ -151,12 +170,15 @@
+   ],
+   "units": [
+     {
+-      "content_hash": "sha256:b8518cae5461facce58d37b8105ad7b76cc6d2b766015520ba579ae2ba42651f",
++      "content_hash": "sha256:93e17e4c1016b739d6790e5e8a29c22afc95f6231f93f4ecb3ec788646fb5c01",
++      "content_hash_schema": "utterplan-unit-v2",
+       "id": "unit-0000",
+       "index": 0,
+       "kind": "paragraph",
+       "marker_ids": [],
+-      "segment_ids": ["seg-000000"],
++      "segment_ids": [
++        "seg-000000"
++      ],
+       "spoken_end": 4,
+       "spoken_start": 0
+     }
+diff --git a/tests/golden/markers.utterplan.json b/tests/golden/markers.utterplan.json
+index b100e50..6522884 100644
+--- a/tests/golden/markers.utterplan.json
++++ b/tests/golden/markers.utterplan.json
+@@ -82,6 +82,17 @@
+       "spoken_start": 0
+     }
+   ],
++  "linguistic_runs": [
++    {
++      "language_run_id": "lang-0",
++      "model": null,
++      "model_version": null,
++      "provider": "fallback",
++      "provider_version": null,
++      "token_end": 2,
++      "token_start": 0
++    }
++  ],
+   "markers": [
+     {
+       "attrs": {
+@@ -92,29 +103,35 @@
+       "spoken_position": 4
+     }
+   ],
+-  "plan_id": "sha256:6ce544f215dd98369140ad9c66ebee113201692e976e42f76e13d3dc1ac2f6c6",
++  "plan_id": "sha256:34c05e37d217f835934ae069311f33c396889580a9690e138f75fdac591e3f8d",
+   "preparation": {
+     "backend": "spokenform",
+-    "languages": ["en-us"],
++    "languages": [
++      "en-us"
++    ],
+     "replacements": [],
+-    "version": "0.4.4.dev0+g71feb9cb4.d19800101",
++    "version": "0.4.5",
+     "warnings": []
+   },
+   "producer": {
+     "name": "utterplan",
+-    "version": "0.1.0"
++    "version": "0.1.3"
+   },
+-  "schema_version": 1,
++  "schema_version": 2,
+   "segments": [
+     {
+-      "annotation_ids": ["annotation-000000"],
++      "annotation_ids": [
++        "annotation-000000"
++      ],
+       "clause": 0,
+       "directives": {},
+       "id": "seg-000000",
+       "language": "en-us",
+       "paragraph": 0,
+       "pause_after": {
+-        "events": ["boundary-000000"],
++        "events": [
++          "boundary-000000"
++        ],
+         "seconds": 0.6
+       },
+       "pause_before": {
+@@ -125,10 +142,14 @@
+       "spoken_end": 4,
+       "spoken_start": 0,
+       "text": "One.",
+-      "token_indices": [0]
++      "token_indices": [
++        0
++      ]
+     },
+     {
+-      "annotation_ids": ["annotation-000000"],
++      "annotation_ids": [
++        "annotation-000000"
++      ],
+       "clause": 0,
+       "directives": {},
+       "id": "seg-000001",
+@@ -146,7 +167,9 @@
+       "spoken_end": 9,
+       "spoken_start": 5,
+       "text": "Two.",
+-      "token_indices": [1]
++      "token_indices": [
++        1
++      ]
+     }
+   ],
+   "source": {
+@@ -162,6 +185,7 @@
+       "id": "token-0",
+       "language": "en-us",
+       "lemma": "one.",
++      "morph": null,
+       "spoken_end": 4,
+       "spoken_start": 0,
+       "text": "One."
+@@ -170,6 +194,7 @@
+       "id": "token-1",
+       "language": "en-us",
+       "lemma": "two.",
++      "morph": null,
+       "spoken_end": 9,
+       "spoken_start": 5,
+       "text": "Two."
+@@ -177,22 +202,30 @@
+   ],
+   "units": [
+     {
+-      "content_hash": "sha256:2331e548d1b1d34f1b4538cd689a80596b7939d64cd37ae858304fc6bc657148",
++      "content_hash": "sha256:4a40a8aee266a392cfa6e809581d542782a9673ef8680326e2fd1dffa12caafd",
++      "content_hash_schema": "utterplan-unit-v2",
+       "id": "unit-0000",
+       "index": 0,
+       "kind": "sentence",
+       "marker_ids": [],
+-      "segment_ids": ["seg-000000"],
++      "segment_ids": [
++        "seg-000000"
++      ],
+       "spoken_end": 4,
+       "spoken_start": 0
+     },
+     {
+-      "content_hash": "sha256:16846267be8586f05733916c94416ab1573c4ae66320674f27f9928b1f742618",
++      "content_hash": "sha256:10fef7b29c73b0afd593da4567df4d2e1219ee3d39549cf0864a0a901f60e7a2",
++      "content_hash_schema": "utterplan-unit-v2",
+       "id": "unit-0001",
+       "index": 1,
+       "kind": "sentence",
+-      "marker_ids": ["marker-000000"],
+-      "segment_ids": ["seg-000001"],
++      "marker_ids": [
++        "marker-000000"
++      ],
++      "segment_ids": [
++        "seg-000001"
++      ],
+       "spoken_end": 9,
+       "spoken_start": 5
+     }
+diff --git a/tests/golden/multilingual.utterplan.json b/tests/golden/multilingual.utterplan.json
+index 1c61962..fe6a094 100644
+--- a/tests/golden/multilingual.utterplan.json
++++ b/tests/golden/multilingual.utterplan.json
+@@ -96,23 +96,58 @@
+       "spoken_start": 13
+     }
+   ],
++  "linguistic_runs": [
++    {
++      "language_run_id": "lang-0",
++      "model": null,
++      "model_version": null,
++      "provider": "fallback",
++      "provider_version": null,
++      "token_end": 1,
++      "token_start": 0
++    },
++    {
++      "language_run_id": "lang-1",
++      "model": null,
++      "model_version": null,
++      "provider": "fallback",
++      "provider_version": null,
++      "token_end": 2,
++      "token_start": 1
++    },
++    {
++      "language_run_id": "lang-2",
++      "model": null,
++      "model_version": null,
++      "provider": "fallback",
++      "provider_version": null,
++      "token_end": 3,
++      "token_start": 2
++    }
++  ],
+   "markers": [],
+-  "plan_id": "sha256:46fed62d1e7126bf0f5f366358e802be45931a1f5a6b7158f24b51b97e298f16",
++  "plan_id": "sha256:c4b143453e35138e8a6e89761cc33bad3ec99d8340bf23c0f6b6a90f6c9d08cf",
+   "preparation": {
+     "backend": "spokenform",
+-    "languages": ["en-us", "fr", "en-us"],
++    "languages": [
++      "en-us",
++      "fr",
++      "en-us"
++    ],
+     "replacements": [],
+-    "version": "0.4.4.dev0+g71feb9cb4.d19800101",
++    "version": "0.4.5",
+     "warnings": []
+   },
+   "producer": {
+     "name": "utterplan",
+-    "version": "0.1.0"
++    "version": "0.1.3"
+   },
+-  "schema_version": 1,
++  "schema_version": 2,
+   "segments": [
+     {
+-      "annotation_ids": ["annotation-000000"],
++      "annotation_ids": [
++        "annotation-000000"
++      ],
+       "clause": 0,
+       "directives": {},
+       "id": "seg-000000",
+@@ -130,10 +165,15 @@
+       "spoken_end": 5,
+       "spoken_start": 0,
+       "text": "Hello",
+-      "token_indices": [0]
++      "token_indices": [
++        0
++      ]
+     },
+     {
+-      "annotation_ids": ["annotation-000000", "annotation-000001"],
++      "annotation_ids": [
++        "annotation-000000",
++        "annotation-000001"
++      ],
+       "clause": 0,
+       "directives": {},
+       "id": "seg-000001",
+@@ -151,10 +191,14 @@
+       "spoken_end": 13,
+       "spoken_start": 6,
+       "text": "Bonjour",
+-      "token_indices": [1]
++      "token_indices": [
++        1
++      ]
+     },
+     {
+-      "annotation_ids": ["annotation-000000"],
++      "annotation_ids": [
++        "annotation-000000"
++      ],
+       "clause": 0,
+       "directives": {},
+       "id": "seg-000002",
+@@ -172,7 +216,9 @@
+       "spoken_end": 14,
+       "spoken_start": 13,
+       "text": ".",
+-      "token_indices": [2]
++      "token_indices": [
++        2
++      ]
+     }
+   ],
+   "source": {
+@@ -188,6 +234,7 @@
+       "id": "token-0",
+       "language": "en-us",
+       "lemma": "hello",
++      "morph": null,
+       "spoken_end": 5,
+       "spoken_start": 0,
+       "text": "Hello"
+@@ -196,6 +243,7 @@
+       "id": "token-1",
+       "language": "fr",
+       "lemma": "bonjour",
++      "morph": null,
+       "spoken_end": 13,
+       "spoken_start": 6,
+       "text": "Bonjour"
+@@ -204,6 +252,7 @@
+       "id": "token-2",
+       "language": "en-us",
+       "lemma": ".",
++      "morph": null,
+       "spoken_end": 14,
+       "spoken_start": 13,
+       "text": "."
+@@ -211,12 +260,17 @@
+   ],
+   "units": [
+     {
+-      "content_hash": "sha256:4865de3ee5a6940aa1414648bb9bd570eda6c3a20e33f3568e28d9d14bdbf3e4",
++      "content_hash": "sha256:836de16d38aee05af7a4de92ea73781b766a53345f93142ae6126fcc74c2bc89",
++      "content_hash_schema": "utterplan-unit-v2",
+       "id": "unit-0000",
+       "index": 0,
+       "kind": "paragraph",
+       "marker_ids": [],
+-      "segment_ids": ["seg-000000", "seg-000001", "seg-000002"],
++      "segment_ids": [
++        "seg-000000",
++        "seg-000001",
++        "seg-000002"
++      ],
+       "spoken_end": 14,
+       "spoken_start": 0
+     }
+diff --git a/tests/golden/parenthetical.utterplan.json b/tests/golden/parenthetical.utterplan.json
+index e09f5a1..a17b761 100644
+--- a/tests/golden/parenthetical.utterplan.json
++++ b/tests/golden/parenthetical.utterplan.json
+@@ -84,20 +84,33 @@
+       "spoken_start": 0
+     }
+   ],
++  "linguistic_runs": [
++    {
++      "language_run_id": "lang-0",
++      "model": null,
++      "model_version": null,
++      "provider": "fallback",
++      "provider_version": null,
++      "token_end": 13,
++      "token_start": 0
++    }
++  ],
+   "markers": [],
+-  "plan_id": "sha256:7fe6a205392b6102bd705d4451188ed54552a1ab77aa40959f42a6a913900814",
++  "plan_id": "sha256:84116e46b50a75a410d1b007b9c20d436c946d8a48abc29f9af880c2cb6e0a09",
+   "preparation": {
+     "backend": "spokenform",
+-    "languages": ["en-us"],
++    "languages": [
++      "en-us"
++    ],
+     "replacements": [],
+-    "version": "0.4.4.dev0+g71feb9cb4.d19800101",
++    "version": "0.4.5",
+     "warnings": []
+   },
+   "producer": {
+     "name": "utterplan",
+-    "version": "0.1.0"
++    "version": "0.1.3"
+   },
+-  "schema_version": 1,
++  "schema_version": 2,
+   "segments": [
+     {
+       "annotation_ids": [],
+@@ -118,11 +131,15 @@
+       "spoken_end": 19,
+       "spoken_start": 0,
+       "text": "The backup battery ",
+-      "token_indices": [0, 1, 2]
++      "token_indices": [
++        0,
++        1,
++        2
++      ]
+     },
+     {
+       "annotation_ids": [],
+-      "clause": 0,
++      "clause": 1,
+       "directives": {},
+       "id": "seg-000001",
+       "language": "en-us",
+@@ -132,18 +149,27 @@
+         "seconds": 0.0
+       },
+       "pause_before": {
+-        "events": ["boundary-000000"],
++        "events": [
++          "boundary-000000"
++        ],
+         "seconds": 0.15
+       },
+       "sentence": 0,
+       "spoken_end": 53,
+       "spoken_start": 19,
+       "text": "(still warm from the morning test)",
+-      "token_indices": [3, 4, 5, 6, 7, 8]
++      "token_indices": [
++        3,
++        4,
++        5,
++        6,
++        7,
++        8
++      ]
+     },
+     {
+       "annotation_ids": [],
+-      "clause": 0,
++      "clause": 2,
+       "directives": {},
+       "id": "seg-000002",
+       "language": "en-us",
+@@ -153,14 +179,21 @@
+         "seconds": 0.0
+       },
+       "pause_before": {
+-        "events": ["boundary-000001"],
++        "events": [
++          "boundary-000001"
++        ],
+         "seconds": 0.15
+       },
+       "sentence": 0,
+       "spoken_end": 77,
+       "spoken_start": 53,
+       "text": " sat beside the console.",
+-      "token_indices": [9, 10, 11, 12]
++      "token_indices": [
++        9,
++        10,
++        11,
++        12
++      ]
+     }
+   ],
+   "source": {
+@@ -176,6 +209,7 @@
+       "id": "token-0",
+       "language": "en-us",
+       "lemma": "the",
++      "morph": null,
+       "spoken_end": 3,
+       "spoken_start": 0,
+       "text": "The"
+@@ -184,6 +218,7 @@
+       "id": "token-1",
+       "language": "en-us",
+       "lemma": "backup",
++      "morph": null,
+       "spoken_end": 10,
+       "spoken_start": 4,
+       "text": "backup"
+@@ -192,6 +227,7 @@
+       "id": "token-2",
+       "language": "en-us",
+       "lemma": "battery",
++      "morph": null,
+       "spoken_end": 18,
+       "spoken_start": 11,
+       "text": "battery"
+@@ -200,6 +236,7 @@
+       "id": "token-3",
+       "language": "en-us",
+       "lemma": "(still",
++      "morph": null,
+       "spoken_end": 25,
+       "spoken_start": 19,
+       "text": "(still"
+@@ -208,6 +245,7 @@
+       "id": "token-4",
+       "language": "en-us",
+       "lemma": "warm",
++      "morph": null,
+       "spoken_end": 30,
+       "spoken_start": 26,
+       "text": "warm"
+@@ -216,6 +254,7 @@
+       "id": "token-5",
+       "language": "en-us",
+       "lemma": "from",
++      "morph": null,
+       "spoken_end": 35,
+       "spoken_start": 31,
+       "text": "from"
+@@ -224,6 +263,7 @@
+       "id": "token-6",
+       "language": "en-us",
+       "lemma": "the",
++      "morph": null,
+       "spoken_end": 39,
+       "spoken_start": 36,
+       "text": "the"
+@@ -232,6 +272,7 @@
+       "id": "token-7",
+       "language": "en-us",
+       "lemma": "morning",
++      "morph": null,
+       "spoken_end": 47,
+       "spoken_start": 40,
+       "text": "morning"
+@@ -240,6 +281,7 @@
+       "id": "token-8",
+       "language": "en-us",
+       "lemma": "test)",
++      "morph": null,
+       "spoken_end": 53,
+       "spoken_start": 48,
+       "text": "test)"
+@@ -248,6 +290,7 @@
+       "id": "token-9",
+       "language": "en-us",
+       "lemma": "sat",
++      "morph": null,
+       "spoken_end": 57,
+       "spoken_start": 54,
+       "text": "sat"
+@@ -256,6 +299,7 @@
+       "id": "token-10",
+       "language": "en-us",
+       "lemma": "beside",
++      "morph": null,
+       "spoken_end": 64,
+       "spoken_start": 58,
+       "text": "beside"
+@@ -264,6 +308,7 @@
+       "id": "token-11",
+       "language": "en-us",
+       "lemma": "the",
++      "morph": null,
+       "spoken_end": 68,
+       "spoken_start": 65,
+       "text": "the"
+@@ -272,6 +317,7 @@
+       "id": "token-12",
+       "language": "en-us",
+       "lemma": "console.",
++      "morph": null,
+       "spoken_end": 77,
+       "spoken_start": 69,
+       "text": "console."
+@@ -279,12 +325,17 @@
+   ],
+   "units": [
+     {
+-      "content_hash": "sha256:5903cb139509fff58be1bda1361160ea2302ef02368a8275a67a3c250f1b2c67",
++      "content_hash": "sha256:f67186d590bcc3a1b09de92bb377db3b88adf94f98a3cf3a00805115dd79edee",
++      "content_hash_schema": "utterplan-unit-v2",
+       "id": "unit-0000",
+       "index": 0,
+       "kind": "paragraph",
+       "marker_ids": [],
+-      "segment_ids": ["seg-000000", "seg-000001", "seg-000002"],
++      "segment_ids": [
++        "seg-000000",
++        "seg-000001",
++        "seg-000002"
++      ],
+       "spoken_end": 77,
+       "spoken_start": 0
+     }
+diff --git a/tests/golden/spokenform_offsets.utterplan.json b/tests/golden/spokenform_offsets.utterplan.json
+index 11b3a91..6e731ed 100644
+--- a/tests/golden/spokenform_offsets.utterplan.json
++++ b/tests/golden/spokenform_offsets.utterplan.json
+@@ -57,11 +57,24 @@
+       "spoken_start": 0
+     }
+   ],
++  "linguistic_runs": [
++    {
++      "language_run_id": "lang-0",
++      "model": null,
++      "model_version": null,
++      "provider": "fallback",
++      "provider_version": null,
++      "token_end": 8,
++      "token_start": 0
++    }
++  ],
+   "markers": [],
+-  "plan_id": "sha256:d26f14468e0e17a1f571e93b9353c88004191f87e89ddb992d6dfb950df54f70",
++  "plan_id": "sha256:fd2dba4376a87419ed91bc3c29a7801122787eeb6cf32ceb95788e7180be2a56",
+   "preparation": {
+     "backend": "spokenform",
+-    "languages": ["en-us"],
++    "languages": [
++      "en-us"
++    ],
+     "replacements": [
+       {
+         "kind": "abbreviation",
+@@ -97,14 +110,14 @@
+         "source_start": 25
+       }
+     ],
+-    "version": "0.4.4.dev0+g71feb9cb4.d19800101",
++    "version": "0.4.5",
+     "warnings": []
+   },
+   "producer": {
+     "name": "utterplan",
+-    "version": "0.1.0"
++    "version": "0.1.3"
+   },
+-  "schema_version": 1,
++  "schema_version": 2,
+   "segments": [
+     {
+       "annotation_ids": [],
+@@ -125,7 +138,16 @@
+       "spoken_end": 53,
+       "spoken_start": 0,
+       "text": "Doctor Smith bought five kilograms on January fourth.",
+-      "token_indices": [0, 1, 2, 3, 4, 5, 6, 7]
++      "token_indices": [
++        0,
++        1,
++        2,
++        3,
++        4,
++        5,
++        6,
++        7
++      ]
+     }
+   ],
+   "source": {
+@@ -141,6 +163,7 @@
+       "id": "token-0",
+       "language": "en-us",
+       "lemma": "doctor",
++      "morph": null,
+       "spoken_end": 6,
+       "spoken_start": 0,
+       "text": "Doctor"
+@@ -149,6 +172,7 @@
+       "id": "token-1",
+       "language": "en-us",
+       "lemma": "smith",
++      "morph": null,
+       "spoken_end": 12,
+       "spoken_start": 7,
+       "text": "Smith"
+@@ -157,6 +181,7 @@
+       "id": "token-2",
+       "language": "en-us",
+       "lemma": "bought",
++      "morph": null,
+       "spoken_end": 19,
+       "spoken_start": 13,
+       "text": "bought"
+@@ -165,6 +190,7 @@
+       "id": "token-3",
+       "language": "en-us",
+       "lemma": "five",
++      "morph": null,
+       "spoken_end": 24,
+       "spoken_start": 20,
+       "text": "five"
+@@ -173,6 +199,7 @@
+       "id": "token-4",
+       "language": "en-us",
+       "lemma": "kilograms",
++      "morph": null,
+       "spoken_end": 34,
+       "spoken_start": 25,
+       "text": "kilograms"
+@@ -181,6 +208,7 @@
+       "id": "token-5",
+       "language": "en-us",
+       "lemma": "on",
++      "morph": null,
+       "spoken_end": 37,
+       "spoken_start": 35,
+       "text": "on"
+@@ -189,6 +217,7 @@
+       "id": "token-6",
+       "language": "en-us",
+       "lemma": "january",
++      "morph": null,
+       "spoken_end": 45,
+       "spoken_start": 38,
+       "text": "January"
+@@ -197,6 +226,7 @@
+       "id": "token-7",
+       "language": "en-us",
+       "lemma": "fourth.",
++      "morph": null,
+       "spoken_end": 53,
+       "spoken_start": 46,
+       "text": "fourth."
+@@ -204,12 +234,15 @@
+   ],
+   "units": [
+     {
+-      "content_hash": "sha256:dcc3968227f8c72d93fd4c9587752464f785091f42b83feb5c897911a5ab5a47",
++      "content_hash": "sha256:b51dd6a43563c9327e7012a651221da71637fd909a47b76cb18f98934f71d658",
++      "content_hash_schema": "utterplan-unit-v2",
+       "id": "unit-0000",
+       "index": 0,
+       "kind": "paragraph",
+       "marker_ids": [],
+-      "segment_ids": ["seg-000000"],
++      "segment_ids": [
++        "seg-000000"
++      ],
+       "spoken_end": 53,
+       "spoken_start": 0
+     }
+diff --git a/tests/golden/ssmd_breaks.utterplan.json b/tests/golden/ssmd_breaks.utterplan.json
+index 8760535..2326ea0 100644
+--- a/tests/golden/ssmd_breaks.utterplan.json
++++ b/tests/golden/ssmd_breaks.utterplan.json
+@@ -97,30 +97,47 @@
+       "spoken_start": 0
+     }
+   ],
++  "linguistic_runs": [
++    {
++      "language_run_id": "lang-0",
++      "model": null,
++      "model_version": null,
++      "provider": "fallback",
++      "provider_version": null,
++      "token_end": 3,
++      "token_start": 0
++    }
++  ],
+   "markers": [],
+-  "plan_id": "sha256:14ebfd9170484fe8f3842ed309570671084f6a1c6b4ae9884b14b7bcf5ea527a",
++  "plan_id": "sha256:11c013f2824bfb6032f26f2a5d7bacab1f6e2752912d79a33250ffed90897fd1",
+   "preparation": {
+     "backend": "spokenform",
+-    "languages": ["en-us"],
++    "languages": [
++      "en-us"
++    ],
+     "replacements": [],
+-    "version": "0.4.4.dev0+g71feb9cb4.d19800101",
++    "version": "0.4.5",
+     "warnings": []
+   },
+   "producer": {
+     "name": "utterplan",
+-    "version": "0.1.0"
++    "version": "0.1.3"
+   },
+-  "schema_version": 1,
++  "schema_version": 2,
+   "segments": [
+     {
+-      "annotation_ids": ["annotation-000000"],
++      "annotation_ids": [
++        "annotation-000000"
++      ],
+       "clause": 0,
+       "directives": {},
+       "id": "seg-000000",
+       "language": "en-us",
+       "paragraph": 0,
+       "pause_after": {
+-        "events": ["boundary-000000"],
++        "events": [
++          "boundary-000000"
++        ],
+         "seconds": 0.5
+       },
+       "pause_before": {
+@@ -131,17 +148,23 @@
+       "spoken_end": 5,
+       "spoken_start": 0,
+       "text": "Hello",
+-      "token_indices": [0]
++      "token_indices": [
++        0
++      ]
+     },
+     {
+-      "annotation_ids": ["annotation-000000"],
+-      "clause": 0,
++      "annotation_ids": [
++        "annotation-000000"
++      ],
++      "clause": 1,
+       "directives": {},
+       "id": "seg-000001",
+       "language": "en-us",
+       "paragraph": 0,
+       "pause_after": {
+-        "events": ["boundary-000001"],
++        "events": [
++          "boundary-000001"
++        ],
+         "seconds": 0.15
+       },
+       "pause_before": {
+@@ -152,11 +175,15 @@
+       "spoken_end": 11,
+       "spoken_start": 5,
+       "text": " world",
+-      "token_indices": [1]
++      "token_indices": [
++        1
++      ]
+     },
+     {
+-      "annotation_ids": ["annotation-000000"],
+-      "clause": 0,
++      "annotation_ids": [
++        "annotation-000000"
++      ],
++      "clause": 2,
+       "directives": {},
+       "id": "seg-000002",
+       "language": "en-us",
+@@ -173,7 +200,9 @@
+       "spoken_end": 18,
+       "spoken_start": 11,
+       "text": " again.",
+-      "token_indices": [2]
++      "token_indices": [
++        2
++      ]
+     }
+   ],
+   "source": {
+@@ -189,6 +218,7 @@
+       "id": "token-0",
+       "language": "en-us",
+       "lemma": "hello",
++      "morph": null,
+       "spoken_end": 5,
+       "spoken_start": 0,
+       "text": "Hello"
+@@ -197,6 +227,7 @@
+       "id": "token-1",
+       "language": "en-us",
+       "lemma": "world",
++      "morph": null,
+       "spoken_end": 11,
+       "spoken_start": 6,
+       "text": "world"
+@@ -205,6 +236,7 @@
+       "id": "token-2",
+       "language": "en-us",
+       "lemma": "again.",
++      "morph": null,
+       "spoken_end": 18,
+       "spoken_start": 12,
+       "text": "again."
+@@ -212,12 +244,17 @@
+   ],
+   "units": [
+     {
+-      "content_hash": "sha256:086e985a538b58f030dae2309c2dd4d2f530cc0a36134ea2012331e9a971db06",
++      "content_hash": "sha256:feeeb048aadea0f1456e0f7b2599ca67a495512e087f2902fe15714a085978d7",
++      "content_hash_schema": "utterplan-unit-v2",
+       "id": "unit-0000",
+       "index": 0,
+       "kind": "paragraph",
+       "marker_ids": [],
+-      "segment_ids": ["seg-000000", "seg-000001", "seg-000002"],
++      "segment_ids": [
++        "seg-000000",
++        "seg-000001",
++        "seg-000002"
++      ],
+       "spoken_end": 18,
+       "spoken_start": 0
+     }
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 8247859..f499c52 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -27,7 +27,7 @@ def test_compile_literal_text_to_stdout_json(capsys: pytest.CaptureFixture[str])
+     assert main(["compile", "Hello world.", "--lang", "en-us"]) == 0
+     payload = _payload(capsys)
+     assert payload["format"] == "utterplan"
+-    assert payload["schema_version"] == 1
++    assert payload["schema_version"] == 2
+     assert payload["segments"]
+
+
+@@ -191,6 +191,20 @@ def test_inspect_segment(tmp_path: Path, capsys: pytest.CaptureFixture[str]) ->
+     assert "Hello" in captured.out
+
+
++def test_inspect_tokens_shows_linguistic_fields(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    output = tmp_path / "plan.utterplan.json"
++    assert main(["compile", "Hello.", "--lang", "en-us", "-o", str(output)]) == 0
++    capsys.readouterr()
++    assert main(["inspect", str(output), "--tokens"]) == 0
++    captured = capsys.readouterr()
++    assert "provider: fallback" in captured.out
++    assert "lemma=hello." in captured.out
++    assert "pos=-" in captured.out
++    assert "tag=-" in captured.out
++    assert "morph=-" in captured.out
++
+ def test_inspect_preparation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+     output = tmp_path / "plan.utterplan.json"
+     assert main(["compile", "Dr. bought 5 kg.", "--lang", "en-us", "-o", str(output)]) == 0
+@@ -258,7 +272,7 @@ def test_migrate_check_current_plan(tmp_path: Path, capsys: pytest.CaptureFixtur
+     assert main(["migrate", str(source), "--check"]) == 0
+     captured = capsys.readouterr()
+     assert "valid migration path" in captured.out
+-    assert "source schema: 1" in captured.out
++    assert "source schema: 2" in captured.out
+     assert "migration required: no" in captured.out
+     assert source.exists()
+
+@@ -269,7 +283,7 @@ def test_migrate_stdout_and_output_file(tmp_path: Path, capsys: pytest.CaptureFi
+     assert main(["compile", "Hello.", "--lang", "en-us", "-o", str(source)]) == 0
+     capsys.readouterr()
+     assert main(["migrate", str(source)]) == 0
+-    assert json.loads(capsys.readouterr().out)["schema_version"] == 1
++    assert json.loads(capsys.readouterr().out)["schema_version"] == 2
+     assert main(["migrate", str(source), "-o", str(destination)]) == 0
+     assert "migrated" in capsys.readouterr().err
+     assert json.loads(destination.read_text(encoding="utf-8"))["format"] == "utterplan"
+@@ -296,6 +310,6 @@ def test_validate_reports_migration_status(
+     capsys.readouterr()
+     assert main(["validate", str(source)]) == 0
+     captured = capsys.readouterr()
+-    assert "source schema version: 1" in captured.out
+-    assert "current schema version: 1" in captured.out
++    assert "source schema version: 2" in captured.out
++    assert "current schema version: 2" in captured.out
+     assert "migration required: no" in captured.out
+diff --git a/tests/test_explain.py b/tests/test_explain.py
+index 109e2b0..7edd43c 100644
+--- a/tests/test_explain.py
++++ b/tests/test_explain.py
+@@ -95,13 +95,18 @@ def test_details_include_technical_identity_and_correlated_ids() -> None:
+     output = format_explanation(_load("parenthetical.utterplan.json"), details=True)
+
+     assert "plan id: sha256:" in output
+-    assert "schema: 1" in output
++    assert "schema: 2" in output
+     assert "id: seg-000001" in output
+     assert "spoken: 19:53" in output
+     assert "content hash: sha256:" in output
+     assert "events: boundary-000000" in output
+     assert "origin phrasplit" in output
+     assert "planning.complete [info]" in output
++    assert "analysis: provider=fallback" in output
++    assert "lemma=the" in output
++    assert "pos=-" in output
++    assert "tag=-" in output
++    assert "morph=-" in output
+
+
+ def test_explanation_is_deterministic() -> None:
+diff --git a/tests/test_format.py b/tests/test_format.py
+index 3336118..4980ccf 100644
+--- a/tests/test_format.py
++++ b/tests/test_format.py
+@@ -36,7 +36,7 @@ def test_schema_and_determinism():
+
+ def test_unsupported_schema():
+     value = plan().to_dict()
+-    value["schema_version"] = 2
++    value["schema_version"] = 3
+     with pytest.raises(UnsupportedSchemaError):
+         UtterancePlan.from_dict(value)
+
+@@ -48,6 +48,12 @@ def test_semantic_corruption_is_rejected():
+         UtterancePlan.from_dict(value)
+
+
++def test_token_text_must_match_spoken_slice():
++    value = plan().to_dict()
++    value["tokens"][0]["text"] = "wrong"
++    with pytest.raises(PlanValidationError, match="token.range_mismatch"):
++        UtterancePlan.from_dict(value)
++
+ def test_compact_optional_fields_are_omitted():
+     value = plan().to_dict()
+     assert value["segments"]
+@@ -57,6 +63,7 @@ def test_compact_optional_fields_are_omitted():
+     assert all("pos" not in item for item in value["tokens"])
+     assert all("tag" not in item for item in value["tokens"])
+
++    assert all(item["morph"] is None for item in value["tokens"])
+
+ def test_json_is_plain_data():
+     value = json.loads(plan().to_json())
+diff --git a/tests/test_linguistics.py b/tests/test_linguistics.py
+index ed8cc0a..73f5f2f 100644
+--- a/tests/test_linguistics.py
++++ b/tests/test_linguistics.py
+@@ -1,7 +1,7 @@
+ import sys
+ from types import SimpleNamespace
+
+-from utterplan import PlannerConfig, UtterancePlanner
++from utterplan import LinguisticsConfig, PlannerConfig, UtterancePlan, UtterancePlanner
+ from utterplan.language import LanguageRun
+ from utterplan.linguistics import LinguisticResourcePool, analyze_run_analyses
+
+@@ -75,3 +75,80 @@ def test_spacy_auto_uses_fake_compatible_local_model(monkeypatch):
+     assert analysis.model_name == "en_core_web_sm"
+     assert analysis.provider_doc is pipeline.last_doc
+     assert analysis.tokens[0].pos == "NOUN"
++
++def _fake_spacy_plan(monkeypatch, *, tag: str = "VBP", morph: str = "Tense=Pres|VerbForm=Fin") -> UtterancePlan:
++    class Pipeline:
++        def __call__(self, text):
++            values = (
++                (0, "I", "PRON", "PRP", "I", "Case=Nom"),
++                (2, "live", "VERB", tag, "live", morph),
++                (7, "here", "ADV", "RB", "here", None),
++                (11, ".", "PUNCT", ".", ".", None),
++            )
++            return [
++                SimpleNamespace(
++                    idx=idx,
++                    text=value,
++                    pos_=pos,
++                    tag_=token_tag,
++                    lemma_=lemma,
++                    morph=token_morph,
++                )
++                for idx, value, pos, token_tag, lemma, token_morph in values
++            ]
++
++    monkeypatch.setitem(sys.modules, "spacy", SimpleNamespace(__version__="3.7.0"))
++    monkeypatch.setattr(LinguisticResourcePool, "pipeline", lambda self, model, require=False: Pipeline())
++    config = PlannerConfig(
++        language="en-us",
++        text_preparation="identity",
++        linguistics=LinguisticsConfig(
++            use_spacy=True, spacy_model="fake_model", require_spacy=True
++        ),
++    )
++    return UtterancePlanner(config).plan("I live here.")
++
++
++def test_fake_spacy_fields_and_provenance_survive_roundtrip(monkeypatch):
++    plan = _fake_spacy_plan(monkeypatch)
++    token = next(token for token in plan.tokens if token.text == "live")
++    assert token.text == "live"
++    assert token.pos == "VERB"
++    assert token.tag == "VBP"
++    assert token.lemma == "live"
++    assert token.morph == "Tense=Pres|VerbForm=Fin"
++    assert plan.linguistic_runs[0].provider == "spacy"
++    assert plan.linguistic_runs[0].model == "fake_model"
++    assert plan.linguistic_runs[0].provider_version == "3.7.0"
++    serialized = plan.to_json()
++    assert "provider_doc" not in serialized
++    assert "spacy.tokens" not in serialized
++    restored = UtterancePlan.from_json(serialized)
++    assert restored.tokens == plan.tokens
++    assert restored.linguistic_runs == plan.linguistic_runs
++
++
++def test_fallback_provenance_is_explicit():
++    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("I live here.")
++    assert plan.linguistic_runs[0].provider == "fallback"
++    assert plan.linguistic_runs[0].model is None
++    assert all(token.pos is None and token.tag is None and token.morph is None for token in plan.tokens)
++
++
++def test_token_semantics_change_unit_hash_but_provenance_does_not(monkeypatch):
++    left = _fake_spacy_plan(monkeypatch, tag="VBP")
++    right = _fake_spacy_plan(monkeypatch, tag="VB")
++    assert left.units[0].content_hash != right.units[0].content_hash
++    changed_provenance = type(left.linguistic_runs[0])(
++        language_run_id=left.linguistic_runs[0].language_run_id,
++        provider="spacy",
++        token_start=left.linguistic_runs[0].token_start,
++        token_end=left.linguistic_runs[0].token_end,
++        model="other_model",
++        provider_version="other",
++        model_version="other",
++    )
++    from dataclasses import replace
++
++    metadata_only = replace(left, linguistic_runs=(changed_provenance,))
++    assert metadata_only.units[0].content_hash == left.units[0].content_hash
+diff --git a/tests/test_migration_framework.py b/tests/test_migration_framework.py
+index 023e4d9..3d6cfa8 100644
+--- a/tests/test_migration_framework.py
++++ b/tests/test_migration_framework.py
+@@ -1,5 +1,6 @@
+ from __future__ import annotations
+
++import json
+ from copy import deepcopy
+
+ import pytest
+@@ -31,8 +32,8 @@ def _step(target: int):
+ def test_current_plan_migration_is_deterministic_noop() -> None:
+     original = _current_data()
+     result = migrate_plan_data(original)
+-    assert result.source_version == 1
+-    assert result.target_version == 1
++    assert result.source_version == 2
++    assert result.target_version == 2
+     assert result.steps == ()
+     assert not result.changed
+     assert result.data == original
+@@ -47,8 +48,8 @@ def test_migration_does_not_mutate_input() -> None:
+
+
+ def test_migrate_json_roundtrips_current_plan() -> None:
+-    result = migrate_plan_json('{"format": "utterplan", "schema_version": 1}')
+-    assert '"schema_version": 1' in result
++    result = migrate_plan_json(json.dumps(_current_data()))
++    assert '"schema_version": 2' in result
+     assert '"format": "utterplan"' in result
+
+
+@@ -114,7 +115,7 @@ def test_mutating_step_is_rejected() -> None:
+
+ def test_future_schema_is_not_migrated() -> None:
+     data = _current_data()
+-    data["schema_version"] = 2
++    data["schema_version"] = 3
+     with pytest.raises(UnsupportedSchemaError):
+         migrate_plan_data(data)
+
+diff --git a/tests/test_public_identity.py b/tests/test_public_identity.py
+index 016830a..9ee5227 100644
+--- a/tests/test_public_identity.py
++++ b/tests/test_public_identity.py
+@@ -19,7 +19,7 @@ def test_public_planner_identity() -> None:
+     assert isinstance(plan, UtterancePlan)
+     payload = plan.to_dict()
+     assert payload["format"] == "utterplan"
+-    assert payload["schema_version"] == 1
++    assert payload["schema_version"] == 2
+     assert payload["producer"]["name"] == "utterplan"
+
+
+diff --git a/tests/test_schema_history.py b/tests/test_schema_history.py
+index 6c45bd9..94b6970 100644
+--- a/tests/test_schema_history.py
++++ b/tests/test_schema_history.py
+@@ -6,7 +6,7 @@ from pathlib import Path
+
+ import jsonschema
+
+-from utterplan import UtterancePlan
++from utterplan import UtterancePlan, migrate_plan_data
+ from utterplan.format import schema
+
+ ROOT = Path(__file__).resolve().parent
+@@ -17,18 +17,26 @@ def test_v1_fixtures_are_present() -> None:
+     assert len(FIXTURES) >= 5
+
+
+-def test_v1_fixtures_validate_and_load_without_mutation() -> None:
++def test_v1_fixtures_validate_before_migration_and_remain_immutable() -> None:
+     frozen_schema = schema(1)
++    current_schema = schema(2)
+     for path in FIXTURES:
+         value = json.loads(path.read_text(encoding="utf-8"))
+         before = copy.deepcopy(value)
+         assert value["format"] == "utterplan"
+         assert value["schema_version"] == 1
+         jsonschema.validate(value, frozen_schema)
++        result = migrate_plan_data(value)
++        jsonschema.validate(result.data, current_schema)
++        assert result.source_version == 1
++        assert result.target_version == 2
++        assert result.data["producer"]["migration"]["original_plan_id"] == value["plan_id"]
++        assert all(run["provider"] == "unknown" for run in result.data["linguistic_runs"])
++        assert all(token["morph"] is None for token in result.data["tokens"])
++        assert all(unit["content_hash_schema"] == "utterplan-unit-v2" for unit in result.data["units"])
+         plan = UtterancePlan.from_dict(value)
+-        assert plan.plan_id == value["plan_id"]
+-        assert plan.source.text == value["source"]["text"]
+-        assert plan.texts.spoken == value["texts"]["spoken"]
++        assert plan.schema_version == 2
++        assert plan.plan_id == result.data["plan_id"]
+         assert value == before
+
+
+diff --git a/tests/test_schema_registry.py b/tests/test_schema_registry.py
+index 8cd9d78..8bc0b42 100644
+--- a/tests/test_schema_registry.py
++++ b/tests/test_schema_registry.py
+@@ -14,15 +14,17 @@ from utterplan.versioning import (
+ )
+
+
+-def test_schema_registry_lists_frozen_v1() -> None:
++def test_schema_registry_lists_frozen_v1_and_current_v2() -> None:
+     assert FORMAT == "utterplan"
+-    assert CURRENT_SCHEMA_VERSION == 1
++    assert CURRENT_SCHEMA_VERSION == 2
+     assert SCHEMA_VERSION == CURRENT_SCHEMA_VERSION
+     assert OLDEST_SUPPORTED_SCHEMA_VERSION == 1
+-    assert SUPPORTED_SCHEMA_VERSIONS == (1,)
+-    assert schema_versions() == (1,)
++    assert SUPPORTED_SCHEMA_VERSIONS == (1, 2)
++    assert schema_versions() == (1, 2)
+     assert has_schema(1)
++    assert has_schema(2)
+     assert schema(1)["properties"]["schema_version"]["const"] == 1
++    assert schema(2)["properties"]["schema_version"]["const"] == 2
+
+
+ def test_current_schema_alias_matches_current_version() -> None:
+@@ -31,8 +33,12 @@ def test_current_schema_alias_matches_current_version() -> None:
+
+ def test_source_and_packaged_frozen_schemas_are_identical() -> None:
+     root = Path(__file__).resolve().parent.parent
+-    source = json.loads((root / "spec" / "schemas" / "v1.schema.json").read_text())
+-    packaged = json.loads((root / "utterplan" / "schemas" / "v1.schema.json").read_text())
++    source_v1 = json.loads((root / "spec" / "schemas" / "v1.schema.json").read_text())
++    packaged_v1 = json.loads((root / "utterplan" / "schemas" / "v1.schema.json").read_text())
++    source_v2 = json.loads((root / "spec" / "schemas" / "v2.schema.json").read_text())
++    packaged_v2 = json.loads((root / "utterplan" / "schemas" / "v2.schema.json").read_text())
+     current_source = json.loads((root / "spec" / "utterplan.schema.json").read_text())
+     current_packaged = json.loads((root / "utterplan" / "utterplan.schema.json").read_text())
+-    assert source == packaged == current_source == current_packaged
++    assert source_v1 == packaged_v1
++    assert source_v2 == packaged_v2 == current_source == current_packaged
++    assert source_v1 != source_v2
+diff --git a/utterplan/__init__.py b/utterplan/__init__.py
+index b8bda79..7161cc0 100644
+--- a/utterplan/__init__.py
++++ b/utterplan/__init__.py
+@@ -27,6 +27,7 @@ from .model import (
+     BoundaryEvent,
+     Diagnostic,
+     EmphasisDirective,
++    LinguisticRun,
+     Marker,
+     PlanSegment,
+     PlanSource,
+@@ -63,6 +64,7 @@ __all__ = [
+     "PlanSegment",
+     "PlanUnit",
+     "LanguageRun",
++    "LinguisticRun",
+     "TokenAnnotation",
+     "AnnotationSpan",
+     "BoundaryEvent",
+diff --git a/utterplan/cli.py b/utterplan/cli.py
+index 4060dee..a29aaf0 100644
+--- a/utterplan/cli.py
++++ b/utterplan/cli.py
+@@ -328,9 +328,18 @@ def _inspect(plan: UtterancePlan, args: argparse.Namespace) -> None:
+             )
+     if args.tokens:
+         print("\nTokens")
+-        for token in plan.tokens:
++        if plan.linguistic_runs:
++            for linguistic_run in plan.linguistic_runs:
++                model = linguistic_run.model or "-"
++                print(f"  provider: {linguistic_run.provider}, model={model}")
++        else:
++            print("  provider: unknown, model=-")
++        for index, token in enumerate(plan.tokens):
++            token_id = token.id or f"token-{index}"
+             print(
+-                f"  {token.spoken_start}:{token.spoken_end} {token.text!r} {token.language or ''}"
++                f"  {token_id}  {token.spoken_start}:{token.spoken_end}  {token.text!r}  "
++                f"lang={token.language or '-'}  lemma={token.lemma or '-'}  "
++                f"pos={token.pos or '-'}  tag={token.tag or '-'}  morph={token.morph or '-'}"
+             )
+     if args.unit is not None:
+         unit = plan.units[args.unit]
+diff --git a/utterplan/explain.py b/utterplan/explain.py
+index 8b9c6e1..09c4636 100644
+--- a/utterplan/explain.py
++++ b/utterplan/explain.py
+@@ -155,14 +155,15 @@ def _format_speech_plan(plan: UtterancePlan, lines: list[str], *, details: bool)
+         _format_markers(unit, markers_by_id, lines, details=details)
+         for segment_number, segment_id in enumerate(unit.segment_ids, start=1):
+             segment = segments_by_id[segment_id]
+-            lines.extend(
+-                _format_segment(
+-                    segment,
+-                    segment_number,
+-                    boundaries_by_id,
+-                    details=details,
+-                )
++            formatted_segment = _format_segment(
++                segment,
++                segment_number,
++                boundaries_by_id,
++                details=details,
+             )
++            lines.extend(formatted_segment)
++            if details:
++                lines.extend(_format_segment_tokens(plan, segment))
+         if details:
+             lines.append(f"    id: {unit.id}")
+             lines.append(f"    spoken: {unit.spoken_start}:{unit.spoken_end}")
+@@ -223,6 +224,19 @@ def _format_segment(
+     return result
+
+
++def _format_segment_tokens(plan: UtterancePlan, segment: PlanSegment) -> list[str]:
++    if not segment.token_indices:
++        return ["       tokens: none"]
++    lines = ["       tokens:"]
++    for index in segment.token_indices:
++        token = plan.tokens[index]
++        lines.append(
++            f"         {_quote(token.text)}  lang={token.language or '-'}  "
++            f"lemma={token.lemma or '-'}  pos={token.pos or '-'}  "
++            f"tag={token.tag or '-'}  morph={token.morph or '-'}"
++        )
++    return lines
++
+ def _format_pause(
+     pause: ResolvedPause,
+     boundaries_by_id: Mapping[str, BoundaryEvent],
+@@ -316,14 +330,23 @@ def _format_audio(directive: AudioDirective) -> str:
+
+ def _format_language_runs(plan: UtterancePlan, lines: list[str]) -> None:
+     lines.extend(["Language runs"])
++    analysis_by_language = {item.language_run_id: item for item in plan.linguistic_runs}
+     if not plan.languages:
+         lines.append("  None.")
+     else:
+         for run in plan.languages:
++            analysis = analysis_by_language.get(run.id)
++            if analysis is None:
++                provider = "unknown"
++                model = "-"
++            else:
++                provider = analysis.provider
++                model = analysis.model or "-"
+             lines.append(
+                 f"  {run.language}  spoken {run.spoken_start}:{run.spoken_end}"
+                 f"  source: {run.source}"
+             )
++            lines.append(f"    analysis: provider={provider}, model={model}")
+     lines.append("")
+
+
+diff --git a/utterplan/hashing.py b/utterplan/hashing.py
+index b37fd80..de08fae 100644
+--- a/utterplan/hashing.py
++++ b/utterplan/hashing.py
+@@ -4,6 +4,7 @@ import hashlib
+ import json
+ from typing import Any
+
++UNIT_HASH_SCHEMA = "utterplan-unit-v2"
+
+ def canonical_json(value: Any) -> str:
+     return json.dumps(
+@@ -27,8 +28,21 @@ def unit_hash_payload(unit: Any) -> dict[str, Any]:
+             markers.append(value)
+         else:
+             markers.append(marker)
++
++    tokens = [
++        {
++            "text": token.text,
++            "language": token.language,
++            "lemma": token.lemma,
++            "pos": token.pos,
++            "tag": token.tag,
++            "morph": token.morph,
++        }
++        for segment in unit.segments
++        for token in (unit.tokens[index] for index in segment.token_indices)
++    ]
+     return {
+-        "hash_schema": "utterplan-unit-v1",
++        "hash_schema": UNIT_HASH_SCHEMA,
+         "segments": [
+             {
+                 "text": segment.text,
+@@ -40,4 +54,5 @@ def unit_hash_payload(unit: Any) -> dict[str, Any]:
+             for segment in unit.segments
+         ],
+         "markers": markers,
++        "tokens": tokens,
+     }
+diff --git a/utterplan/linguistics.py b/utterplan/linguistics.py
+index edd3ef5..9df31f4 100644
+--- a/utterplan/linguistics.py
++++ b/utterplan/linguistics.py
+@@ -2,7 +2,7 @@ from __future__ import annotations
+
+ import re
+ from dataclasses import dataclass
+-from typing import Any
++from typing import Any, Literal
+
+ from .config import LinguisticsConfig
+ from .language import LanguageRun
+@@ -19,7 +19,10 @@ class RunAnalysis:
+     end: int
+     tokens: tuple[TokenAnnotation, ...]
+     provider_doc: object | None = None
++    provider: Literal["spacy", "fallback"] = "fallback"
+     model_name: str | None = None
++    provider_version: str | None = None
++    model_version: str | None = None
+
+
+ @dataclass(frozen=True, slots=True)
+@@ -27,7 +30,10 @@ class LinguisticAnalysis:
+     language: str
+     text: str
+     tokens: tuple[TokenAnnotation, ...]
++    provider: Literal["spacy", "fallback"] = "fallback"
+     model_name: str | None = None
++    provider_version: str | None = None
++    model_version: str | None = None
+     provider_doc: object | None = None
+
+
+@@ -87,44 +93,68 @@ class LinguisticResourcePool:
+             pipeline = self.pipeline(model, require=config.require_spacy)
+             if pipeline is not None:
+                 doc = pipeline(text)
++                provider_version = _spacy_version()
++                model_version = _model_version(pipeline)
+                 return LinguisticAnalysis(
+-                    run.language,
+-                    text,
+-                    tuple(
++                    language=run.language,
++                    text=text,
++                    tokens=tuple(
+                         TokenAnnotation(
+-                            int(token.idx),
+-                            int(token.idx + len(token.text)),
+-                            str(token.text),
+-                            getattr(token, "pos_", None) or None,
+-                            getattr(token, "tag_", None) or None,
+-                            getattr(token, "lemma_", None) or None,
+-                            run.language,
+-                            f"token-{i}",
++                            spoken_start=int(token.idx),
++                            spoken_end=int(token.idx + len(token.text)),
++                            text=str(token.text),
++                            pos=getattr(token, "pos_", None) or None,
++                            tag=getattr(token, "tag_", None) or None,
++                            lemma=getattr(token, "lemma_", None) or None,
++                            language=run.language,
++                            id=f"token-{i}",
++                            morph=str(getattr(token, "morph", "") or "") or None,
+                         )
+                         for i, token in enumerate(doc)
+                         if token.text
+                     ),
+-                    model,
+-                    doc,
++                    provider="spacy",
++                    model_name=model,
++                    provider_version=provider_version,
++                    model_version=model_version,
++                    provider_doc=doc,
+                 )
+             if config.require_spacy:
+                 raise RuntimeError("spaCy is required but no local model is available")
+         return LinguisticAnalysis(
+-            run.language, text, _fallback_tokens(text, run.language), None, None
++            language=run.language,
++            text=text,
++            tokens=_fallback_tokens(text, run.language),
++            provider="fallback",
+         )
+
+
++def _spacy_version() -> str | None:
++    try:
++        import spacy
++    except ImportError:
++        return None
++    value = getattr(spacy, "__version__", None)
++    return str(value) if value else None
++
++
++def _model_version(pipeline: Any) -> str | None:
++    metadata = getattr(pipeline, "meta", None)
++    if isinstance(metadata, dict):
++        value = metadata.get("version")
++        return str(value) if value else None
++    return None
++
++
+ def _fallback_tokens(text: str, language: str) -> tuple[TokenAnnotation, ...]:
+     return tuple(
+         TokenAnnotation(
+-            match.start(),
+-            match.end(),
+-            match.group(0),
+-            None,
+-            None,
+-            match.group(0).lower(),
+-            language,
+-            f"token-{i}",
++            spoken_start=match.start(),
++            spoken_end=match.end(),
++            text=match.group(0),
++            lemma=match.group(0).lower(),
++            language=language,
++            id=f"token-{i}",
+         )
+         for i, match in enumerate(re.finditer(r"\S+", text))
+     )
+@@ -140,27 +170,32 @@ def analyze_run_analyses(
+     for run in runs:
+         local = text[run.spoken_start : run.spoken_end]
+         analysis = pool.analyze(local, run, config)
++        offset = run.spoken_start
+         tokens = tuple(
+             TokenAnnotation(
+-                token.spoken_start + run.spoken_start,
+-                token.spoken_end + run.spoken_start,
+-                token.text,
+-                token.pos,
+-                token.tag,
+-                token.lemma,
+-                token.language,
+-                f"token-{sum(len(item.tokens) for item in analyses) + i}",
++                spoken_start=token.spoken_start + offset,
++                spoken_end=token.spoken_end + offset,
++                text=token.text,
++                pos=token.pos,
++                tag=token.tag,
++                lemma=token.lemma,
++                language=token.language,
++                id=f"token-{sum(len(item.tokens) for item in analyses) + i}",
++                morph=token.morph,
+             )
+             for i, token in enumerate(analysis.tokens)
+         )
+         analyses.append(
+             RunAnalysis(
+-                run.language,
+-                run.spoken_start,
+-                run.spoken_end,
+-                tokens,
+-                analysis.provider_doc,
+-                analysis.model_name,
++                language=run.language,
++                start=run.spoken_start,
++                end=run.spoken_end,
++                tokens=tokens,
++                provider_doc=analysis.provider_doc,
++                provider=analysis.provider,
++                model_name=analysis.model_name,
++                provider_version=analysis.provider_version,
++                model_version=analysis.model_version,
+             )
+         )
+     return tuple(analyses)
+diff --git a/utterplan/migrations/__init__.py b/utterplan/migrations/__init__.py
+index 0384685..eb2e12e 100644
+--- a/utterplan/migrations/__init__.py
++++ b/utterplan/migrations/__init__.py
+@@ -1,5 +1,6 @@
+ from __future__ import annotations
+
+-from .registry import migration_registry
++from .registry import migration_registry, register_migration
++from .v1_to_v2 import migrate_v1_to_v2
+
+-__all__ = ["migration_registry"]
++__all__ = ["migration_registry", "register_migration", "migrate_v1_to_v2"]
+diff --git a/utterplan/migrations/registry.py b/utterplan/migrations/registry.py
+index 9b082fb..2d6868f 100644
+--- a/utterplan/migrations/registry.py
++++ b/utterplan/migrations/registry.py
+@@ -8,9 +8,13 @@ MigrationFn = Callable[[Mapping[str, Any]], Mapping[str, Any]]
+ _MIGRATIONS: dict[int, MigrationFn] = {}
+
+
++def register_migration(source_version: int, migration: MigrationFn) -> None:
++    _MIGRATIONS[source_version] = migration
++
++
+ def migration_registry() -> dict[int, MigrationFn]:
+     """Return a copy of the registered single-step migrations."""
+     return dict(_MIGRATIONS)
+
+
+-__all__ = ["MigrationFn", "migration_registry"]
++__all__ = ["MigrationFn", "migration_registry", "register_migration"]
+diff --git a/utterplan/migrations/v1_to_v2.py b/utterplan/migrations/v1_to_v2.py
+new file mode 100644
+index 0000000..7b6cbea
+--- /dev/null
++++ b/utterplan/migrations/v1_to_v2.py
+@@ -0,0 +1,199 @@
++from __future__ import annotations
++
++from collections.abc import Mapping
++from copy import deepcopy
++from typing import Any
++
++from ..exceptions import PlanMigrationError
++from ..hashing import UNIT_HASH_SCHEMA, semantic_hash
++from .registry import register_migration
++
++
++def _error(message: str, code: str = "migration.v1-invalid") -> PlanMigrationError:
++    return PlanMigrationError(message, code=code)
++
++
++def _legacy_tokens_by_language(
++    data: Mapping[str, Any],
++) -> list[dict[str, Any]]:
++    languages = data.get("languages")
++    tokens = data.get("tokens")
++    if not isinstance(languages, list) or not isinstance(tokens, list):
++        raise _error("v1 languages and tokens must be arrays")
++    text = data.get("texts", {}).get("spoken") if isinstance(data.get("texts"), Mapping) else None
++    if not isinstance(text, str):
++        raise _error("v1 spoken text is required")
++
++    assignments: list[int | None] = [None] * len(tokens)
++    ranges: list[tuple[int, int]] = []
++    for language_index, language in enumerate(languages):
++        if not isinstance(language, Mapping):
++            raise _error("v1 language run must be an object")
++        start = language.get("spoken_start")
++        end = language.get("spoken_end")
++        if type(start) is not int or type(end) is not int or not (0 <= start <= end <= len(text)):
++            raise _error("v1 language run range is invalid")
++        language_id = language.get("id")
++        if not isinstance(language_id, str):
++            raise _error("v1 language run id is invalid")
++        if ranges and start < ranges[-1][1]:
++            raise _error("v1 language runs overlap or are not ordered")
++        ranges.append((start, end))
++        contained: list[int] = []
++        for token_index, token in enumerate(tokens):
++            if not isinstance(token, Mapping):
++                raise _error("v1 token must be an object")
++            token_start = token.get("spoken_start")
++            token_end = token.get("spoken_end")
++            token_text = token.get("text")
++            if (
++                type(token_start) is not int
++                or type(token_end) is not int
++                or not isinstance(token_text, str)
++                or not (0 <= token_start <= token_end <= len(text))
++                or text[token_start:token_end] != token_text
++            ):
++                raise _error("v1 token range or text is invalid")
++            overlaps = token_start < end and token_end > start
++            contained_by_run = start <= token_start and token_end <= end
++            if overlaps and not contained_by_run:
++                raise _error("v1 token overlaps a language boundary ambiguously")
++            if contained_by_run:
++                if assignments[token_index] is not None:
++                    raise _error("v1 token belongs to multiple language runs")
++                assignments[token_index] = language_index
++                contained.append(token_index)
++        if contained and contained != list(range(contained[0], contained[-1] + 1)):
++            raise _error("v1 language token range is not contiguous")
++
++    if any(assignment is None for assignment in assignments):
++        raise _error("v1 token is not covered by a language run")
++
++    result: list[dict[str, Any]] = []
++    for language_index, (_start, _end) in enumerate(ranges):
++        indices = [index for index, assignment in enumerate(assignments) if assignment == language_index]
++        token_start = indices[0] if indices else next(
++            (index for index, assignment in enumerate(assignments) if assignment is not None and assignment > language_index),
++            len(tokens),
++        )
++        token_end = indices[-1] + 1 if indices else token_start
++        language = languages[language_index]
++        result.append(
++            {
++                "language_run_id": language["id"],
++                "provider": "unknown",
++                "model": None,
++                "provider_version": None,
++                "model_version": None,
++                "token_start": token_start,
++                "token_end": token_end,
++            }
++        )
++    return result
++
++
++def _token_semantics(token: Mapping[str, Any]) -> dict[str, Any]:
++    return {
++        "text": token.get("text"),
++        "language": token.get("language"),
++        "lemma": token.get("lemma"),
++        "pos": token.get("pos"),
++        "tag": token.get("tag"),
++        "morph": token.get("morph"),
++    }
++
++
++def _unit_hash_payload(
++    unit: Mapping[str, Any],
++    segments: Mapping[str, Mapping[str, Any]],
++    tokens: list[Mapping[str, Any]],
++    markers: Mapping[str, Mapping[str, Any]],
++) -> dict[str, Any]:
++    segment_values = [segments[segment_id] for segment_id in unit.get("segment_ids", ())]
++    marker_values: list[dict[str, Any]] = []
++    for marker_id in unit.get("marker_ids", ()):
++        marker = dict(markers[marker_id])
++        marker.pop("id", None)
++        marker_values.append(marker)
++    token_values = [
++        _token_semantics(tokens[token_index])
++        for segment in segment_values
++        for token_index in segment.get("token_indices", ())
++    ]
++    return {
++        "hash_schema": UNIT_HASH_SCHEMA,
++        "segments": [
++            {
++                "text": segment.get("text"),
++                "language": segment.get("language"),
++                "directives": segment.get("directives", {}),
++                "pause_before": segment.get("pause_before", {}),
++                "pause_after": segment.get("pause_after", {}),
++            }
++            for segment in segment_values
++        ],
++        "markers": marker_values,
++        "tokens": token_values,
++    }
++
++
++def migrate_v1_to_v2(data: Mapping[str, Any]) -> Mapping[str, Any]:
++    if data.get("schema_version") != 1:
++        raise _error("v1_to_v2 requires schema version 1", "migration.source-version-invalid")
++    result = deepcopy(dict(data))
++    linguistic_runs = _legacy_tokens_by_language(result)
++    tokens = result.get("tokens")
++    if not isinstance(tokens, list):
++        raise _error("v1 tokens must be an array")
++    result["tokens"] = [dict(token, morph=None) for token in tokens]
++    result["linguistic_runs"] = linguistic_runs
++
++    segments = result.get("segments")
++    units = result.get("units")
++    markers = result.get("markers")
++    if not isinstance(segments, list) or not isinstance(units, list) or not isinstance(markers, list):
++        raise _error("v1 segments, units, and markers must be arrays")
++    segment_map: dict[str, Mapping[str, Any]] = {}
++    for segment in segments:
++        if not isinstance(segment, Mapping) or not isinstance(segment.get("id"), str):
++            raise _error("v1 segment must have a string id")
++        if segment["id"] in segment_map:
++            raise _error("v1 segment ids must be unique")
++        segment_map[segment["id"]] = segment
++    marker_map: dict[str, Mapping[str, Any]] = {}
++    for marker in markers:
++        if not isinstance(marker, Mapping) or not isinstance(marker.get("id"), str):
++            raise _error("v1 marker must have a string id")
++        if marker["id"] in marker_map:
++            raise _error("v1 marker ids must be unique")
++        marker_map[marker["id"]] = marker
++    token_values = [token for token in result["tokens"] if isinstance(token, Mapping)]
++    if len(token_values) != len(result["tokens"]):
++        raise _error("v1 token must be an object")
++    for unit_index, unit in enumerate(units):
++        if not isinstance(unit, Mapping):
++            raise _error("v1 unit must be an object")
++        try:
++            payload = _unit_hash_payload(unit, segment_map, token_values, marker_map)
++        except (KeyError, IndexError, TypeError) as exc:
++            raise _error(f"v1 unit references invalid content: {exc}") from exc
++        migrated_unit = dict(unit)
++        migrated_unit["content_hash_schema"] = UNIT_HASH_SCHEMA
++        migrated_unit["content_hash"] = semantic_hash(payload)
++        units[unit_index] = migrated_unit
++
++    result["schema_version"] = 2
++    semantic = deepcopy(result)
++    for key in ("plan_id", "producer", "diagnostics", "warnings"):
++        semantic.pop(key, None)
++    config = semantic.get("config")
++    if isinstance(config, Mapping):
++        semantic["config"] = dict(config)
++        semantic["config"].pop("diagnostics", None)
++    result["plan_id"] = semantic_hash(semantic)
++    return result
++
++
++register_migration(1, migrate_v1_to_v2)
++
++__all__ = ["migrate_v1_to_v2"]
+diff --git a/utterplan/model.py b/utterplan/model.py
+index 0e40a61..316f987 100644
+--- a/utterplan/model.py
++++ b/utterplan/model.py
+@@ -4,12 +4,12 @@ import math
+ from collections.abc import Mapping
+ from dataclasses import dataclass, field
+ from pathlib import Path
+-from typing import Any
++from typing import Any, Literal, cast
+
+ from ._version import __version__
+ from .config import semantic_config
+ from .exceptions import PlanFormatError, PlanValidationError, UnsupportedSchemaError
+-from .hashing import semantic_hash, unit_hash_payload
++from .hashing import UNIT_HASH_SCHEMA, semantic_hash, unit_hash_payload
+ from .language import LanguageRun
+ from .migration import migrate_plan_data
+ from .versioning import FORMAT, SCHEMA_VERSION
+@@ -106,6 +106,7 @@ class TokenAnnotation:
+     language: str | None = None
+     id: str | None = None
+
++    morph: str | None = None
+     @property
+     def start(self) -> int:
+         return self.spoken_start
+@@ -125,14 +126,37 @@ class TokenAnnotation:
+             ("tag", self.tag),
+             ("lemma", self.lemma),
+             ("language", self.language),
++            ("morph", self.morph),
+         ):
+             if value is not None:
+                 result[key] = value
+         if self.id is not None:
+             result["id"] = self.id
++        result["morph"] = self.morph
+         return result
+
+
++@dataclass(frozen=True, slots=True)
++class LinguisticRun:
++    language_run_id: str
++    provider: Literal["spacy", "fallback", "unknown"]
++    token_start: int
++    token_end: int
++    model: str | None = None
++    provider_version: str | None = None
++    model_version: str | None = None
++
++    def to_dict(self) -> dict[str, Any]:
++        return {
++            "language_run_id": self.language_run_id,
++            "provider": self.provider,
++            "token_start": self.token_start,
++            "token_end": self.token_end,
++            "model": self.model,
++            "provider_version": self.provider_version,
++            "model_version": self.model_version,
++        }
++
+ @dataclass(frozen=True, slots=True)
+ class BoundaryEvent:
+     id: str
+@@ -348,6 +372,7 @@ class PlanUnit:
+     segment_ids: tuple[str, ...]
+     marker_ids: tuple[str, ...] = ()
+     content_hash: str = ""
++    content_hash_schema: str = UNIT_HASH_SCHEMA
+
+     def to_dict(self) -> dict[str, Any]:
+         return {
+@@ -359,6 +384,7 @@ class PlanUnit:
+             "segment_ids": list(self.segment_ids),
+             "marker_ids": list(self.marker_ids),
+             "content_hash": self.content_hash,
++            "content_hash_schema": self.content_hash_schema,
+         }
+
+
+@@ -386,6 +412,7 @@ class UtterancePlan:
+     preparation: TextPreparationInfo
+     languages: tuple[LanguageRun, ...] = ()
+     annotations: tuple[AnnotationSpan, ...] = ()
++    linguistic_runs: tuple[LinguisticRun, ...] = ()
+     boundaries: tuple[BoundaryEvent, ...] = ()
+     tokens: tuple[TokenAnnotation, ...] = ()
+     segments: tuple[PlanSegment, ...] = ()
+@@ -426,6 +453,7 @@ class UtterancePlan:
+             "texts": self.texts.to_dict(),
+             "preparation": self.preparation.to_dict(),
+             "languages": [_plain(x) for x in self.languages],
++            "linguistic_runs": [_plain(x) for x in self.linguistic_runs],
+             "annotations": [_plain(x) for x in self.annotations],
+             "boundaries": [_plain(x) for x in self.boundaries],
+             "tokens": [_plain(x) for x in self.tokens],
+@@ -476,6 +504,11 @@ class UtterancePlan:
+     def validate(self) -> None:
+         validate_plan(self)
+
++    def tokens_for_segment(self, segment: PlanSegment | str) -> tuple[TokenAnnotation, ...]:
++        if isinstance(segment, str):
++            segment = next(item for item in self.segments if item.id == segment)
++        return tuple(self.tokens[index] for index in segment.token_indices)
++
+
+ def _replace_plan(plan: UtterancePlan, **changes: Any) -> UtterancePlan:
+     values = {field: getattr(plan, field) for field in plan.__dataclass_fields__}
+@@ -498,6 +531,7 @@ def _check_shape(data: Mapping[str, Any]) -> None:
+         "texts",
+         "preparation",
+         "languages",
++        "linguistic_runs",
+         "annotations",
+         "boundaries",
+         "tokens",
+@@ -513,7 +547,7 @@ def _check_shape(data: Mapping[str, Any]) -> None:
+         raise PlanFormatError(f"unknown top-level fields: {sorted(unknown)}", code="field.unknown")
+     if data.get("schema_version") != SCHEMA_VERSION:
+         raise UnsupportedSchemaError(data.get("schema_version"))
+-    for key in ("source", "config", "texts", "preparation", "segments", "units"):
++    for key in ("source", "config", "texts", "preparation", "segments", "units", "linguistic_runs"):
+         if key not in data:
+             raise PlanFormatError(
+                 f"required field {key!r} is missing", code="field.required", path=f"$.{key}"
+@@ -549,6 +583,7 @@ def _check_nested_types(data: Mapping[str, Any]) -> None:
+         "annotations",
+         "boundaries",
+         "tokens",
++        "linguistic_runs",
+         "segments",
+         "units",
+         "markers",
+@@ -562,6 +597,17 @@ def _check_nested_types(data: Mapping[str, Any]) -> None:
+         _expect(value.get("spoken_start"), int, f"$.languages[{index}].spoken_start")
+         _expect(value.get("spoken_end"), int, f"$.languages[{index}].spoken_end")
+         _expect(value.get("language"), str, f"$.languages[{index}].language")
++
++    for index, item in enumerate(data["linguistic_runs"]):
++        value = _expect(item, Mapping, f"$.linguistic_runs[{index}]")
++        for key in ("language_run_id", "provider"):
++            _expect(value.get(key), str, f"$.linguistic_runs[{index}].{key}")
++        for key in ("token_start", "token_end"):
++            _expect(value.get(key), int, f"$.linguistic_runs[{index}].{key}")
++        for key in ("model", "provider_version", "model_version"):
++            if value.get(key) is not None:
++                _expect(value.get(key), str, f"$.linguistic_runs[{index}].{key}")
++
+     for index, item in enumerate(data["annotations"]):
+         value = _expect(item, Mapping, f"$.annotations[{index}]")
+         for key in ("id", "kind"):
+@@ -572,6 +618,15 @@ def _check_nested_types(data: Mapping[str, Any]) -> None:
+             if value.get(key) is not None:
+                 _expect(value.get(key), int, f"$.annotations[{index}].{key}")
+         _expect(value.get("attrs"), Mapping, f"$.annotations[{index}].attrs")
++    for index, item in enumerate(data["tokens"]):
++        value = _expect(item, Mapping, f"$.tokens[{index}]")
++        for key in ("spoken_start", "spoken_end"):
++            _expect(value.get(key), int, f"$.tokens[{index}].{key}")
++        _expect(value.get("text"), str, f"$.tokens[{index}].text")
++        for key in ("pos", "tag", "lemma", "language", "morph"):
++            if value.get(key) is not None:
++                _expect(value.get(key), str, f"$.tokens[{index}].{key}")
++
+     for index, item in enumerate(data["segments"]):
+         value = _expect(item, Mapping, f"$.segments[{index}]")
+         _expect(value.get("text"), str, f"$.segments[{index}].text")
+@@ -582,7 +637,7 @@ def _check_nested_types(data: Mapping[str, Any]) -> None:
+             _expect(value.get(key), list, f"$.segments[{index}].{key}")
+     for index, item in enumerate(data["units"]):
+         value = _expect(item, Mapping, f"$.units[{index}]")
+-        for key in ("id", "kind", "content_hash"):
++        for key in ("id", "kind", "content_hash", "content_hash_schema"):
+             _expect(value.get(key), str, f"$.units[{index}].{key}")
+         _expect(value.get("segment_ids"), list, f"$.units[{index}].segment_ids")
+         _expect(value.get("marker_ids"), list, f"$.units[{index}].marker_ids")
+@@ -671,6 +726,18 @@ def _from_current_dict(data: Mapping[str, Any]) -> UtterancePlan:
+             )
+             for x in data.get("languages", ())
+         ),
++        linguistic_runs=tuple(
++            LinguisticRun(
++                language_run_id=str(x["language_run_id"]),
++                provider=cast(Literal["spacy", "fallback", "unknown"], str(x["provider"])),
++                token_start=int(x["token_start"]),
++                token_end=int(x["token_end"]),
++                model=x.get("model"),
++                provider_version=x.get("provider_version"),
++                model_version=x.get("model_version"),
++            )
++            for x in data.get("linguistic_runs", ())
++        ),
+         annotations=tuple(
+             AnnotationSpan(
+                 id=str(x.get("id", f"annotation-{i:06d}")),
+@@ -705,6 +772,7 @@ def _from_current_dict(data: Mapping[str, Any]) -> UtterancePlan:
+                 x.get("lemma"),
+                 x.get("language"),
+                 x.get("id"),
++                x.get("morph"),
+             )
+             for x in data.get("tokens", ())
+         ),
+@@ -738,6 +806,7 @@ def _from_current_dict(data: Mapping[str, Any]) -> UtterancePlan:
+                 tuple(x.get("segment_ids", ())),
+                 tuple(x.get("marker_ids", ())),
+                 str(x.get("content_hash", "")),
++                str(x.get("content_hash_schema", UNIT_HASH_SCHEMA)),
+             )
+             for x in data.get("units", ())
+         ),
+@@ -789,8 +858,8 @@ def validate_plan(plan: UtterancePlan) -> None:
+                 raise PlanValidationError(f"duplicate id {item_id}", code="id.duplicate")
+             if item_id is not None:
+                 ids.add(item_id)
+-    previous = 0
+     boundary_ids = {event.id for event in plan.boundaries}
++    previous_segment_end = 0
+     for segment in plan.segments:
+         if not (0 <= segment.spoken_start <= segment.spoken_end <= len(text)):
+             raise PlanValidationError(
+@@ -800,9 +869,9 @@ def validate_plan(plan: UtterancePlan) -> None:
+             raise PlanValidationError(
+                 "segment text does not match spoken range", code="segment.range_mismatch"
+             )
+-        if segment.spoken_start < previous:
++        if segment.spoken_start < previous_segment_end:
+             raise PlanValidationError("segments are not sorted", code="segment.order")
+-        previous = segment.spoken_end
++        previous_segment_end = segment.spoken_end
+         for pause in (segment.pause_before, segment.pause_after):
+             if not math.isfinite(pause.seconds) or pause.seconds < 0:
+                 raise PlanValidationError(
+@@ -841,27 +910,89 @@ def validate_plan(plan: UtterancePlan) -> None:
+                 "annotation spoken range must be both null or both present",
+                 code="annotation.spoken_range",
+             )
+-        spoken_start = annotation.spoken_start
+-        spoken_end = annotation.spoken_end
+         if (
+-            spoken_start is not None
+-            and spoken_end is not None
+-            and not (0 <= spoken_start <= spoken_end <= len(text))
++            annotation.spoken_start is not None
++            and annotation.spoken_end is not None
++            and not (0 <= annotation.spoken_start <= annotation.spoken_end <= len(text))
+         ):
+             raise PlanValidationError(
+-                "annotation spoken range is outside spoken text",
+-                code="annotation.spoken_range",
++                "annotation spoken range is outside spoken text", code="annotation.spoken_range"
+             )
++    language_runs = {run.id: run for run in plan.languages}
+     for run in plan.languages:
+         if not (0 <= run.spoken_start <= run.spoken_end <= len(text)):
+             raise PlanValidationError(
+                 "language range is outside spoken text", code="language.out_of_range"
+             )
++    previous_token_key: tuple[int, int] | None = None
+     for token in plan.tokens:
+         if not (0 <= token.spoken_start <= token.spoken_end <= len(text)):
+             raise PlanValidationError(
+                 "token range is outside spoken text", code="token.out_of_range"
+             )
++        if token.text != text[token.spoken_start : token.spoken_end]:
++            raise PlanValidationError(
++                "token text does not match spoken range", code="token.range_mismatch"
++            )
++        token_key = (token.spoken_start, token.spoken_end)
++        if previous_token_key is not None and token_key < previous_token_key:
++            raise PlanValidationError("tokens are not sorted", code="token.order")
++        previous_token_key = token_key
++        for field_name in ("pos", "tag", "lemma", "language", "morph"):
++            value = getattr(token, field_name)
++            if value is not None and not isinstance(value, str):
++                raise PlanValidationError(
++                    f"token {field_name} must be a string", code="token.field_type"
++                )
++    seen_run_ids: set[str] = set()
++    previous_run_end = 0
++    for linguistic_run in plan.linguistic_runs:
++        if linguistic_run.language_run_id in seen_run_ids:
++            raise PlanValidationError(
++                f"duplicate linguistic run {linguistic_run.language_run_id}",
++                code="linguistic_run.duplicate",
++            )
++        seen_run_ids.add(linguistic_run.language_run_id)
++        language_run = language_runs.get(linguistic_run.language_run_id)
++        if language_run is None:
++            raise PlanValidationError(
++                "linguistic run references unknown language run",
++                code="linguistic_run.unknown_language",
++            )
++        if linguistic_run.provider not in {"spacy", "fallback", "unknown"}:
++            raise PlanValidationError(
++                "linguistic run provider is invalid", code="linguistic_run.provider"
++            )
++        if not (0 <= linguistic_run.token_start <= linguistic_run.token_end <= len(plan.tokens)):
++            raise PlanValidationError(
++                "linguistic run token range is invalid", code="linguistic_run.token_range"
++            )
++        if linguistic_run.token_start < previous_run_end:
++            raise PlanValidationError(
++                "linguistic runs overlap or are not ordered", code="linguistic_run.order"
++            )
++        previous_run_end = linguistic_run.token_end
++        if linguistic_run.provider == "fallback" and linguistic_run.model is not None:
++            raise PlanValidationError(
++                "fallback linguistic run cannot claim a model",
++                code="linguistic_run.model",
++            )
++        for field_name in ("model", "provider_version", "model_version"):
++            value = getattr(linguistic_run, field_name)
++            if value is not None and not isinstance(value, str):
++                raise PlanValidationError(
++                    f"linguistic run {field_name} must be a string",
++                    code="linguistic_run.field_type",
++                )
++        for token in plan.tokens[linguistic_run.token_start : linguistic_run.token_end]:
++            if not (
++                language_run.spoken_start <= token.spoken_start
++                and token.spoken_end <= language_run.spoken_end
++            ):
++                raise PlanValidationError(
++                    "linguistic run tokens are outside language range",
++                    code="linguistic_run.token_membership",
++                )
+     segment_ids = {segment.id for segment in plan.segments}
+     token_count = len(plan.tokens)
+     for segment in plan.segments:
+@@ -869,6 +1000,20 @@ def validate_plan(plan: UtterancePlan) -> None:
+             raise PlanValidationError(
+                 "segment references unknown token", code="segment.unknown_token"
+             )
++        if len(segment.token_indices) != len(set(segment.token_indices)):
++            raise PlanValidationError(
++                "segment references a token more than once", code="segment.token_membership"
++            )
++        if any(
++            not (
++                plan.tokens[index].spoken_start < segment.spoken_end
++                and plan.tokens[index].spoken_end > segment.spoken_start
++            )
++            for index in segment.token_indices
++        ):
++            raise PlanValidationError(
++                "segment token is outside segment range", code="segment.token_membership"
++            )
+         if any(annotation_id not in annotation_ids for annotation_id in segment.annotation_ids):
+             raise PlanValidationError(
+                 "segment references unknown annotation", code="segment.unknown_annotation"
+@@ -886,6 +1031,7 @@ def validate_plan(plan: UtterancePlan) -> None:
+         if unit.spoken_start < previous_unit_end:
+             raise PlanValidationError("units must not overlap", code="unit.overlap")
+         previous_unit_end = unit.spoken_end
++    segment_by_id = {segment.id: segment for segment in plan.segments}
+     for unit in plan.units:
+         if not all(segment_id in segment_ids for segment_id in unit.segment_ids):
+             raise PlanValidationError(
+@@ -895,10 +1041,16 @@ def validate_plan(plan: UtterancePlan) -> None:
+             raise PlanValidationError("unit references unknown marker", code="unit.unknown_marker")
+         if not (0 <= unit.spoken_start <= unit.spoken_end <= len(text)):
+             raise PlanValidationError("unit range is outside spoken text", code="unit.out_of_range")
+-        unit_segments = [segment for segment in plan.segments if segment.id in unit.segment_ids]
++        if unit.content_hash_schema != UNIT_HASH_SCHEMA:
++            raise PlanValidationError(
++                "unsupported unit content hash schema", code="unit.hash_schema"
++            )
++        unit_segments = [segment_by_id[segment_id] for segment_id in unit.segment_ids]
+         marker_values = tuple(marker for marker in plan.markers if marker.id in unit.marker_ids)
+         if unit.content_hash != semantic_hash(
+-            unit_hash_payload(_HashUnit(unit_segments, unit.marker_ids, marker_values))
++            unit_hash_payload(
++                _HashUnit(unit_segments, unit.marker_ids, marker_values, plan.tokens)
++            )
+         ):
+             raise PlanValidationError(
+                 "unit content hash does not match semantics", code="unit.hash_mismatch"
+@@ -936,7 +1088,9 @@ class _HashUnit:
+         segments: list[PlanSegment],
+         marker_ids: tuple[str, ...],
+         marker_values: tuple[Marker, ...],
++        tokens: tuple[TokenAnnotation, ...],
+     ) -> None:
+         self.segments = segments
+         self.marker_ids = marker_ids
+         self.marker_values = marker_values
++        self.tokens = tokens
+diff --git a/utterplan/planner.py b/utterplan/planner.py
+index d18390b..21c264f 100644
+--- a/utterplan/planner.py
++++ b/utterplan/planner.py
+@@ -13,6 +13,7 @@ from .model import (
+     AnnotationSpan,
+     BoundaryEvent,
+     Diagnostic,
++    LinguisticRun,
+     Marker,
+     PlanSegment,
+     PlanSource,
+@@ -83,6 +84,7 @@ class UtterancePlanner:
+         )
+         pass_b = analyze_run_analyses(spoken, runs, config.linguistics, self._resources)
+         tokens = tuple(token for analysis in pass_b for token in analysis.tokens)
++        linguistic_runs = _linguistic_runs(runs, pass_b)
+         boundaries = list(prepared.boundaries)
+         boundaries.extend(_linguistic_boundaries(spoken, runs, config, start_id=len(boundaries)))
+         segments = _segment(
+@@ -94,7 +96,7 @@ class UtterancePlanner:
+         segments = resolve_pauses(segments, boundaries, pause_config)
+         markers = tuple(_map_marker(marker, prepared.source_map) for marker in parsed.markers)
+         segment_tuple = tuple(segments)
+-        units = make_units(segment_tuple, markers, selected_unit)
++        units = make_units(segment_tuple, markers, tokens, selected_unit)
+         metadata = dict(parsed.metadata)
+         metadata["planning"] = {
+             "linguistic_passes": 2,
+@@ -117,6 +119,7 @@ class UtterancePlanner:
+             preparation=prepared.info,
+             languages=runs,
+             annotations=prepared.annotations,
++            linguistic_runs=linguistic_runs,
+             boundaries=tuple(boundaries),
+             tokens=tokens,
+             segments=segment_tuple,
+@@ -183,6 +186,28 @@ def _config_dict(config: PlannerConfig) -> dict[str, Any]:
+         result["ssmd"]["pause_defaults"] = dict(config.ssmd.pause_defaults or {})
+     return result
+
++def _linguistic_runs(
++    runs: tuple[Any, ...], analyses: tuple[Any, ...]
++) -> tuple[LinguisticRun, ...]:
++    token_start = 0
++    result: list[LinguisticRun] = []
++    for run, analysis in zip(runs, analyses, strict=True):
++        token_end = token_start + len(analysis.tokens)
++        result.append(
++            LinguisticRun(
++                language_run_id=run.id,
++                provider=analysis.provider,
++                token_start=token_start,
++                token_end=token_end,
++                model=analysis.model_name,
++                provider_version=analysis.provider_version,
++                model_version=analysis.model_version,
++            )
++        )
++        token_start = token_end
++    return tuple(result)
++
++
+
+ def _segment(
+     text: str,
+diff --git a/utterplan/schema_registry.py b/utterplan/schema_registry.py
+index e69a81c..a950267 100644
+--- a/utterplan/schema_registry.py
++++ b/utterplan/schema_registry.py
+@@ -6,7 +6,10 @@ from typing import Any
+
+ from .versioning import CURRENT_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSIONS
+
+-_SCHEMA_RESOURCES: dict[int, str] = {1: "schemas/v1.schema.json"}
++_SCHEMA_RESOURCES: dict[int, str] = {
++    1: "schemas/v1.schema.json",
++    2: "schemas/v2.schema.json",
++}
+
+
+ def schema_versions() -> tuple[int, ...]:
+diff --git a/utterplan/utterplan.schema.json b/utterplan/schemas/v2.schema.json
+similarity index 88%
+copy from utterplan/utterplan.schema.json
+copy to utterplan/schemas/v2.schema.json
+index 7637858..77356eb 100644
+--- a/utterplan/utterplan.schema.json
++++ b/utterplan/schemas/v2.schema.json
+@@ -1,6 +1,6 @@
+ {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+-  "$id": "https://github.com/buchwandler/utterplan/schema/v1",
++  "$id": "https://github.com/buchwandler/utterplan/schema/v2",
+   "title": "UtterPlan schema",
+   "type": "object",
+   "required": [
+@@ -13,6 +13,7 @@
+     "texts",
+     "preparation",
+     "languages",
++    "linguistic_runs",
+     "annotations",
+     "boundaries",
+     "tokens",
+@@ -24,7 +25,7 @@
+   ],
+   "properties": {
+     "format": { "const": "utterplan" },
+-    "schema_version": { "const": 1 },
++    "schema_version": { "const": 2 },
+     "producer": {
+       "type": "object",
+       "required": ["name", "version"],
+@@ -48,6 +49,7 @@
+     },
+     "preparation": { "$ref": "#/$defs/preparation" },
+     "languages": { "type": "array", "items": { "$ref": "#/$defs/language" } },
++    "linguistic_runs": { "type": "array", "items": { "$ref": "#/$defs/linguistic_run" } },
+     "annotations": {
+       "type": "array",
+       "items": { "$ref": "#/$defs/annotation" }
+@@ -118,6 +120,20 @@
+       },
+       "additionalProperties": false
+     },
++    "linguistic_run": {
++      "type": "object",
++      "required": ["language_run_id", "provider", "token_start", "token_end", "model", "provider_version", "model_version"],
++      "properties": {
++        "language_run_id": { "type": "string" },
++        "provider": { "enum": ["spacy", "fallback", "unknown"] },
++        "token_start": { "type": "integer", "minimum": 0 },
++        "token_end": { "type": "integer", "minimum": 0 },
++        "model": { "type": ["string", "null"] },
++        "provider_version": { "type": ["string", "null"] },
++        "model_version": { "type": ["string", "null"] }
++      },
++      "additionalProperties": false
++    },
+     "annotation": {
+       "type": "object",
+       "required": [
+@@ -165,7 +181,8 @@
+         "pos": { "type": ["string", "null"] },
+         "tag": { "type": ["string", "null"] },
+         "lemma": { "type": ["string", "null"] },
+-        "language": { "type": ["string", "null"] }
++        "language": { "type": ["string", "null"] },
++        "morph": { "type": ["string", "null"] }
+       },
+       "additionalProperties": false
+     },
+@@ -238,7 +255,8 @@
+         "spoken_end",
+         "segment_ids",
+         "marker_ids",
+-        "content_hash"
++        "content_hash",
++        "content_hash_schema"
+       ],
+       "properties": {
+         "id": { "type": "string" },
+@@ -248,7 +266,8 @@
+         "spoken_end": { "$ref": "#/$defs/range" },
+         "segment_ids": { "type": "array", "items": { "type": "string" } },
+         "marker_ids": { "type": "array", "items": { "type": "string" } },
+-        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
++        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
++        "content_hash_schema": { "const": "utterplan-unit-v2" }
+       },
+       "additionalProperties": false
+     },
+diff --git a/utterplan/units.py b/utterplan/units.py
+index 095ded9..94c0837 100644
+--- a/utterplan/units.py
++++ b/utterplan/units.py
+@@ -2,12 +2,15 @@ from __future__ import annotations
+
+ from dataclasses import replace
+
+-from .hashing import semantic_hash, unit_hash_payload
++from .hashing import UNIT_HASH_SCHEMA, semantic_hash, unit_hash_payload
+ from .model import Marker, PlanSegment, PlanUnit
+
+
+ def make_units(
+-    segments: tuple[PlanSegment, ...], markers: tuple[Marker, ...], kind: str
++    segments: tuple[PlanSegment, ...],
++    markers: tuple[Marker, ...],
++    tokens: tuple[object, ...],
++    kind: str,
+ ) -> tuple[PlanUnit, ...]:
+     if not segments:
+         return ()
+@@ -51,8 +54,9 @@ def make_units(
+             replace(
+                 provisional,
+                 content_hash=semantic_hash(
+-                    unit_hash_payload(_UnitView(group, marker_ids, marker_values))
++                    unit_hash_payload(_UnitView(group, marker_ids, marker_values, tokens))
+                 ),
++                content_hash_schema=UNIT_HASH_SCHEMA,
+             )
+         )
+     return tuple(units)
+@@ -75,7 +79,9 @@ class _UnitView:
+         segments: list[PlanSegment],
+         marker_ids: tuple[str, ...],
+         marker_values: tuple[Marker, ...],
++        tokens: tuple[object, ...],
+     ) -> None:
+         self.segments = tuple(segments)
+         self.marker_ids = marker_ids
+         self.marker_values = marker_values
++        self.tokens = tokens
+diff --git a/utterplan/utterplan.schema.json b/utterplan/utterplan.schema.json
+index 7637858..77356eb 100644
+--- a/utterplan/utterplan.schema.json
++++ b/utterplan/utterplan.schema.json
+@@ -1,6 +1,6 @@
+ {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+-  "$id": "https://github.com/buchwandler/utterplan/schema/v1",
++  "$id": "https://github.com/buchwandler/utterplan/schema/v2",
+   "title": "UtterPlan schema",
+   "type": "object",
+   "required": [
+@@ -13,6 +13,7 @@
+     "texts",
+     "preparation",
+     "languages",
++    "linguistic_runs",
+     "annotations",
+     "boundaries",
+     "tokens",
+@@ -24,7 +25,7 @@
+   ],
+   "properties": {
+     "format": { "const": "utterplan" },
+-    "schema_version": { "const": 1 },
++    "schema_version": { "const": 2 },
+     "producer": {
+       "type": "object",
+       "required": ["name", "version"],
+@@ -48,6 +49,7 @@
+     },
+     "preparation": { "$ref": "#/$defs/preparation" },
+     "languages": { "type": "array", "items": { "$ref": "#/$defs/language" } },
++    "linguistic_runs": { "type": "array", "items": { "$ref": "#/$defs/linguistic_run" } },
+     "annotations": {
+       "type": "array",
+       "items": { "$ref": "#/$defs/annotation" }
+@@ -118,6 +120,20 @@
+       },
+       "additionalProperties": false
+     },
++    "linguistic_run": {
++      "type": "object",
++      "required": ["language_run_id", "provider", "token_start", "token_end", "model", "provider_version", "model_version"],
++      "properties": {
++        "language_run_id": { "type": "string" },
++        "provider": { "enum": ["spacy", "fallback", "unknown"] },
++        "token_start": { "type": "integer", "minimum": 0 },
++        "token_end": { "type": "integer", "minimum": 0 },
++        "model": { "type": ["string", "null"] },
++        "provider_version": { "type": ["string", "null"] },
++        "model_version": { "type": ["string", "null"] }
++      },
++      "additionalProperties": false
++    },
+     "annotation": {
+       "type": "object",
+       "required": [
+@@ -165,7 +181,8 @@
+         "pos": { "type": ["string", "null"] },
+         "tag": { "type": ["string", "null"] },
+         "lemma": { "type": ["string", "null"] },
+-        "language": { "type": ["string", "null"] }
++        "language": { "type": ["string", "null"] },
++        "morph": { "type": ["string", "null"] }
+       },
+       "additionalProperties": false
+     },
+@@ -238,7 +255,8 @@
+         "spoken_end",
+         "segment_ids",
+         "marker_ids",
+-        "content_hash"
++        "content_hash",
++        "content_hash_schema"
+       ],
+       "properties": {
+         "id": { "type": "string" },
+@@ -248,7 +266,8 @@
+         "spoken_end": { "$ref": "#/$defs/range" },
+         "segment_ids": { "type": "array", "items": { "type": "string" } },
+         "marker_ids": { "type": "array", "items": { "type": "string" } },
+-        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
++        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
++        "content_hash_schema": { "const": "utterplan-unit-v2" }
+       },
+       "additionalProperties": false
+     },
+diff --git a/utterplan/versioning.py b/utterplan/versioning.py
+index a974b51..b212c8e 100644
+--- a/utterplan/versioning.py
++++ b/utterplan/versioning.py
+@@ -1,9 +1,8 @@
+ from __future__ import annotations
+
+ FORMAT = "utterplan"
+-CURRENT_SCHEMA_VERSION = 1
++CURRENT_SCHEMA_VERSION = 2
+ OLDEST_SUPPORTED_SCHEMA_VERSION = 1
+-SUPPORTED_SCHEMA_VERSIONS: tuple[int, ...] = (1,)
+-
++SUPPORTED_SCHEMA_VERSIONS: tuple[int, ...] = (1, 2)
+ # Compatibility alias retained for existing callers.
+ SCHEMA_VERSION = CURRENT_SCHEMA_VERSION

@@ -289,11 +289,16 @@ def _split_run(
     try:
         import phrasplit
 
-        kwargs: dict[str, Any] = {"mode": "sentence", "use_spacy": False, "language": language}
-        if analysis is not None and analysis.provider_doc is not None:
-            kwargs["nlp"] = analysis.provider_doc
-        items = phrasplit.split_with_offsets(text, **kwargs)
-    except (ImportError, OSError, TypeError, ValueError):
+        # Linguistic enrichment is consumed for token annotations only. Sentence
+        # topology stays on the deterministic phrasplit path.
+        items = phrasplit.split_with_offsets(
+            text, mode="sentence", use_spacy=False, language=language
+        )
+    except ImportError:
+        return [_FallbackSplit(0, len(text), 0, 0)] if text else []
+    except TypeError as exc:
+        raise PlanningError("sentence segmentation integration failed") from exc
+    except (OSError, ValueError):
         return [_FallbackSplit(0, len(text), 0, 0)] if text else []
     valid: list[Any] = []
     previous = 0

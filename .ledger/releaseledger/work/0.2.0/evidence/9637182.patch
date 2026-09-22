@@ -1,0 +1,991 @@
+ docs/cli.md                                    |  1 +
+ docs/consumer-guide.md                         |  2 +-
+ docs/getting-started.md                        |  1 -
+ docs/pykokoro-integration.md                   |  2 ++
+ docs/python-api.md                             |  1 -
+ spec/schemas/v2.schema.json                    | 20 ++++++++++--
+ spec/utterplan.schema.json                     | 20 ++++++++++--
+ tests/golden/basic_en.utterplan.json           | 12 ++------
+ tests/golden/directives.utterplan.json         | 17 +++--------
+ tests/golden/markers.utterplan.json            | 36 ++++++----------------
+ tests/golden/multilingual.utterplan.json       | 37 +++++------------------
+ tests/golden/parenthetical.utterplan.json      | 40 +++++-------------------
+ tests/golden/spokenform_offsets.utterplan.json | 19 ++----------
+ tests/golden/ssmd_breaks.utterplan.json        | 42 ++++++--------------------
+ tests/test_cli.py                              |  1 +
+ tests/test_format.py                           |  2 ++
+ tests/test_linguistics.py                      | 17 +++++++----
+ tests/test_schema_history.py                   |  4 ++-
+ utterplan/explain.py                           |  1 +
+ utterplan/hashing.py                           |  1 +
+ utterplan/migrations/v1_to_v2.py               | 24 ++++++++++++---
+ utterplan/model.py                             |  6 ++--
+ utterplan/planner.py                           |  6 ++--
+ utterplan/schemas/v2.schema.json               | 20 ++++++++++--
+ utterplan/utterplan.schema.json                | 20 ++++++++++--
+ 25 files changed, 159 insertions(+), 193 deletions(-)
+
+diff --git a/docs/cli.md b/docs/cli.md
+index 75df731..646793b 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -59,6 +59,7 @@ Explain an existing compiled plan as a human-readable speech narrative:
+ utterplan explain chapter.utterplan.json
+ utterplan explain chapter.utterplan.json --details
+ ```
++
+ The default output shows the prepared wording, render units, ordered segments, languages, resolved pauses, directives, markers, and warnings. Add `--details` for IDs, offsets, provenance, hashes, plan identity, and token analysis beneath each segment. Use `inspect --tokens` for a compact token/provenance view.
+
+ ## Planning controls
+diff --git a/docs/consumer-guide.md b/docs/consumer-guide.md
+index 36f5a74..20a3f99 100644
+--- a/docs/consumer-guide.md
++++ b/docs/consumer-guide.md
+@@ -29,7 +29,7 @@ Use these public fields:
+ - `plan.units` groups segments for paragraph or sentence rendering.
+ - `plan.document_metadata` contains document-level metadata such as logical
+   voice bindings.
+-Consumers may rely on these plan-level fields: `texts.spoken`, `preparation`, `languages`, `linguistic_runs`, `tokens`, `annotations`, `boundaries`, `segments`, `units`, `markers`, and `document_metadata`. Each segment additionally provides its ID, spoken text range, language, paragraph/sentence/clause ownership, resolved pauses, typed directives, token indices, and annotation IDs.
++  Consumers may rely on these plan-level fields: `texts.spoken`, `preparation`, `languages`, `linguistic_runs`, `tokens`, `annotations`, `boundaries`, `segments`, `units`, `markers`, and `document_metadata`. Each segment additionally provides its ID, spoken text range, language, paragraph/sentence/clause ownership, resolved pauses, typed directives, token indices, and annotation IDs.
+
+ `TokenAnnotation` stores the exact spoken slice plus normalized language, lemma, coarse POS, fine-grained tag, and compact morphology. `LinguisticRun` records actual provider/model provenance.
+
+diff --git a/docs/getting-started.md b/docs/getting-started.md
+index 102ffd4..556c654 100644
+--- a/docs/getting-started.md
++++ b/docs/getting-started.md
+@@ -46,7 +46,6 @@ The default compile policy is `spokenform` for text preparation, `tts` for pause
+ `--spacy auto` is an explicit opt-in. With a compatible local model, final pass-B tokens may contain POS, tag, lemma, and morphology, and the plan records the actual provider, model, and known versions. `sm`, `md`, `lg`, and `trf` require the requested local model. UtterPlan never downloads models automatically.
+ Install the optional library with `python -m pip install 'utterplan[spacy]'` when needed. Language model packages remain explicit environment dependencies and are never downloaded by UtterPlan.
+
+-
+ ```bash
+ utterplan compile "Hello world." --lang en-us | jq '.segments'
+ ```
+diff --git a/docs/pykokoro-integration.md b/docs/pykokoro-integration.md
+index ebc81fa..b900b48 100644
+--- a/docs/pykokoro-integration.md
++++ b/docs/pykokoro-integration.md
+@@ -37,6 +37,7 @@ A future adapter can use only public UtterancePlan fields:
+ It should pass `PlanSegment.text` and `PlanSegment.language` to the next
+
+ For contextual pronunciation, pass the segment token snapshot to G2P:
++
+ ```python
+ segment_tokens = plan.tokens_for_segment(segment)
+ if linguistic_run.provider != "spacy":
+@@ -44,6 +45,7 @@ if linguistic_run.provider != "spacy":
+     ...
+ phonemizer(segment.text, segment.language, segment_tokens)
+ ```
++
+ The renderer must not rerun spaCy or infer missing POS/tag values.
+ frontend stage. No JSON serialization is required for in-process use.
+
+diff --git a/docs/python-api.md b/docs/python-api.md
+index dd96725..626df13 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -6,7 +6,6 @@ an in-process consumer does not need to serialize and reload a plan.
+
+ The Python defaults are deliberately spaCy-free: `PlannerConfig` uses `spokenform` text preparation, and `PauseConfig().mode` is `"tts"`. The CLI additionally defaults to the `spacy off` linguistic-resource policy, which uses deterministic fallback tokenization and analysis without requiring an installed spaCy model.
+
+-
+ For an explicit contextual-G2P configuration, use `LinguisticsConfig(use_spacy=True, spacy_model="en_core_web_sm", require_spacy=True)`. The resulting plan records final pass-B token provenance in `linguistic_runs`; no provider document is retained.
+ spaCy enrichment is opt-in through the CLI's `--spacy auto` policy or an explicit `LinguisticsConfig` with a compatible local model. It may provide richer tokenization, POS tags, lemmas, and tags, but UtterPlan never downloads a model implicitly.
+
+diff --git a/spec/schemas/v2.schema.json b/spec/schemas/v2.schema.json
+index 77356eb..18bb75d 100644
+--- a/spec/schemas/v2.schema.json
++++ b/spec/schemas/v2.schema.json
+@@ -49,7 +49,10 @@
+     },
+     "preparation": { "$ref": "#/$defs/preparation" },
+     "languages": { "type": "array", "items": { "$ref": "#/$defs/language" } },
+-    "linguistic_runs": { "type": "array", "items": { "$ref": "#/$defs/linguistic_run" } },
++    "linguistic_runs": {
++      "type": "array",
++      "items": { "$ref": "#/$defs/linguistic_run" }
++    },
+     "annotations": {
+       "type": "array",
+       "items": { "$ref": "#/$defs/annotation" }
+@@ -122,7 +125,15 @@
+     },
+     "linguistic_run": {
+       "type": "object",
+-      "required": ["language_run_id", "provider", "token_start", "token_end", "model", "provider_version", "model_version"],
++      "required": [
++        "language_run_id",
++        "provider",
++        "token_start",
++        "token_end",
++        "model",
++        "provider_version",
++        "model_version"
++      ],
+       "properties": {
+         "language_run_id": { "type": "string" },
+         "provider": { "enum": ["spacy", "fallback", "unknown"] },
+@@ -266,7 +277,10 @@
+         "spoken_end": { "$ref": "#/$defs/range" },
+         "segment_ids": { "type": "array", "items": { "type": "string" } },
+         "marker_ids": { "type": "array", "items": { "type": "string" } },
+-        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
++        "content_hash": {
++          "type": "string",
++          "pattern": "^sha256:[0-9a-f]{64}$"
++        },
+         "content_hash_schema": { "const": "utterplan-unit-v2" }
+       },
+       "additionalProperties": false
+diff --git a/spec/utterplan.schema.json b/spec/utterplan.schema.json
+index 77356eb..18bb75d 100644
+--- a/spec/utterplan.schema.json
++++ b/spec/utterplan.schema.json
+@@ -49,7 +49,10 @@
+     },
+     "preparation": { "$ref": "#/$defs/preparation" },
+     "languages": { "type": "array", "items": { "$ref": "#/$defs/language" } },
+-    "linguistic_runs": { "type": "array", "items": { "$ref": "#/$defs/linguistic_run" } },
++    "linguistic_runs": {
++      "type": "array",
++      "items": { "$ref": "#/$defs/linguistic_run" }
++    },
+     "annotations": {
+       "type": "array",
+       "items": { "$ref": "#/$defs/annotation" }
+@@ -122,7 +125,15 @@
+     },
+     "linguistic_run": {
+       "type": "object",
+-      "required": ["language_run_id", "provider", "token_start", "token_end", "model", "provider_version", "model_version"],
++      "required": [
++        "language_run_id",
++        "provider",
++        "token_start",
++        "token_end",
++        "model",
++        "provider_version",
++        "model_version"
++      ],
+       "properties": {
+         "language_run_id": { "type": "string" },
+         "provider": { "enum": ["spacy", "fallback", "unknown"] },
+@@ -266,7 +277,10 @@
+         "spoken_end": { "$ref": "#/$defs/range" },
+         "segment_ids": { "type": "array", "items": { "type": "string" } },
+         "marker_ids": { "type": "array", "items": { "type": "string" } },
+-        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
++        "content_hash": {
++          "type": "string",
++          "pattern": "^sha256:[0-9a-f]{64}$"
++        },
+         "content_hash_schema": { "const": "utterplan-unit-v2" }
+       },
+       "additionalProperties": false
+diff --git a/tests/golden/basic_en.utterplan.json b/tests/golden/basic_en.utterplan.json
+index b5ba595..e6d70f0 100644
+--- a/tests/golden/basic_en.utterplan.json
++++ b/tests/golden/basic_en.utterplan.json
+@@ -72,9 +72,7 @@
+   "plan_id": "sha256:5fae7217f085545848ec2e6480a79a93d1c89ba2eb6a66234b1363b737f57881",
+   "preparation": {
+     "backend": "spokenform",
+-    "languages": [
+-      "en-us"
+-    ],
++    "languages": ["en-us"],
+     "replacements": [],
+     "version": "0.4.5",
+     "warnings": []
+@@ -104,9 +102,7 @@
+       "spoken_end": 6,
+       "spoken_start": 0,
+       "text": "Hello.",
+-      "token_indices": [
+-        0
+-      ]
++      "token_indices": [0]
+     }
+   ],
+   "source": {
+@@ -136,9 +132,7 @@
+       "index": 0,
+       "kind": "paragraph",
+       "marker_ids": [],
+-      "segment_ids": [
+-        "seg-000000"
+-      ],
++      "segment_ids": ["seg-000000"],
+       "spoken_end": 6,
+       "spoken_start": 0
+     }
+diff --git a/tests/golden/directives.utterplan.json b/tests/golden/directives.utterplan.json
+index eb5bcb2..c854264 100644
+--- a/tests/golden/directives.utterplan.json
++++ b/tests/golden/directives.utterplan.json
+@@ -100,9 +100,7 @@
+   "plan_id": "sha256:84f39cda7fbbc17d4501d0a52ea20519b715350ebf52d7604a1e1c15e5e10c6e",
+   "preparation": {
+     "backend": "spokenform",
+-    "languages": [
+-      "en-us"
+-    ],
++    "languages": ["en-us"],
+     "replacements": [],
+     "version": "0.4.5",
+     "warnings": []
+@@ -114,10 +112,7 @@
+   "schema_version": 2,
+   "segments": [
+     {
+-      "annotation_ids": [
+-        "annotation-000000",
+-        "annotation-000001"
+-      ],
++      "annotation_ids": ["annotation-000000", "annotation-000001"],
+       "clause": 0,
+       "directives": {
+         "emphasis": {
+@@ -144,9 +139,7 @@
+       "spoken_end": 4,
+       "spoken_start": 0,
+       "text": "fast",
+-      "token_indices": [
+-        0
+-      ]
++      "token_indices": [0]
+     }
+   ],
+   "source": {
+@@ -176,9 +169,7 @@
+       "index": 0,
+       "kind": "paragraph",
+       "marker_ids": [],
+-      "segment_ids": [
+-        "seg-000000"
+-      ],
++      "segment_ids": ["seg-000000"],
+       "spoken_end": 4,
+       "spoken_start": 0
+     }
+diff --git a/tests/golden/markers.utterplan.json b/tests/golden/markers.utterplan.json
+index 6522884..23dabb7 100644
+--- a/tests/golden/markers.utterplan.json
++++ b/tests/golden/markers.utterplan.json
+@@ -106,9 +106,7 @@
+   "plan_id": "sha256:34c05e37d217f835934ae069311f33c396889580a9690e138f75fdac591e3f8d",
+   "preparation": {
+     "backend": "spokenform",
+-    "languages": [
+-      "en-us"
+-    ],
++    "languages": ["en-us"],
+     "replacements": [],
+     "version": "0.4.5",
+     "warnings": []
+@@ -120,18 +118,14 @@
+   "schema_version": 2,
+   "segments": [
+     {
+-      "annotation_ids": [
+-        "annotation-000000"
+-      ],
++      "annotation_ids": ["annotation-000000"],
+       "clause": 0,
+       "directives": {},
+       "id": "seg-000000",
+       "language": "en-us",
+       "paragraph": 0,
+       "pause_after": {
+-        "events": [
+-          "boundary-000000"
+-        ],
++        "events": ["boundary-000000"],
+         "seconds": 0.6
+       },
+       "pause_before": {
+@@ -142,14 +136,10 @@
+       "spoken_end": 4,
+       "spoken_start": 0,
+       "text": "One.",
+-      "token_indices": [
+-        0
+-      ]
++      "token_indices": [0]
+     },
+     {
+-      "annotation_ids": [
+-        "annotation-000000"
+-      ],
++      "annotation_ids": ["annotation-000000"],
+       "clause": 0,
+       "directives": {},
+       "id": "seg-000001",
+@@ -167,9 +157,7 @@
+       "spoken_end": 9,
+       "spoken_start": 5,
+       "text": "Two.",
+-      "token_indices": [
+-        1
+-      ]
++      "token_indices": [1]
+     }
+   ],
+   "source": {
+@@ -208,9 +196,7 @@
+       "index": 0,
+       "kind": "sentence",
+       "marker_ids": [],
+-      "segment_ids": [
+-        "seg-000000"
+-      ],
++      "segment_ids": ["seg-000000"],
+       "spoken_end": 4,
+       "spoken_start": 0
+     },
+@@ -220,12 +206,8 @@
+       "id": "unit-0001",
+       "index": 1,
+       "kind": "sentence",
+-      "marker_ids": [
+-        "marker-000000"
+-      ],
+-      "segment_ids": [
+-        "seg-000001"
+-      ],
++      "marker_ids": ["marker-000000"],
++      "segment_ids": ["seg-000001"],
+       "spoken_end": 9,
+       "spoken_start": 5
+     }
+diff --git a/tests/golden/multilingual.utterplan.json b/tests/golden/multilingual.utterplan.json
+index fe6a094..74b7e73 100644
+--- a/tests/golden/multilingual.utterplan.json
++++ b/tests/golden/multilingual.utterplan.json
+@@ -129,11 +129,7 @@
+   "plan_id": "sha256:c4b143453e35138e8a6e89761cc33bad3ec99d8340bf23c0f6b6a90f6c9d08cf",
+   "preparation": {
+     "backend": "spokenform",
+-    "languages": [
+-      "en-us",
+-      "fr",
+-      "en-us"
+-    ],
++    "languages": ["en-us", "fr", "en-us"],
+     "replacements": [],
+     "version": "0.4.5",
+     "warnings": []
+@@ -145,9 +141,7 @@
+   "schema_version": 2,
+   "segments": [
+     {
+-      "annotation_ids": [
+-        "annotation-000000"
+-      ],
++      "annotation_ids": ["annotation-000000"],
+       "clause": 0,
+       "directives": {},
+       "id": "seg-000000",
+@@ -165,15 +159,10 @@
+       "spoken_end": 5,
+       "spoken_start": 0,
+       "text": "Hello",
+-      "token_indices": [
+-        0
+-      ]
++      "token_indices": [0]
+     },
+     {
+-      "annotation_ids": [
+-        "annotation-000000",
+-        "annotation-000001"
+-      ],
++      "annotation_ids": ["annotation-000000", "annotation-000001"],
+       "clause": 0,
+       "directives": {},
+       "id": "seg-000001",
+@@ -191,14 +180,10 @@
+       "spoken_end": 13,
+       "spoken_start": 6,
+       "text": "Bonjour",
+-      "token_indices": [
+-        1
+-      ]
++      "token_indices": [1]
+     },
+     {
+-      "annotation_ids": [
+-        "annotation-000000"
+-      ],
++      "annotation_ids": ["annotation-000000"],
+       "clause": 0,
+       "directives": {},
+       "id": "seg-000002",
+@@ -216,9 +201,7 @@
+       "spoken_end": 14,
+       "spoken_start": 13,
+       "text": ".",
+-      "token_indices": [
+-        2
+-      ]
++      "token_indices": [2]
+     }
+   ],
+   "source": {
+@@ -266,11 +249,7 @@
+       "index": 0,
+       "kind": "paragraph",
+       "marker_ids": [],
+-      "segment_ids": [
+-        "seg-000000",
+-        "seg-000001",
+-        "seg-000002"
+-      ],
++      "segment_ids": ["seg-000000", "seg-000001", "seg-000002"],
+       "spoken_end": 14,
+       "spoken_start": 0
+     }
+diff --git a/tests/golden/parenthetical.utterplan.json b/tests/golden/parenthetical.utterplan.json
+index a17b761..b75eecf 100644
+--- a/tests/golden/parenthetical.utterplan.json
++++ b/tests/golden/parenthetical.utterplan.json
+@@ -99,9 +99,7 @@
+   "plan_id": "sha256:84116e46b50a75a410d1b007b9c20d436c946d8a48abc29f9af880c2cb6e0a09",
+   "preparation": {
+     "backend": "spokenform",
+-    "languages": [
+-      "en-us"
+-    ],
++    "languages": ["en-us"],
+     "replacements": [],
+     "version": "0.4.5",
+     "warnings": []
+@@ -131,11 +129,7 @@
+       "spoken_end": 19,
+       "spoken_start": 0,
+       "text": "The backup battery ",
+-      "token_indices": [
+-        0,
+-        1,
+-        2
+-      ]
++      "token_indices": [0, 1, 2]
+     },
+     {
+       "annotation_ids": [],
+@@ -149,23 +143,14 @@
+         "seconds": 0.0
+       },
+       "pause_before": {
+-        "events": [
+-          "boundary-000000"
+-        ],
++        "events": ["boundary-000000"],
+         "seconds": 0.15
+       },
+       "sentence": 0,
+       "spoken_end": 53,
+       "spoken_start": 19,
+       "text": "(still warm from the morning test)",
+-      "token_indices": [
+-        3,
+-        4,
+-        5,
+-        6,
+-        7,
+-        8
+-      ]
++      "token_indices": [3, 4, 5, 6, 7, 8]
+     },
+     {
+       "annotation_ids": [],
+@@ -179,21 +164,14 @@
+         "seconds": 0.0
+       },
+       "pause_before": {
+-        "events": [
+-          "boundary-000001"
+-        ],
++        "events": ["boundary-000001"],
+         "seconds": 0.15
+       },
+       "sentence": 0,
+       "spoken_end": 77,
+       "spoken_start": 53,
+       "text": " sat beside the console.",
+-      "token_indices": [
+-        9,
+-        10,
+-        11,
+-        12
+-      ]
++      "token_indices": [9, 10, 11, 12]
+     }
+   ],
+   "source": {
+@@ -331,11 +309,7 @@
+       "index": 0,
+       "kind": "paragraph",
+       "marker_ids": [],
+-      "segment_ids": [
+-        "seg-000000",
+-        "seg-000001",
+-        "seg-000002"
+-      ],
++      "segment_ids": ["seg-000000", "seg-000001", "seg-000002"],
+       "spoken_end": 77,
+       "spoken_start": 0
+     }
+diff --git a/tests/golden/spokenform_offsets.utterplan.json b/tests/golden/spokenform_offsets.utterplan.json
+index 6e731ed..492273f 100644
+--- a/tests/golden/spokenform_offsets.utterplan.json
++++ b/tests/golden/spokenform_offsets.utterplan.json
+@@ -72,9 +72,7 @@
+   "plan_id": "sha256:fd2dba4376a87419ed91bc3c29a7801122787eeb6cf32ceb95788e7180be2a56",
+   "preparation": {
+     "backend": "spokenform",
+-    "languages": [
+-      "en-us"
+-    ],
++    "languages": ["en-us"],
+     "replacements": [
+       {
+         "kind": "abbreviation",
+@@ -138,16 +136,7 @@
+       "spoken_end": 53,
+       "spoken_start": 0,
+       "text": "Doctor Smith bought five kilograms on January fourth.",
+-      "token_indices": [
+-        0,
+-        1,
+-        2,
+-        3,
+-        4,
+-        5,
+-        6,
+-        7
+-      ]
++      "token_indices": [0, 1, 2, 3, 4, 5, 6, 7]
+     }
+   ],
+   "source": {
+@@ -240,9 +229,7 @@
+       "index": 0,
+       "kind": "paragraph",
+       "marker_ids": [],
+-      "segment_ids": [
+-        "seg-000000"
+-      ],
++      "segment_ids": ["seg-000000"],
+       "spoken_end": 53,
+       "spoken_start": 0
+     }
+diff --git a/tests/golden/ssmd_breaks.utterplan.json b/tests/golden/ssmd_breaks.utterplan.json
+index 2326ea0..43d14b9 100644
+--- a/tests/golden/ssmd_breaks.utterplan.json
++++ b/tests/golden/ssmd_breaks.utterplan.json
+@@ -112,9 +112,7 @@
+   "plan_id": "sha256:11c013f2824bfb6032f26f2a5d7bacab1f6e2752912d79a33250ffed90897fd1",
+   "preparation": {
+     "backend": "spokenform",
+-    "languages": [
+-      "en-us"
+-    ],
++    "languages": ["en-us"],
+     "replacements": [],
+     "version": "0.4.5",
+     "warnings": []
+@@ -126,18 +124,14 @@
+   "schema_version": 2,
+   "segments": [
+     {
+-      "annotation_ids": [
+-        "annotation-000000"
+-      ],
++      "annotation_ids": ["annotation-000000"],
+       "clause": 0,
+       "directives": {},
+       "id": "seg-000000",
+       "language": "en-us",
+       "paragraph": 0,
+       "pause_after": {
+-        "events": [
+-          "boundary-000000"
+-        ],
++        "events": ["boundary-000000"],
+         "seconds": 0.5
+       },
+       "pause_before": {
+@@ -148,23 +142,17 @@
+       "spoken_end": 5,
+       "spoken_start": 0,
+       "text": "Hello",
+-      "token_indices": [
+-        0
+-      ]
++      "token_indices": [0]
+     },
+     {
+-      "annotation_ids": [
+-        "annotation-000000"
+-      ],
++      "annotation_ids": ["annotation-000000"],
+       "clause": 1,
+       "directives": {},
+       "id": "seg-000001",
+       "language": "en-us",
+       "paragraph": 0,
+       "pause_after": {
+-        "events": [
+-          "boundary-000001"
+-        ],
++        "events": ["boundary-000001"],
+         "seconds": 0.15
+       },
+       "pause_before": {
+@@ -175,14 +163,10 @@
+       "spoken_end": 11,
+       "spoken_start": 5,
+       "text": " world",
+-      "token_indices": [
+-        1
+-      ]
++      "token_indices": [1]
+     },
+     {
+-      "annotation_ids": [
+-        "annotation-000000"
+-      ],
++      "annotation_ids": ["annotation-000000"],
+       "clause": 2,
+       "directives": {},
+       "id": "seg-000002",
+@@ -200,9 +184,7 @@
+       "spoken_end": 18,
+       "spoken_start": 11,
+       "text": " again.",
+-      "token_indices": [
+-        2
+-      ]
++      "token_indices": [2]
+     }
+   ],
+   "source": {
+@@ -250,11 +232,7 @@
+       "index": 0,
+       "kind": "paragraph",
+       "marker_ids": [],
+-      "segment_ids": [
+-        "seg-000000",
+-        "seg-000001",
+-        "seg-000002"
+-      ],
++      "segment_ids": ["seg-000000", "seg-000001", "seg-000002"],
+       "spoken_end": 18,
+       "spoken_start": 0
+     }
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index f499c52..1446232 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -205,6 +205,7 @@ def test_inspect_tokens_shows_linguistic_fields(
+     assert "tag=-" in captured.out
+     assert "morph=-" in captured.out
+
++
+ def test_inspect_preparation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+     output = tmp_path / "plan.utterplan.json"
+     assert main(["compile", "Dr. bought 5 kg.", "--lang", "en-us", "-o", str(output)]) == 0
+diff --git a/tests/test_format.py b/tests/test_format.py
+index 4980ccf..1d3a7de 100644
+--- a/tests/test_format.py
++++ b/tests/test_format.py
+@@ -54,6 +54,7 @@ def test_token_text_must_match_spoken_slice():
+     with pytest.raises(PlanValidationError, match="token.range_mismatch"):
+         UtterancePlan.from_dict(value)
+
++
+ def test_compact_optional_fields_are_omitted():
+     value = plan().to_dict()
+     assert value["segments"]
+@@ -65,6 +66,7 @@ def test_compact_optional_fields_are_omitted():
+
+     assert all(item["morph"] is None for item in value["tokens"])
+
++
+ def test_json_is_plain_data():
+     value = json.loads(plan().to_json())
+     assert "phonemes" not in json.dumps(value)
+diff --git a/tests/test_linguistics.py b/tests/test_linguistics.py
+index 73f5f2f..9afdd81 100644
+--- a/tests/test_linguistics.py
++++ b/tests/test_linguistics.py
+@@ -76,7 +76,10 @@ def test_spacy_auto_uses_fake_compatible_local_model(monkeypatch):
+     assert analysis.provider_doc is pipeline.last_doc
+     assert analysis.tokens[0].pos == "NOUN"
+
+-def _fake_spacy_plan(monkeypatch, *, tag: str = "VBP", morph: str = "Tense=Pres|VerbForm=Fin") -> UtterancePlan:
++
++def _fake_spacy_plan(
++    monkeypatch, *, tag: str = "VBP", morph: str = "Tense=Pres|VerbForm=Fin"
++) -> UtterancePlan:
+     class Pipeline:
+         def __call__(self, text):
+             values = (
+@@ -98,13 +101,13 @@ def _fake_spacy_plan(monkeypatch, *, tag: str = "VBP", morph: str = "Tense=Pres|
+             ]
+
+     monkeypatch.setitem(sys.modules, "spacy", SimpleNamespace(__version__="3.7.0"))
+-    monkeypatch.setattr(LinguisticResourcePool, "pipeline", lambda self, model, require=False: Pipeline())
++    monkeypatch.setattr(
++        LinguisticResourcePool, "pipeline", lambda self, model, require=False: Pipeline()
++    )
+     config = PlannerConfig(
+         language="en-us",
+         text_preparation="identity",
+-        linguistics=LinguisticsConfig(
+-            use_spacy=True, spacy_model="fake_model", require_spacy=True
+-        ),
++        linguistics=LinguisticsConfig(use_spacy=True, spacy_model="fake_model", require_spacy=True),
+     )
+     return UtterancePlanner(config).plan("I live here.")
+
+@@ -132,7 +135,9 @@ def test_fallback_provenance_is_explicit():
+     plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("I live here.")
+     assert plan.linguistic_runs[0].provider == "fallback"
+     assert plan.linguistic_runs[0].model is None
+-    assert all(token.pos is None and token.tag is None and token.morph is None for token in plan.tokens)
++    assert all(
++        token.pos is None and token.tag is None and token.morph is None for token in plan.tokens
++    )
+
+
+ def test_token_semantics_change_unit_hash_but_provenance_does_not(monkeypatch):
+diff --git a/tests/test_schema_history.py b/tests/test_schema_history.py
+index 94b6970..1583f16 100644
+--- a/tests/test_schema_history.py
++++ b/tests/test_schema_history.py
+@@ -33,7 +33,9 @@ def test_v1_fixtures_validate_before_migration_and_remain_immutable() -> None:
+         assert result.data["producer"]["migration"]["original_plan_id"] == value["plan_id"]
+         assert all(run["provider"] == "unknown" for run in result.data["linguistic_runs"])
+         assert all(token["morph"] is None for token in result.data["tokens"])
+-        assert all(unit["content_hash_schema"] == "utterplan-unit-v2" for unit in result.data["units"])
++        assert all(
++            unit["content_hash_schema"] == "utterplan-unit-v2" for unit in result.data["units"]
++        )
+         plan = UtterancePlan.from_dict(value)
+         assert plan.schema_version == 2
+         assert plan.plan_id == result.data["plan_id"]
+diff --git a/utterplan/explain.py b/utterplan/explain.py
+index 09c4636..5ab9eed 100644
+--- a/utterplan/explain.py
++++ b/utterplan/explain.py
+@@ -237,6 +237,7 @@ def _format_segment_tokens(plan: UtterancePlan, segment: PlanSegment) -> list[st
+         )
+     return lines
+
++
+ def _format_pause(
+     pause: ResolvedPause,
+     boundaries_by_id: Mapping[str, BoundaryEvent],
+diff --git a/utterplan/hashing.py b/utterplan/hashing.py
+index de08fae..7cfc7fe 100644
+--- a/utterplan/hashing.py
++++ b/utterplan/hashing.py
+@@ -6,6 +6,7 @@ from typing import Any
+
+ UNIT_HASH_SCHEMA = "utterplan-unit-v2"
+
++
+ def canonical_json(value: Any) -> str:
+     return json.dumps(
+         value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+diff --git a/utterplan/migrations/v1_to_v2.py b/utterplan/migrations/v1_to_v2.py
+index 7b6cbea..446c04f 100644
+--- a/utterplan/migrations/v1_to_v2.py
++++ b/utterplan/migrations/v1_to_v2.py
+@@ -71,10 +71,20 @@ def _legacy_tokens_by_language(
+
+     result: list[dict[str, Any]] = []
+     for language_index, (_start, _end) in enumerate(ranges):
+-        indices = [index for index, assignment in enumerate(assignments) if assignment == language_index]
+-        token_start = indices[0] if indices else next(
+-            (index for index, assignment in enumerate(assignments) if assignment is not None and assignment > language_index),
+-            len(tokens),
++        indices = [
++            index for index, assignment in enumerate(assignments) if assignment == language_index
++        ]
++        token_start = (
++            indices[0]
++            if indices
++            else next(
++                (
++                    index
++                    for index, assignment in enumerate(assignments)
++                    if assignment is not None and assignment > language_index
++                ),
++                len(tokens),
++            )
+         )
+         token_end = indices[-1] + 1 if indices else token_start
+         language = languages[language_index]
+@@ -151,7 +161,11 @@ def migrate_v1_to_v2(data: Mapping[str, Any]) -> Mapping[str, Any]:
+     segments = result.get("segments")
+     units = result.get("units")
+     markers = result.get("markers")
+-    if not isinstance(segments, list) or not isinstance(units, list) or not isinstance(markers, list):
++    if (
++        not isinstance(segments, list)
++        or not isinstance(units, list)
++        or not isinstance(markers, list)
++    ):
+         raise _error("v1 segments, units, and markers must be arrays")
+     segment_map: dict[str, Mapping[str, Any]] = {}
+     for segment in segments:
+diff --git a/utterplan/model.py b/utterplan/model.py
+index 316f987..8f71b9c 100644
+--- a/utterplan/model.py
++++ b/utterplan/model.py
+@@ -107,6 +107,7 @@ class TokenAnnotation:
+     id: str | None = None
+
+     morph: str | None = None
++
+     @property
+     def start(self) -> int:
+         return self.spoken_start
+@@ -157,6 +158,7 @@ class LinguisticRun:
+             "model_version": self.model_version,
+         }
+
++
+ @dataclass(frozen=True, slots=True)
+ class BoundaryEvent:
+     id: str
+@@ -1048,9 +1050,7 @@ def validate_plan(plan: UtterancePlan) -> None:
+         unit_segments = [segment_by_id[segment_id] for segment_id in unit.segment_ids]
+         marker_values = tuple(marker for marker in plan.markers if marker.id in unit.marker_ids)
+         if unit.content_hash != semantic_hash(
+-            unit_hash_payload(
+-                _HashUnit(unit_segments, unit.marker_ids, marker_values, plan.tokens)
+-            )
++            unit_hash_payload(_HashUnit(unit_segments, unit.marker_ids, marker_values, plan.tokens))
+         ):
+             raise PlanValidationError(
+                 "unit content hash does not match semantics", code="unit.hash_mismatch"
+diff --git a/utterplan/planner.py b/utterplan/planner.py
+index 21c264f..2c7b322 100644
+--- a/utterplan/planner.py
++++ b/utterplan/planner.py
+@@ -186,9 +186,8 @@ def _config_dict(config: PlannerConfig) -> dict[str, Any]:
+         result["ssmd"]["pause_defaults"] = dict(config.ssmd.pause_defaults or {})
+     return result
+
+-def _linguistic_runs(
+-    runs: tuple[Any, ...], analyses: tuple[Any, ...]
+-) -> tuple[LinguisticRun, ...]:
++
++def _linguistic_runs(runs: tuple[Any, ...], analyses: tuple[Any, ...]) -> tuple[LinguisticRun, ...]:
+     token_start = 0
+     result: list[LinguisticRun] = []
+     for run, analysis in zip(runs, analyses, strict=True):
+@@ -208,7 +207,6 @@ def _linguistic_runs(
+     return tuple(result)
+
+
+-
+ def _segment(
+     text: str,
+     runs: tuple[Any, ...],
+diff --git a/utterplan/schemas/v2.schema.json b/utterplan/schemas/v2.schema.json
+index 77356eb..18bb75d 100644
+--- a/utterplan/schemas/v2.schema.json
++++ b/utterplan/schemas/v2.schema.json
+@@ -49,7 +49,10 @@
+     },
+     "preparation": { "$ref": "#/$defs/preparation" },
+     "languages": { "type": "array", "items": { "$ref": "#/$defs/language" } },
+-    "linguistic_runs": { "type": "array", "items": { "$ref": "#/$defs/linguistic_run" } },
++    "linguistic_runs": {
++      "type": "array",
++      "items": { "$ref": "#/$defs/linguistic_run" }
++    },
+     "annotations": {
+       "type": "array",
+       "items": { "$ref": "#/$defs/annotation" }
+@@ -122,7 +125,15 @@
+     },
+     "linguistic_run": {
+       "type": "object",
+-      "required": ["language_run_id", "provider", "token_start", "token_end", "model", "provider_version", "model_version"],
++      "required": [
++        "language_run_id",
++        "provider",
++        "token_start",
++        "token_end",
++        "model",
++        "provider_version",
++        "model_version"
++      ],
+       "properties": {
+         "language_run_id": { "type": "string" },
+         "provider": { "enum": ["spacy", "fallback", "unknown"] },
+@@ -266,7 +277,10 @@
+         "spoken_end": { "$ref": "#/$defs/range" },
+         "segment_ids": { "type": "array", "items": { "type": "string" } },
+         "marker_ids": { "type": "array", "items": { "type": "string" } },
+-        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
++        "content_hash": {
++          "type": "string",
++          "pattern": "^sha256:[0-9a-f]{64}$"
++        },
+         "content_hash_schema": { "const": "utterplan-unit-v2" }
+       },
+       "additionalProperties": false
+diff --git a/utterplan/utterplan.schema.json b/utterplan/utterplan.schema.json
+index 77356eb..18bb75d 100644
+--- a/utterplan/utterplan.schema.json
++++ b/utterplan/utterplan.schema.json
+@@ -49,7 +49,10 @@
+     },
+     "preparation": { "$ref": "#/$defs/preparation" },
+     "languages": { "type": "array", "items": { "$ref": "#/$defs/language" } },
+-    "linguistic_runs": { "type": "array", "items": { "$ref": "#/$defs/linguistic_run" } },
++    "linguistic_runs": {
++      "type": "array",
++      "items": { "$ref": "#/$defs/linguistic_run" }
++    },
+     "annotations": {
+       "type": "array",
+       "items": { "$ref": "#/$defs/annotation" }
+@@ -122,7 +125,15 @@
+     },
+     "linguistic_run": {
+       "type": "object",
+-      "required": ["language_run_id", "provider", "token_start", "token_end", "model", "provider_version", "model_version"],
++      "required": [
++        "language_run_id",
++        "provider",
++        "token_start",
++        "token_end",
++        "model",
++        "provider_version",
++        "model_version"
++      ],
+       "properties": {
+         "language_run_id": { "type": "string" },
+         "provider": { "enum": ["spacy", "fallback", "unknown"] },
+@@ -266,7 +277,10 @@
+         "spoken_end": { "$ref": "#/$defs/range" },
+         "segment_ids": { "type": "array", "items": { "type": "string" } },
+         "marker_ids": { "type": "array", "items": { "type": "string" } },
+-        "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
++        "content_hash": {
++          "type": "string",
++          "pattern": "^sha256:[0-9a-f]{64}$"
++        },
+         "content_hash_schema": { "const": "utterplan-unit-v2" }
+       },
+       "additionalProperties": false
