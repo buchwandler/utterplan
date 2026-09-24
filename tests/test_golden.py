@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import jsonschema
@@ -27,6 +28,10 @@ def test_canonical_ssmd_09_compiles_to_comprehensive_v3_golden() -> None:
         PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
     ).plan(source)
     expected = UtterancePlan.load(COMPREHENSIVE_GOLDEN)
+    expected = replace(
+        expected,
+        producer={**expected.producer, "version": plan.producer["version"]},
+    )
 
     assert plan == expected
     assert plan.schema_version == 3

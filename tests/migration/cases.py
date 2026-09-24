@@ -15,8 +15,8 @@ class MigrationCase:
 PLAIN = PlannerConfig(language="en-us", document_format="plain")
 IDENTITY = PlannerConfig(language="en-us", document_format="plain", text_preparation="identity")
 AUTO = PlannerConfig(language="en-us", document_format="plain", pauses=PauseConfig(mode="auto"))
-SSMD = PlannerConfig(language="en-us")
-SSMD_IDENTITY = PlannerConfig(language="en-us", text_preparation="identity")
+SSMD = PlannerConfig(language="en-us", document_format="ssmd")
+SSMD_IDENTITY = PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
 
 CASES = (
     MigrationCase("plain_single", "A single sentence.", PLAIN),

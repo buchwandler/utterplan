@@ -27,6 +27,7 @@ for segment in plan.segments:
     print(segment.text, segment.language)
 ```
 
+Python `PlannerConfig` defaults to plain input. Pass `document_format="ssmd"` when planning SSMD source from Python.
 The planner produces semantic information for a renderer. It does not produce
 phonemes, model tokens, or audio.
 

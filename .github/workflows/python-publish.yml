@@ -45,18 +45,21 @@ jobs:
           from packaging.requirements import Requirement
           from packaging.version import Version
 
-          def has_minimum(requirements, name, minimum):
+          def has_range(requirements, name, minimum, maximum):
               minimum_version = Version(minimum)
+              maximum_version = Version(maximum)
               return any(
                   requirement.name == name
                   and any(
-                      spec.operator in (">=", ">", "==")
-                      and Version(spec.version) >= minimum_version
+                      spec.operator == ">=" and Version(spec.version) == minimum_version
+                      for spec in requirement.specifier
+                  )
+                  and any(
+                      spec.operator == "<" and Version(spec.version) == maximum_version
                       for spec in requirement.specifier
                   )
                   for requirement in requirements
               )
-
           tag_version = os.environ["RELEASE_TAG"].removeprefix("v")
           artifacts = list(Path("dist").iterdir())
           wheels = [path for path in artifacts if path.suffix == ".whl"]
@@ -76,11 +79,18 @@ jobs:
               requirements = [
                   Requirement(value) for value in metadata.get_all("Requires-Dist", [])
               ]
-              assert has_minimum(requirements, "phrasplit", "0.3.9")
-              assert has_minimum(requirements, "ssmd", "0.8.7")
-              assert has_minimum(requirements, "spokenform", "0.4.3")
-              assert any(name.endswith("utterplan/py.typed") for name in archive.namelist())
-              assert any(name.endswith("utterplan/utterplan.schema.json") for name in archive.namelist())
+              assert has_range(requirements, "phrasplit", "0.3.9", "0.4")
+              assert has_range(requirements, "ssmd", "0.9.0", "0.10")
+              assert has_range(requirements, "spokenform", "0.4.3", "0.5")
+              names = set(archive.namelist())
+              expected = {
+                  "utterplan/py.typed",
+                  "utterplan/utterplan.schema.json",
+                  "utterplan/schemas/v1.schema.json",
+                  "utterplan/schemas/v2.schema.json",
+                  "utterplan/schemas/v3.schema.json",
+              }
+              assert expected <= names
           PY
 
       - name: Publish package to PyPI

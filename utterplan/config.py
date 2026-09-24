@@ -88,32 +88,27 @@ class LinguisticsConfig:
 
 @dataclass(frozen=True, slots=True)
 class SSMDConfig:
-    parse_header: bool = True
-    strict_header: bool = True
-    unknown_header: Literal["warn", "error", "ignore"] = "warn"
-    pause_defaults: Mapping[str, object] | None = None
+    parse_yaml_header: bool = True
+    pause_overrides: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
-        _validate_bool(self.parse_header, "ssmd.parse_header")
-        _validate_bool(self.strict_header, "ssmd.strict_header")
-        if self.unknown_header not in {"warn", "error", "ignore"}:
-            raise ConfigurationError("ssmd.unknown_header must be 'warn', 'error', or 'ignore'")
-        if self.pause_defaults is not None:
-            if not isinstance(self.pause_defaults, Mapping):
-                raise ConfigurationError("ssmd.pause_defaults must be a mapping")
-            for key, value in self.pause_defaults.items():
+        _validate_bool(self.parse_yaml_header, "ssmd.parse_yaml_header")
+        if self.pause_overrides is not None:
+            if not isinstance(self.pause_overrides, Mapping):
+                raise ConfigurationError("ssmd.pause_overrides must be a mapping")
+            for key, value in self.pause_overrides.items():
                 if key == "enabled":
-                    _validate_bool(value, "ssmd.pause_defaults.enabled")
+                    _validate_bool(value, "ssmd.pause_overrides.enabled")
                 elif key in _PAUSE_KEYS:
-                    parse_duration(value, field_name=f"ssmd.pause_defaults.{key}")
+                    parse_duration(value, field_name=f"ssmd.pause_overrides.{key}")
                 else:
-                    raise ConfigurationError(f"ssmd.pause_defaults.{key} is unsupported")
+                    raise ConfigurationError(f"ssmd.pause_overrides.{key} is unsupported")
 
 
 @dataclass(frozen=True, slots=True)
 class PlannerConfig:
     language: str
-    document_format: Literal["plain", "ssmd"] = "ssmd"
+    document_format: Literal["plain", "ssmd"] = "plain"
     text_preparation: Literal["spokenform", "identity"] = "spokenform"
     unit: Literal["paragraph", "sentence"] = "paragraph"
     pauses: PauseConfig = field(default_factory=PauseConfig)

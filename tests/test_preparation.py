@@ -2,7 +2,9 @@ from utterplan import PlannerConfig, UtterancePlanner
 
 
 def test_multilingual_preparation_composes_run_offsets():
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan('Hello [Bonjour]{lang="fr"}.')
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
+        'Hello [Bonjour]{lang="fr"}.'
+    )
     assert plan.texts.spoken == "Hello Bonjour."
     assert [(run.language, run.spoken_start, run.spoken_end) for run in plan.languages] == [
         ("en-us", 0, 5),
@@ -26,7 +28,9 @@ def test_multilingual_preparation_composes_run_offsets():
 
 
 def test_pronunciation_annotation_is_protected_and_resolved():
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan('[tomato]{ph="təˈmeɪtoʊ"}')
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
+        '[tomato]{ph="təˈmeɪtoʊ"}'
+    )
     assert plan.texts.spoken == "tomato"
     assert plan.segments[0].directives.pronunciation.phonemes == "təˈmeɪtoʊ"
 
@@ -38,7 +42,7 @@ pause_defaults:
   sentence: 0.45
 ---
 Hello ...s world"""
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan(text)
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(text)
     event = next(event for event in plan.boundaries if event.kind == "explicit")
     assert event.seconds == 0.45
     assert event.attrs["anchor"] == "after"
@@ -46,6 +50,8 @@ Hello ...s world"""
 
 
 def test_zero_break_is_not_a_paragraph_event():
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello ...0ms world")
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
+        "Hello ...0ms world"
+    )
     assert any(event.kind == "explicit" and event.seconds == 0.0 for event in plan.boundaries)
     assert not any(event.kind == "paragraph" for event in plan.boundaries)

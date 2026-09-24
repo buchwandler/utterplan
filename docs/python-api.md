@@ -13,6 +13,10 @@ spaCy enrichment is opt-in through the CLI's `--spacy auto` policy or an explici
 
 The SSMD parser accepts dialect 0.9 only. Select SSMD explicitly for unversioned canonical fragments with `PlannerConfig(document_format="ssmd")`. Older SSMD source must be migrated with `ssmd migrate FILE --to 0.9`; `migrate_plan_data` and `utterplan migrate` apply to serialized UtterPlan JSON, not source documents.
 
+`PlannerConfig.document_format` defaults to `"plain"`, so SSMD syntax is never inferred for an ordinary Python string. Set `document_format="ssmd"` for SSMD documents or fragments.
+
+`SSMDConfig.parse_yaml_header` controls front-matter parsing. The ineffective `strict_header` and `unknown_header` options were removed because SSMD 0.9 owns header validation. Application pause settings use `SSMDConfig.pause_overrides`; this is distinct from the portable source-header key `pause_defaults`. At a shared boundary, an explicit SSMD break takes precedence, followed by the application override, document defaults, and planner defaults.
+
 ```python
 from utterplan import PlannerConfig, UtterancePlanner
 

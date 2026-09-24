@@ -55,7 +55,7 @@ class SSMDDocumentParser:
             parsed = ssmd.parse_structure(
                 text,
                 default_lang=None,
-                parse_yaml_header=config.ssmd.parse_header,
+                parse_yaml_header=config.ssmd.parse_yaml_header,
                 resolve_defaults=False,
                 dialect="0.9",
             )
@@ -166,7 +166,7 @@ class SSMDDocumentParser:
             if key in header:
                 metadata[key] = header[key]
 
-        document_language = header.get("language") if config.ssmd.parse_header else None
+        document_language = header.get("language") if config.ssmd.parse_yaml_header else None
         if not isinstance(document_language, str) or not document_language:
             document_language = config.language
 
@@ -252,8 +252,8 @@ def _duration(
             except ConfigurationError:
                 continue
             defaults[name] = candidate
-    if config.ssmd.pause_defaults:
-        defaults.update(config.ssmd.pause_defaults)
+    if config.ssmd.pause_overrides:
+        defaults.update(config.ssmd.pause_overrides)
     if not _pause_enabled(config, header):
         return None
     if key in defaults:
@@ -270,8 +270,8 @@ def _pause_enabled(config: PlannerConfig, header: dict[str, Any] | None) -> bool
         value = header["pause_defaults"].get("enabled")
         if isinstance(value, bool):
             enabled = value
-    if config.ssmd.pause_defaults and "enabled" in config.ssmd.pause_defaults:
-        enabled = bool(config.ssmd.pause_defaults["enabled"])
+    if config.ssmd.pause_overrides and "enabled" in config.ssmd.pause_overrides:
+        enabled = bool(config.ssmd.pause_overrides["enabled"])
     return enabled
 
 
@@ -286,7 +286,7 @@ def _duration_origin(attrs: dict[str, Any], config: PlannerConfig, header: dict[
         "strong": "sentence",
         "x-strong": "paragraph",
     }.get(strength)
-    if config.ssmd.pause_defaults and key in config.ssmd.pause_defaults:
+    if config.ssmd.pause_overrides and key in config.ssmd.pause_overrides:
         return "config_default"
     header_defaults = header.get("pause_defaults")
     if isinstance(header_defaults, dict) and header_defaults.get(key) is not None:

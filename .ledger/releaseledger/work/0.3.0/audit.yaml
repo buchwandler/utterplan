@@ -1,0 +1,85 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.3.0
+git_base_ref: v0.2.0
+git_base_sha: 215d3a4b43ccaadbf50cb40b752ae30a5b4f39e5
+git_head_ref: HEAD
+git_head_sha: 49023f0470950eb3b1ff9a1c9a928bac5a47575e
+git_range: 215d3a4b43ccaadbf50cb40b752ae30a5b4f39e5..49023f0470950eb3b1ff9a1c9a928bac5a47575e
+commit_count: 1
+rows:
+  - sha: 49023f0470950eb3b1ff9a1c9a928bac5a47575e
+    source_ref: git:49023f0470950eb3b1ff9a1c9a928bac5a47575e
+    short_sha: 49023f0
+    changed_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/coordinate-spaces.md
+      - docs/debugging.md
+      - docs/format.md
+      - docs/getting-started.md
+      - docs/python-api.md
+      - examples/chapter.ssmd
+      - pyproject.toml
+      - spec/schemas/v3.schema.json
+      - spec/utterplan.schema.json
+      - tests/fixtures/ssmd_09_comprehensive.ssmd
+      - tests/golden/ssmd_09_comprehensive.utterplan.json
+      - tests/migration/cases.py
+      - tests/migration/goldens/multilingual_preparation.json
+      - tests/migration/goldens/spokenform_numbers.json
+      - tests/migration/goldens/ssmd_break.json
+      - tests/migration/goldens/ssmd_language_detection.json
+      - tests/migration/goldens/ssmd_marker.json
+      - tests/migration/goldens/ssmd_pronunciation.json
+      - tests/schema_history/README.md
+      - tests/schema_history/v2/directives.json
+      - tests/test_cli.py
+      - tests/test_consumer_contract.py
+      - tests/test_consumer_readiness.py
+      - tests/test_coordinates.py
+      - tests/test_directives.py
+      - tests/test_explain.py
+      - tests/test_fake_renderer.py
+      - tests/test_format.py
+      - tests/test_golden.py
+      - tests/test_migration_framework.py
+      - tests/test_preparation.py
+      - tests/test_public_identity.py
+      - tests/test_schema_history.py
+      - tests/test_schema_registry.py
+      - tests/test_ssmd_09_parser.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/directives.py
+      - utterplan/explain.py
+      - utterplan/language.py
+      - utterplan/migrations/__init__.py
+      - utterplan/migrations/v2_to_v3.py
+      - utterplan/model.py
+      - utterplan/parsers.py
+      - utterplan/pauses.py
+      - utterplan/planner.py
+      - utterplan/preparation.py
+      - utterplan/schema_registry.py
+      - utterplan/schemas/v3.schema.json
+      - utterplan/stages/segmentation/phrasplit.py
+      - utterplan/utterplan.schema.json
+      - utterplan/versioning.py
+    stats:
+      files_changed: 57
+      insertions: 4920
+      deletions: 507
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: support ssmd 0.9 and prepare v3 plan"

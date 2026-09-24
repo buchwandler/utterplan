@@ -46,7 +46,7 @@ jobs:
           python -m pip install pytest jsonschema
           python -m pip install \
             "phrasplit==0.3.9" \
-            "ssmd==0.8.7" \
+            "ssmd==0.9.0" \
             "spokenform==0.4.3" \
             "typing_extensions>=4.0"
           python -m pip install --no-deps -e .
@@ -61,37 +61,117 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build wheel
+      - name: Build wheel and sdist
         run: |
           python -m pip install --upgrade pip build
-          python -m build --wheel --outdir "$RUNNER_TEMP/wheels"
-      - name: Verify wheel contents
+          python -m build --outdir "$RUNNER_TEMP/dist"
+      - name: Verify wheel and sdist contents and dependency metadata
         run: |
           python - <<'PY'
           import os
+          import tarfile
+          from email import policy
+          from email.parser import Parser
           from pathlib import Path
           from zipfile import ZipFile
 
-          wheel = next((Path(os.environ["RUNNER_TEMP"]) / "wheels").glob("*.whl"))
-          names = set(ZipFile(wheel).namelist())
-          assert "utterplan/py.typed" in names
-          assert "utterplan/utterplan.schema.json" in names
-          assert "utterplan/schemas/v1.schema.json" in names
+          from packaging.requirements import Requirement
+          from packaging.version import Version
+
+          artifacts = Path(os.environ["RUNNER_TEMP"]) / "dist"
+          wheel = next(artifacts.glob("*.whl"))
+          sdist = next(artifacts.glob("*.tar.gz"))
+          expected = {
+              "utterplan/py.typed",
+              "utterplan/utterplan.schema.json",
+              "utterplan/schemas/v1.schema.json",
+              "utterplan/schemas/v2.schema.json",
+              "utterplan/schemas/v3.schema.json",
+          }
+          expected_ranges = {
+              "phrasplit": ("0.3.9", "0.4"),
+              "ssmd": ("0.9.0", "0.10"),
+              "spokenform": ("0.4.3", "0.5"),
+          }
+
+          def check_metadata(contents):
+              metadata = Parser(policy=policy.default).parsestr(contents)
+              requirements = metadata.get_all("Requires-Dist", [])
+              for name, (minimum, maximum) in expected_ranges.items():
+                  requirement = next(
+                      Requirement(value)
+                      for value in requirements
+                      if Requirement(value).name == name
+                  )
+                  assert any(
+                      spec.operator == ">=" and Version(spec.version) == Version(minimum)
+                      for spec in requirement.specifier
+                  ), (name, requirement)
+                  assert any(
+                      spec.operator == "<" and Version(spec.version) == Version(maximum)
+                      for spec in requirement.specifier
+                  ), (name, requirement)
+
+          with ZipFile(wheel) as archive:
+              wheel_names = set(archive.namelist())
+              assert expected <= wheel_names
+              metadata_name = next(
+                  name for name in wheel_names if name.endswith("METADATA")
+              )
+              check_metadata(archive.read(metadata_name).decode("utf-8"))
+
+          with tarfile.open(sdist, "r:gz") as archive:
+              sdist_names = archive.getnames()
+              assert all(
+                  any(name.endswith(resource) for name in sdist_names)
+                  for resource in expected
+              )
+              metadata_name = next(
+                  name for name in sdist_names if name.endswith("PKG-INFO")
+              )
+              check_metadata(
+                  archive.extractfile(metadata_name).read().decode("utf-8")
+              )
           PY
       - name: Install wheel in clean environment
         run: |
           python -m venv "$RUNNER_TEMP/utterplan-wheel-venv"
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/python" -m pip install \
-            "$RUNNER_TEMP"/wheels/utterplan-*.whl
+            "$RUNNER_TEMP"/dist/utterplan-*.whl
       - name: Run installed smoke checks
         run: |
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/python" -c \
             "import importlib.metadata as m; import utterplan; assert m.version('utterplan') == utterplan.__version__"
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" --version
+          cat > "$RUNNER_TEMP/test.ssmd.md" <<'EOF'
+          ---
+          ssmd_version: "0.9"
+          language: en-US
+          pause_defaults:
+            sentence: 500ms
+          ---
+          [Hello]{voice-name="test"} ...200ms world.
+          EOF
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" compile \
-            "Doctor Smith bought 5 kg." --lang en-us --json > "$RUNNER_TEMP/utterplan.json"
-          "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" validate "$RUNNER_TEMP/utterplan.json"
+            "$RUNNER_TEMP/test.ssmd.md" --lang en-us --text-preparation identity --json \
+            > "$RUNNER_TEMP/test.utterplan.json"
+          "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" validate \
+            "$RUNNER_TEMP/test.utterplan.json"
+          cat > "$RUNNER_TEMP/test-0.8.ssmd.md" <<'EOF'
+          ---
+          ssmd_version: "0.8"
+          ---
+          Hello.
+          EOF
+          if "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" compile \
+            "$RUNNER_TEMP/test-0.8.ssmd.md" --lang en-us --text-preparation identity --json \
+            > "$RUNNER_TEMP/test-0.8.out" 2>&1; then
+            cat "$RUNNER_TEMP/test-0.8.out"
+            echo "Installed wheel accepted an SSMD 0.8 document" >&2
+            exit 1
+          fi
+          grep -q "header.version_unsupported" "$RUNNER_TEMP/test-0.8.out"
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" migrate \
             "$GITHUB_WORKSPACE/tests/schema_history/v1/basic.json" --check
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" inspect \
-            "$RUNNER_TEMP/utterplan.json" --segment 0
+            "$RUNNER_TEMP/test.utterplan.json" --segment 0

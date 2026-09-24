@@ -115,6 +115,7 @@ def test_explicit_ssmd_break_remains_active_when_automatic_pauses_are_disabled()
     plan = UtterancePlanner(
         PlannerConfig(
             language="en-us",
+            document_format="ssmd",
             text_preparation="identity",
             pauses=PauseConfig(mode="manual", enabled=False),
         )
@@ -145,15 +146,15 @@ def test_high_confidence_clausal_comma_and_zero_duration_boundary_are_resolved()
             "explicit",
             seconds=0.0,
             origin="ssmd",
-            attrs={"anchor": "after"},
+            attrs={"anchor": "after", "pause_origin": "explicit"},
         ),
     )
     resolved = resolve_pauses([segment], list(boundaries), PauseConfig(mode="auto"))[0]
-    assert resolved.pause_after.seconds == pytest.approx(0.3)
+    assert resolved.pause_after.seconds == pytest.approx(0.0)
     assert resolved.pause_after.events == ("comma", "zero")
 
 
-def test_overlapping_boundary_sources_keep_provenance_and_choose_longest_pause() -> None:
+def test_explicit_ssmd_break_precedes_automatic_pause_and_retains_provenance() -> None:
     segment = PlanSegment("seg", "Hello", 0, 5, "en-us")
     boundaries = (
         BoundaryEvent(
@@ -170,12 +171,37 @@ def test_overlapping_boundary_sources_keep_provenance_and_choose_longest_pause()
             "explicit",
             seconds=0.2,
             origin="ssmd",
-            attrs={"anchor": "after"},
+            attrs={"anchor": "after", "pause_origin": "explicit"},
         ),
     )
     resolved = resolve_pauses([segment], list(boundaries), PauseConfig(mode="auto"))[0]
-    assert resolved.pause_after.seconds == pytest.approx(0.6)
+    assert resolved.pause_after.seconds == pytest.approx(0.2)
     assert resolved.pause_after.events == ("break", "sentence")
+
+
+def test_longest_default_pause_wins_without_explicit_break() -> None:
+    segment = PlanSegment("seg", "Hello", 0, 5, "en-us")
+    boundaries = (
+        BoundaryEvent(
+            "sentence",
+            5,
+            "sentence",
+            seconds=0.6,
+            origin="planner",
+            attrs={"automatic": True},
+        ),
+        BoundaryEvent(
+            "paragraph",
+            5,
+            "paragraph",
+            seconds=1.0,
+            origin="planner",
+            attrs={"automatic": True},
+        ),
+    )
+    resolved = resolve_pauses([segment], list(boundaries), PauseConfig(mode="auto"))[0]
+    assert resolved.pause_after.seconds == pytest.approx(1.0)
+    assert resolved.pause_after.events == ("paragraph", "sentence")
 
 
 def test_unit_content_hash_tracks_semantic_content() -> None:

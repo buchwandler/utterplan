@@ -32,6 +32,25 @@ def test_ssmd_09_parser_uses_strict_dialect_for_unversioned_fragments() -> None:
     assert error.value.code == "syntax.comma_separator_legacy"
 
 
+@pytest.mark.parametrize(("break_time", "expected_seconds"), [("200ms", 0.2), ("0ms", 0.0)])
+def test_explicit_ssmd_break_precedes_sentence_default(
+    break_time: str, expected_seconds: float
+) -> None:
+    source = f"""---
+ssmd_version: "0.9"
+pause_defaults:
+  sentence: 800ms
+---
+One. ...{break_time} Two."""
+    plan = _planner().plan(source)
+
+    explicit = next(event for event in plan.boundaries if event.kind == "explicit")
+    sentence = next(event for event in plan.boundaries if event.kind == "sentence")
+    first_segment = plan.segments[0]
+    assert first_segment.pause_after.seconds == pytest.approx(expected_seconds)
+    assert first_segment.pause_after.events == tuple(sorted((explicit.id, sentence.id)))
+
+
 @pytest.mark.parametrize(
     ("source", "code"),
     [

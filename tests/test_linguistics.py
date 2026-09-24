@@ -11,6 +11,13 @@ from utterplan.linguistics import LinguisticResourcePool, analyze_run_analyses
 from utterplan.planner import _split_run
 
 
+class FakeProviderDoc(list):
+    def __init__(self, text: str, tokens: list[SimpleNamespace]) -> None:
+        super().__init__(tokens)
+        self.text = text
+        self.sents = ()
+
+
 def test_run_analysis_is_lightweight_and_request_local():
     pool = LinguisticResourcePool()
 
@@ -85,17 +92,20 @@ def test_spacy_auto_uses_fake_compatible_local_model(monkeypatch):
 def test_spacy_enrichment_does_not_collapse_sentence_topology(monkeypatch):
     class Pipeline:
         def __call__(self, text):
-            return [
-                SimpleNamespace(
-                    idx=match.start(),
-                    text=match.group(0),
-                    pos_="NOUN",
-                    tag_="NN",
-                    lemma_=match.group(0).lower(),
-                    morph="",
-                )
-                for match in re.finditer(r"\S+", text)
-            ]
+            return FakeProviderDoc(
+                text,
+                [
+                    SimpleNamespace(
+                        idx=match.start(),
+                        text=match.group(0),
+                        pos_="NOUN",
+                        tag_="NN",
+                        lemma_=match.group(0).lower(),
+                        morph="",
+                    )
+                    for match in re.finditer(r"\S+", text)
+                ],
+            )
 
     monkeypatch.setitem(sys.modules, "spacy", SimpleNamespace(__version__="3.7.0"))
     monkeypatch.setattr(
@@ -125,6 +135,86 @@ def test_spacy_enrichment_does_not_collapse_sentence_topology(monkeypatch):
     ]
     assert len(plan.units) == 3
     assert [token.pos for token in plan.tokens] == ["NOUN"] * 6
+    assert [(segment.spoken_start, segment.spoken_end) for segment in plan.segments] == [
+        (0, 13),
+        (14, 28),
+        (29, 45),
+    ]
+    assert all(
+        plan.texts.spoken[segment.spoken_start : segment.spoken_end] == segment.text
+        for segment in plan.segments
+    )
+
+
+def test_clausal_boundaries_reuse_provider_document(monkeypatch):
+    import phrasplit
+
+    docs = []
+
+    class Pipeline:
+        def __call__(self, text):
+            tokens = [
+                SimpleNamespace(
+                    idx=match.start(),
+                    text=match.group(0),
+                    pos_="NOUN",
+                    tag_="NN",
+                    lemma_=match.group(0).lower(),
+                    morph="",
+                )
+                for match in re.finditer(r"\S+", text)
+            ]
+            doc = FakeProviderDoc(text, tokens)
+            docs.append(doc)
+            return doc
+
+    pipeline = Pipeline()
+    monkeypatch.setitem(sys.modules, "spacy", SimpleNamespace(__version__="3.7.0"))
+    monkeypatch.setattr(
+        LinguisticResourcePool,
+        "pipeline",
+        lambda self, model, require=False: pipeline,
+    )
+    source = "I wanted to go, but it was raining."
+    detected = []
+
+    def detect_clause_boundaries(text, *, language, doc):
+        detected.append((text, doc))
+        return [
+            SimpleNamespace(
+                kind="clausal_comma",
+                char_start=text.index(","),
+            )
+        ]
+
+    monkeypatch.setattr(phrasplit, "detect_clause_boundaries", detect_clause_boundaries)
+    config = PlannerConfig(
+        language="en-us",
+        document_format="plain",
+        text_preparation="identity",
+        linguistics=LinguisticsConfig(use_spacy=True, spacy_model="fake_model", require_spacy=True),
+    )
+
+    plan = UtterancePlanner(config).plan(source)
+
+    assert len(docs) == 2
+    assert detected == [(source, docs[-1])]
+    boundary = next(item for item in plan.boundaries if item.kind == "clausal_comma")
+    assert boundary.position == source.index(",")
+
+
+def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):
+    import phrasplit
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("fallback analysis must not infer syntactic clauses")
+
+    monkeypatch.setattr(phrasplit, "detect_clause_boundaries", fail_if_called)
+    plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(
+        "I wanted to go, but it was raining."
+    )
+
+    assert not any(item.kind == "clausal_comma" for item in plan.boundaries)
 
 
 def test_segmentation_type_error_is_not_a_whole_document_fallback(monkeypatch):
@@ -135,12 +225,7 @@ def test_segmentation_type_error_is_not_a_whole_document_fallback(monkeypatch):
 
     monkeypatch.setattr(phrasplit, "split_with_offsets", broken_split)
     with pytest.raises(PlanningError, match="sentence segmentation integration failed"):
-        _split_run(
-            "One sentence. Two sentences.",
-            "en-us",
-            PlannerConfig(language="en-us"),
-            SimpleNamespace(provider_doc=object()),
-        )
+        _split_run("One sentence. Two sentences.", "en-us")
 
 
 def _fake_spacy_plan(
@@ -154,17 +239,20 @@ def _fake_spacy_plan(
                 (7, "here", "ADV", "RB", "here", None),
                 (11, ".", "PUNCT", ".", ".", None),
             )
-            return [
-                SimpleNamespace(
-                    idx=idx,
-                    text=value,
-                    pos_=pos,
-                    tag_=token_tag,
-                    lemma_=lemma,
-                    morph=token_morph,
-                )
-                for idx, value, pos, token_tag, lemma, token_morph in values
-            ]
+            return FakeProviderDoc(
+                text,
+                [
+                    SimpleNamespace(
+                        idx=idx,
+                        text=value,
+                        pos_=pos,
+                        tag_=token_tag,
+                        lemma_=lemma,
+                        morph=token_morph,
+                    )
+                    for idx, value, pos, token_tag, lemma, token_morph in values
+                ],
+            )
 
     monkeypatch.setitem(sys.modules, "spacy", SimpleNamespace(__version__="3.7.0"))
     monkeypatch.setattr(

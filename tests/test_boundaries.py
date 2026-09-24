@@ -30,12 +30,16 @@ def test_parenthetical_boundary_keeps_phrasplit_origin():
 
 
 def test_language_cut_does_not_invent_clausal_comma():
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan('Hello [Bonjour]{lang="fr"}.')
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
+        'Hello [Bonjour]{lang="fr"}.'
+    )
     assert not any(event.kind == "clausal_comma" for event in plan.boundaries)
 
 
 def test_explicit_ssmd_boundary_keeps_ssmd_origin():
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello ...c world")
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
+        "Hello ...c world"
+    )
     event = next(event for event in plan.boundaries if event.kind == "explicit")
     assert event.origin == "ssmd"
     assert event.attrs["anchor"] == "after"

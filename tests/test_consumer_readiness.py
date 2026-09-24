@@ -48,8 +48,42 @@ def test_duration_spellings_have_equal_plan_identity() -> None:
 
 
 def _ssmd_plan(text: str, **kwargs: object):
-    config = PlannerConfig(language="en-us", text_preparation="identity", ssmd=SSMDConfig(**kwargs))
+    config = PlannerConfig(
+        language="en-us",
+        document_format="ssmd",
+        text_preparation="identity",
+        ssmd=SSMDConfig(**kwargs),
+    )
     return UtterancePlanner(config).plan(text)
+
+
+def test_planner_config_defaults_to_plain_text() -> None:
+    config = PlannerConfig(language="en-us", text_preparation="identity")
+    assert config.document_format == "plain"
+
+    plan = UtterancePlanner(config).plan('[Hello]{voice-name="Joanna"}')
+    assert plan.source.format == "plain"
+    assert not plan.annotations
+
+
+@pytest.mark.parametrize("option", ["strict_header", "unknown_header"])
+def test_noop_ssmd_header_options_are_removed(option: str) -> None:
+    with pytest.raises(TypeError):
+        SSMDConfig(**{option: True})
+
+
+def test_ssmd_pause_overrides_override_document_defaults() -> None:
+    plan = _ssmd_plan(
+        """---
+ssmd_version: "0.9"
+pause_defaults:
+  sentence: 800ms
+---
+One. Two.""",
+        pause_overrides={"sentence": "250ms"},
+    )
+    assert plan.segments[0].pause_after.seconds == pytest.approx(0.25)
+    assert plan.config["ssmd"]["pause_overrides"] == {"sentence": "250ms"}
 
 
 def test_ssmd_unknown_header_uses_parser_diagnostic() -> None:
@@ -79,14 +113,14 @@ Hello."""
         )
 
 
-def test_ssmd_parse_header_false_does_not_consume_front_matter() -> None:
+def test_ssmd_parse_yaml_header_false_does_not_consume_front_matter() -> None:
     plan = _ssmd_plan(
         """---
 ssmd_version: "0.9"
 unknown: value
 ---
 Hello.""",
-        parse_header=False,
+        parse_yaml_header=False,
     )
     assert "unknown: value" in plan.texts.structural
     assert plan.document_metadata["header"] == {}
@@ -109,7 +143,10 @@ One. Two."""
 
 def test_voice_change_pause_uses_logical_voice_in_one_language() -> None:
     config = PlannerConfig(
-        language="en-us", text_preparation="identity", pauses=PauseConfig(mode="auto")
+        language="en-us",
+        document_format="ssmd",
+        text_preparation="identity",
+        pauses=PauseConfig(mode="auto"),
     )
     plan = UtterancePlanner(config).plan('[One]{voice="a"} [Two]{voice="b"}.')
     voice_events = [event for event in plan.boundaries if event.kind == "voice_change"]
@@ -122,7 +159,7 @@ def test_voice_change_pause_uses_logical_voice_in_one_language() -> None:
 
 def test_prepared_contract_uses_spoken_coordinates_and_public_token_fields() -> None:
     source = 'Dr. Smith [has]{emphasis="moderate"} 5 kg.'
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan(source)
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(source)
     assert plan.texts.spoken == "Doctor Smith has five kilograms."
     annotation = plan.annotations[0]
     assert annotation.spoken_start == 12
@@ -148,7 +185,9 @@ voice_bindings:
   narrator: voice-a
 ---
 [Hello]{voice="narrator"}."""
-    plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(text)
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
+    ).plan(text)
     assert plan.document_metadata["voice_bindings"] == {"narrator": "voice-a"}
     assert plan.segments[0].directives.voice.reference == "narrator"
     assert plan.segments[0].directives.voice.reference != "voice-a"
@@ -164,7 +203,7 @@ language_detection:
   languages: [de, en]
 ---
 Hallo."""
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan(text)
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(text)
     assert plan.document_metadata["language_detection"] == {
         "mode": "auto",
         "languages": ["de", "en"],
@@ -191,5 +230,5 @@ def test_language_detection_header_shape_is_validated(header: str, code: str) ->
 ---
 Hallo."""
     with pytest.raises(PlanFormatError) as error:
-        UtterancePlanner(PlannerConfig(language="en-us")).plan(document)
+        UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(document)
     assert error.value.code == code

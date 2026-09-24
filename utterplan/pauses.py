@@ -61,7 +61,15 @@ def resolve_pauses(
 def _pause(events: list[BoundaryEvent]) -> ResolvedPause:
     if not events:
         return ResolvedPause()
-    winner = max(events, key=lambda event: (float(event.seconds or 0), event.id))
+    explicit = [
+        event
+        for event in events
+        if event.origin == "ssmd"
+        and event.kind == "explicit"
+        and event.attrs.get("pause_origin") == "explicit"
+    ]
+    candidates = explicit or events
+    winner = max(candidates, key=lambda event: (float(event.seconds or 0), event.id))
     return ResolvedPause(
         float(winner.seconds or 0),
         tuple(event.id for event in sorted(events, key=lambda event: event.id)),

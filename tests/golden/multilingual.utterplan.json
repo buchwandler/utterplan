@@ -48,10 +48,8 @@
       "weak": 0.15
     },
     "ssmd": {
-      "parse_header": true,
-      "pause_defaults": null,
-      "strict_header": true,
-      "unknown_header": "warn"
+      "parse_yaml_header": true,
+      "pause_overrides": null
     },
     "text_preparation": "spokenform",
     "unit": "paragraph"
@@ -126,7 +124,7 @@
     }
   ],
   "markers": [],
-  "plan_id": "sha256:c4b143453e35138e8a6e89761cc33bad3ec99d8340bf23c0f6b6a90f6c9d08cf",
+  "plan_id": "sha256:e6f510f1d78a90c74d7807c59327d3860d15167006ea51e3894a7106f0e3c0e0",
   "preparation": {
     "backend": "spokenform",
     "languages": ["en-us", "fr", "en-us"],

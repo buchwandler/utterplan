@@ -39,7 +39,9 @@ voice_bindings:
   narrator: voice-a
 ---
 [Hello]{voice="narrator"} @mark"""
-    plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(text)
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
+    ).plan(text)
     rendered = render_semantic_plan(plan)
     assert rendered
     assert rendered[0]["text"] == "Hello"

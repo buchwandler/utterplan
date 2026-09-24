@@ -96,7 +96,7 @@ ssmd_version: "0.9"
 unknown: true
 ---
 Hello."""
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan(text)
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(text)
 
     output = format_explanation(plan)
 

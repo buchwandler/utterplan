@@ -8,7 +8,7 @@ from .config import PauseConfig, PlannerConfig, parse_duration
 from .directives import resolve_directives
 from .exceptions import ConfigurationError, PlanningError
 from .language import build_language_runs, language_lookup_key, spans_from_annotations
-from .linguistics import LinguisticResourcePool, analyze_run_analyses
+from .linguistics import LinguisticResourcePool, RunAnalysis, analyze_run_analyses
 from .model import (
     AnnotationSpan,
     BoundaryEvent,
@@ -90,10 +90,8 @@ class UtterancePlanner:
         tokens = tuple(token for analysis in pass_b for token in analysis.tokens)
         linguistic_runs = _linguistic_runs(runs, pass_b)
         boundaries = list(prepared.boundaries)
-        boundaries.extend(_linguistic_boundaries(spoken, runs, config, start_id=len(boundaries)))
-        segments = _segment(
-            spoken, runs, prepared.annotations, boundaries, config, pause_config, pass_b
-        )
+        boundaries.extend(_linguistic_boundaries(spoken, runs, pass_b, start_id=len(boundaries)))
+        segments = _segment(spoken, runs, prepared.annotations, boundaries, pause_config)
         segments = _attach_membership(segments, tokens, prepared.annotations)
         segments = [
             resolve_directives(
@@ -180,12 +178,12 @@ def _effective_pause_config(config: PlannerConfig, header: dict[str, Any]) -> Pa
                     values[name] = parse_duration(value, field_name=f"pause_defaults.{name}")
                 except ConfigurationError:
                     continue
-    if config.ssmd.pause_defaults:
-        for name, value in config.ssmd.pause_defaults.items():
+    if config.ssmd.pause_overrides:
+        for name, value in config.ssmd.pause_overrides.items():
             values[name] = (
                 bool(value)
                 if name == "enabled"
-                else parse_duration(value, field_name=f"ssmd.pause_defaults.{name}")
+                else parse_duration(value, field_name=f"ssmd.pause_overrides.{name}")
             )
     return PauseConfig(**values)
 
@@ -193,8 +191,8 @@ def _effective_pause_config(config: PlannerConfig, header: dict[str, Any]) -> Pa
 def _config_dict(config: PlannerConfig) -> dict[str, Any]:
     result = asdict(config)
     result["language_aliases"] = dict(config.language_aliases)
-    if result.get("ssmd", {}).get("pause_defaults") is not None:
-        result["ssmd"]["pause_defaults"] = dict(config.ssmd.pause_defaults or {})
+    if result.get("ssmd", {}).get("pause_overrides") is not None:
+        result["ssmd"]["pause_overrides"] = dict(config.ssmd.pause_overrides or {})
     return result
 
 
@@ -223,17 +221,14 @@ def _segment(
     runs: tuple[Any, ...],
     annotations: tuple[AnnotationSpan, ...],
     boundaries: list[BoundaryEvent],
-    config: PlannerConfig,
     pause_config: PauseConfig,
-    analyses: tuple[Any, ...] = (),
 ) -> list[PlanSegment]:
     if not text:
         return []
     result: list[PlanSegment] = []
-    for run_index, run in enumerate(runs):
+    for run in runs:
         local_text = text[run.spoken_start : run.spoken_end]
-        analysis = analyses[run_index] if run_index < len(analyses) else None
-        for item in _split_run(local_text, run.language, config, analysis):
+        for item in _split_run(local_text, run.language):
             local_start = int(getattr(item, "char_start", 0))
             local_end = int(getattr(item, "char_end", len(local_text)))
             start = run.spoken_start + local_start
@@ -294,14 +289,11 @@ def _segment(
     return result
 
 
-def _split_run(
-    text: str, language: str, config: PlannerConfig, analysis: Any | None = None
-) -> list[Any]:
+def _split_run(text: str, language: str) -> list[Any]:
     try:
         import phrasplit
 
-        # Linguistic enrichment is consumed for token annotations only. Sentence
-        # topology stays on the deterministic phrasplit path.
+        # Sentence topology stays on the deterministic phrasplit path.
         items = phrasplit.split_with_offsets(
             text, mode="sentence", use_spacy=False, language=language_lookup_key(language)
         )
@@ -405,21 +397,29 @@ class _FallbackSplit:
 
 
 def _linguistic_boundaries(
-    text: str, runs: tuple[Any, ...], config: PlannerConfig, *, start_id: int = 0
+    text: str,
+    runs: tuple[Any, ...],
+    analyses: tuple[RunAnalysis, ...],
+    *,
+    start_id: int = 0,
 ) -> list[BoundaryEvent]:
     try:
         import phrasplit
     except ImportError:
         return []
     result: list[BoundaryEvent] = []
-    for run in runs:
+    for run, analysis in zip(runs, analyses, strict=True):
         local = text[run.spoken_start : run.spoken_end]
-        try:
-            clause_items = phrasplit.detect_clause_boundaries(
-                local, language=language_lookup_key(run.language), use_spacy=False
-            )
-        except (OSError, TypeError, ValueError):
-            clause_items = []
+        clause_items = []
+        if analysis.provider_doc is not None:
+            try:
+                clause_items = phrasplit.detect_clause_boundaries(
+                    local,
+                    language=language_lookup_key(run.language),
+                    doc=analysis.provider_doc,
+                )
+            except (OSError, TypeError, ValueError):
+                clause_items = []
         for item in clause_items:
             kind = str(getattr(item, "kind", ""))
             event_kind = (

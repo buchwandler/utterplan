@@ -355,10 +355,8 @@
       "weak": 0.15
     },
     "ssmd": {
-      "parse_header": true,
-      "pause_defaults": null,
-      "strict_header": true,
-      "unknown_header": "warn"
+      "parse_yaml_header": true,
+      "pause_overrides": null
     },
     "text_preparation": "identity",
     "unit": "paragraph"
@@ -465,7 +463,7 @@
       "spoken_position": 249
     }
   ],
-  "plan_id": "sha256:7549f4a82a1ef630cea1049d59115f7f39950801151d18abd6e379e35b108aa3",
+  "plan_id": "sha256:16e2df79328dec10d56c247526c7ece988f22066f160d26f0b8fd920dc3a4cc2",
   "preparation": {
     "backend": "identity",
     "languages": ["sr-Latn"],

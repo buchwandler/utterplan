@@ -1,0 +1,160 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.3.0
+git_base_ref: 215d3a4b43ccaadbf50cb40b752ae30a5b4f39e5
+git_base_sha: 215d3a4b43ccaadbf50cb40b752ae30a5b4f39e5
+git_head_ref: 49023f0470950eb3b1ff9a1c9a928bac5a47575e
+git_head_sha: 49023f0470950eb3b1ff9a1c9a928bac5a47575e
+include_merges: nontrivial
+entries:
+  - kind: changed
+    summary: Changed source compatibility to SSMD 0.9 with typed schema v3 plans
+    body: >-
+      SSMD input uses dialect 0.9 and older source syntax is rejected. Schema v3
+      preserves typed renderer-neutral directives and source provenance; supported
+      v1 and v2 plans migrate to v3 without reparsing or replanning.
+    breaking: true
+    status: accepted
+    source_refs:
+      - git:49023f0470950eb3b1ff9a1c9a928bac5a47575e
+    paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/coordinate-spaces.md
+      - docs/debugging.md
+      - docs/format.md
+      - docs/getting-started.md
+      - docs/python-api.md
+      - examples/chapter.ssmd
+      - pyproject.toml
+      - spec/schemas/v3.schema.json
+      - spec/utterplan.schema.json
+      - tests/fixtures/ssmd_09_comprehensive.ssmd
+      - tests/golden/ssmd_09_comprehensive.utterplan.json
+      - tests/migration/cases.py
+      - tests/migration/goldens/multilingual_preparation.json
+      - tests/migration/goldens/spokenform_numbers.json
+      - tests/migration/goldens/ssmd_break.json
+      - tests/migration/goldens/ssmd_language_detection.json
+      - tests/migration/goldens/ssmd_marker.json
+      - tests/migration/goldens/ssmd_pronunciation.json
+      - tests/schema_history/README.md
+      - tests/schema_history/v2/directives.json
+      - tests/test_cli.py
+      - tests/test_consumer_contract.py
+      - tests/test_consumer_readiness.py
+      - tests/test_coordinates.py
+      - tests/test_directives.py
+      - tests/test_explain.py
+      - tests/test_fake_renderer.py
+      - tests/test_format.py
+      - tests/test_golden.py
+      - tests/test_migration_framework.py
+      - tests/test_preparation.py
+      - tests/test_public_identity.py
+      - tests/test_schema_history.py
+      - tests/test_schema_registry.py
+      - tests/test_ssmd_09_parser.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/directives.py
+      - utterplan/explain.py
+      - utterplan/language.py
+      - utterplan/migrations/__init__.py
+      - utterplan/migrations/v2_to_v3.py
+      - utterplan/model.py
+      - utterplan/parsers.py
+      - utterplan/pauses.py
+      - utterplan/planner.py
+      - utterplan/preparation.py
+      - utterplan/schema_registry.py
+      - utterplan/schemas/v3.schema.json
+      - utterplan/stages/segmentation/phrasplit.py
+      - utterplan/utterplan.schema.json
+      - utterplan/versioning.py
+    sources:
+      - git:49023f0470950eb3b1ff9a1c9a928bac5a47575e
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+
+  - kind: fixed
+    summary: Fixed precedence so authored SSMD breaks override generated pauses
+    body: >-
+      At a shared boundary, an explicit SSMD break wins over automatic or default
+      pauses. Durations are not added, all contributing event IDs remain in provenance,
+      and an authored zero-duration break still takes precedence.
+    status: accepted
+    paths:
+      - utterplan/pauses.py
+      - tests/test_pauses.py
+      - tests/test_ssmd_09_parser.py
+    sources:
+      - tl:task-0017
+
+  - kind: changed
+    summary: Changed Python input defaults and renamed SSMDConfig options
+    body: >-
+      PlannerConfig now treats strings as plain text unless SSMD is selected explicitly.
+      The no-op strict_header and unknown_header options were removed; parse_header and
+      the application pause_defaults option are now parse_yaml_header and pause_overrides.
+      The source-header pause_defaults key remains unchanged.
+    status: accepted
+    breaking: true
+    paths:
+      - utterplan/config.py
+      - utterplan/parsers.py
+      - utterplan/planner.py
+      - docs/python-api.md
+      - docs/consumer-guide.md
+      - tests/test_consumer_readiness.py
+    sources:
+      - tl:task-0017
+
+  - kind: changed
+    summary: Changed clause enrichment to reuse provider-owned spaCy docs
+    body: >-
+      Clausal-boundary enrichment reuses the request-local provider document when
+      available. Fallback analysis does not infer syntactic clauses, and sentence
+      topology remains on the deterministic spaCy-free segmentation path.
+    status: accepted
+    paths:
+      - utterplan/planner.py
+      - tests/test_linguistics.py
+    sources:
+      - tl:task-0017
+
+  - kind: added
+    summary: Added PEP 561 metadata and SSMD 0.9 package checks
+    body: >-
+      Wheel and source-distribution checks require the PEP 561 marker, all schema
+      resources, and the SSMD 0.9 dependency range. Installed-package smoke coverage
+      accepts strict 0.9 input and rejects an explicit 0.8 header.
+    status: accepted
+    paths:
+      - utterplan/py.typed
+      - pyproject.toml
+      - .github/workflows/tests.yml
+      - .github/workflows/python-publish.yml
+    sources:
+      - tl:task-0017
+
+  - kind: docs
+    summary: Documented the 0.2-to-0.3 migration paths
+    body: >-
+      The migration guide separates SSMD source conversion with ssmd migrate from
+      UtterPlan JSON schema migration. It documents the plain Python input default,
+      SSMDConfig renames, and continued v1/v2 plan migration to schema v3.
+    status: accepted
+    paths:
+      - docs/consumer-guide.md
+      - docs/python-api.md
+      - docs/format.md
+    sources:
+      - tl:task-0017

@@ -410,16 +410,18 @@ def _format_metadata(plan: UtterancePlan, lines: list[str]) -> None:
     displayed: list[str] = []
     bindings = metadata.get("voice_bindings")
     if isinstance(bindings, Mapping) and bindings:
-        values = ", ".join(f"{name}={_json(value)}" for name, value in sorted(bindings.items()))
-        displayed.append(f"  voice bindings: {values}")
+        binding_values = ", ".join(
+            f"{name}={_json(value)}" for name, value in sorted(bindings.items())
+        )
+        displayed.append(f"  voice bindings: {binding_values}")
     defaults = metadata.get("voice_defaults")
     if isinstance(defaults, Mapping) and defaults:
-        values = []
+        default_values = []
         for name, fields in sorted(defaults.items()):
             if isinstance(fields, Mapping):
-                values.append(f"{name} ({_format_metadata_fields(fields)})")
-        if values:
-            displayed.append(f"  voice defaults: {', '.join(values)}")
+                default_values.append(f"{name} ({_format_metadata_fields(fields)})")
+        if default_values:
+            displayed.append(f"  voice defaults: {', '.join(default_values)}")
     for key, label in (
         ("pause_defaults", "pause defaults"),
         ("prosody_transitions", "prosody transitions"),

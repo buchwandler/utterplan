@@ -4,11 +4,43 @@ UtterPlan ends at a semantic planning boundary. A renderer consumes the public
 plan object and begins G2P after planning. It does not need a JSON round trip
 when planner and renderer run in the same process.
 
-UtterPlan accepts SSMD source syntax at version 0.9 only. Convert older source with `ssmd migrate FILE --to 0.9` before planning. This is separate from `UtterancePlan` schema migration, which operates only on serialized plan JSON. SSMD annotations and header semantics are preserved as portable data; UtterPlan does not execute audio or extension directives.
+UtterPlan accepts SSMD source syntax at version 0.9 only. See [migration from 0.2 to 0.3](#migrating-from-utterplan-02-to-03) for source and serialized-plan migration paths.
+
+## Migrating from UtterPlan 0.2 to 0.3
+
+### SSMD source documents
+
+UtterPlan 0.3 accepts SSMD 0.9 only. Convert older source files before compilation:
+
+```bash
+ssmd migrate FILE --to 0.9
+```
+
+This is source-dialect migration. It does not convert serialized UtterPlan plans.
+
+### Python input format
+
+`PlannerConfig.document_format` now defaults to `"plain"`. Plain-text callers need no change. Set `document_format="ssmd"` when a Python string contains an SSMD document or fragment:
+
+```python
+planner = UtterancePlanner(
+    PlannerConfig(language="en-us", document_format="ssmd")
+)
+plan = planner.plan(ssmd_source)
+```
+
+### SSMD configuration
+
+`SSMDConfig.strict_header` and `SSMDConfig.unknown_header` were removed because SSMD 0.9 owns header validation. `parse_header` is now `parse_yaml_header`, and the application-level `pause_defaults` option is now `pause_overrides`. The portable SSMD source-header key remains `pause_defaults`. At a shared boundary, an explicit source break takes precedence over application overrides, document defaults, and planner defaults, including an authored `0ms` break.
+
+### Existing UtterPlan JSON plans
+
+Serialized schema v1 and v2 plans remain supported. UtterPlan migrates v1 plans sequentially through v2 to current schema v3, and migrates v2 directly to v3. Migration converts serialized plan data only. It does not reparse source or replan. Package version and serialized schema version are independent.
 
 ## Planning defaults
 
 UtterPlan's default text-preparation backend is `spokenform`, its default pause mode is `tts`, and the default CLI linguistic-resource policy is `spacy off`. The default path uses deterministic fallback tokenization and analysis and does not depend on an installed spaCy model.
+The Python API defaults `PlannerConfig.document_format` to `"plain"`; choose `"ssmd"` explicitly for authored SSMD strings. In `SSMDConfig`, use `parse_yaml_header` and `pause_overrides`. SSMD 0.9 owns header diagnostics, and the source-header `pause_defaults` key remains separate from application overrides.
 
 `spacy auto` is an opt-in enrichment policy. When a compatible local model is available, it may expose richer tokenization, POS tags, lemmas, and tags. Consumers should not assume `auto` is enabled, and provider documents remain internal planning state rather than public plan data.
 

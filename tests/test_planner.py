@@ -14,13 +14,15 @@ def test_plain_sentences_paragraphs_and_pauses():
 
 
 def test_ssmd_preparation_and_explicit_directives():
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan('[tomato]{ph="təˈmeɪtoʊ"}')
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
+        '[tomato]{ph="təˈmeɪtoʊ"}'
+    )
     assert plan.preparation.backend == "spokenform"
     assert plan.segments[0].directives.pronunciation.phonemes == "təˈmeɪtoʊ"
 
 
 def test_ssmd_break_marker_and_language():
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan(
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
         'Hello ...500ms [Bonjour]{lang="fr"} @mark'
     )
     assert len(plan.segments) >= 2

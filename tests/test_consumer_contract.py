@@ -69,7 +69,7 @@ def assert_public_consumer_contract(plan: UtterancePlan) -> None:
 
 
 def test_fake_renderer_cannot_mutate_completed_plan() -> None:
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan(
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
         """---
 ssmd_version: "0.9"
 voice_bindings:
@@ -91,9 +91,9 @@ def test_plain_spokenform_consumer_contract() -> None:
 
 
 def test_multilingual_ssmd_consumer_contract() -> None:
-    plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(
-        'Hello [Bonjour]{lang="fr"}.'
-    )
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
+    ).plan('Hello [Bonjour]{lang="fr"}.')
     assert {run.language for run in plan.languages} == {"en-us", "fr"}
     assert_public_consumer_contract(plan)
 
@@ -105,16 +105,18 @@ voice_bindings:
   narrator: voice-a
 ---
 [Hello]{voice="narrator"}."""
-    plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(text)
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
+    ).plan(text)
     assert plan.document_metadata["voice_bindings"] == {"narrator": "voice-a"}
     assert plan.segments[0].directives.voice.reference == "narrator"
     assert_public_consumer_contract(plan)
 
 
 def test_explicit_break_is_a_public_boundary() -> None:
-    plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(
-        "Hello ...c world"
-    )
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
+    ).plan("Hello ...c world")
     assert any(boundary.kind == "explicit" for boundary in plan.boundaries)
     assert_public_consumer_contract(plan)
 
@@ -154,7 +156,9 @@ def test_medial_parenthetical_consumer_contract_preserves_pause_ownership():
 @pytest.mark.parametrize("unit", ["paragraph", "sentence"])
 def test_markers_and_unit_ownership_are_public(unit: str) -> None:
     plan = UtterancePlanner(
-        PlannerConfig(language="en-us", unit=unit, text_preparation="identity")
+        PlannerConfig(
+            language="en-us", document_format="ssmd", unit=unit, text_preparation="identity"
+        )
     ).plan("One. @mark Two.")
     assert plan.markers
     owned = [marker_id for item in plan.units for marker_id in item.marker_ids]
