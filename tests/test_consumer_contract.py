@@ -70,7 +70,12 @@ def assert_public_consumer_contract(plan: UtterancePlan) -> None:
 
 def test_fake_renderer_cannot_mutate_completed_plan() -> None:
     plan = UtterancePlanner(PlannerConfig(language="en-us")).plan(
-        '---\nvoice_bindings:\n  narrator: voice-a\n---\nOne. @mark [Two]{voice="narrator"}.'
+        """---
+ssmd_version: "0.9"
+voice_bindings:
+  narrator: voice-a
+---
+One. @mark [Two]{voice="narrator"}."""
     )
     before = plan.to_json(indent=None)
     plan_id = plan.plan_id
@@ -94,7 +99,12 @@ def test_multilingual_ssmd_consumer_contract() -> None:
 
 
 def test_voice_directive_and_document_binding_are_public() -> None:
-    text = '---\nvoice_bindings:\n  narrator: voice-a\n---\n[Hello]{voice="narrator"}.'
+    text = """---
+ssmd_version: "0.9"
+voice_bindings:
+  narrator: voice-a
+---
+[Hello]{voice="narrator"}."""
     plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(text)
     assert plan.document_metadata["voice_bindings"] == {"narrator": "voice-a"}
     assert plan.segments[0].directives.voice.reference == "narrator"

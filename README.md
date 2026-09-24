@@ -21,13 +21,13 @@ utterplan compile "Doctor Smith bought 5 kg." --lang en-us --json
 Compile a file to a plan file:
 
 ```bash
-utterplan compile chapter.ssmd --lang en-us -o chapter.utterplan.json
+utterplan compile examples/chapter.ssmd --lang en-us -o chapter.utterplan.json
 ```
 
 Use stdin and shell pipelines:
 
 ```bash
-cat chapter.ssmd | utterplan compile --lang en-us --input-format ssmd | jq .
+cat examples/chapter.ssmd | utterplan compile --lang en-us --input-format ssmd | jq .
 ```
 
 The CLI also provides:
@@ -42,6 +42,22 @@ utterplan explain chapter.utterplan.json
 `explain` presents the compiled plan as a human-readable speech plan, while `inspect` exposes lower-level diagnostic fields.
 Compile JSON is written to stdout when no output file is supplied. Status
 messages use stderr, and existing output files require `--force`.
+
+## SSMD source contract
+
+UtterPlan accepts SSMD 0.9 syntax only. Use `document_format="ssmd"` or
+`--input-format ssmd` to compile canonical unversioned fragments as SSMD 0.9.
+Automatic detection recognizes `.ssmd`, `.ssmd.md`, and Markdown files with an SSMD
+version header; ordinary Markdown remains plain text.
+
+Migrate older SSMD source before compilation with the SSMD project's migration
+command:
+
+```bash
+ssmd migrate old.ssmd --to 0.9
+```
+
+`utterplan migrate` is only for historical `.utterplan.json` schema migration. It does not migrate SSMD source.
 
 ## Planning defaults
 
@@ -71,6 +87,12 @@ Renderers consume `PlanSegment.text`, which is prepared/spoken text, and use
 pauses, language, directives, annotations, boundaries, markers, units, and
 document metadata are public plan fields. Plans contain no phonemes, model
 tokens, model sessions, renderer configuration, provider documents, or audio.
+For SSMD input, `plan.annotations` preserve declared source semantics and source
+provenance, `document_metadata` preserves portable header data, and
+`segment.directives` carries effective typed semantics after scope and voice-default
+resolution. Typed directives include voice, pronunciation, prosody, emphasis, say-as,
+substitution, audio references, and extension references. Audio and extensions are
+data only. UtterPlan does not fetch media or execute extension handlers.
 
 The intended dependency direction is:
 
@@ -91,15 +113,16 @@ renderer repository rather than UtterPlan's test suite.
 - [Architecture](docs/architecture.md)
 - [Coordinates](docs/coordinate-spaces.md)
 - [PyKokoro integration](docs/pykokoro-integration.md)
+- [Python API](docs/python-api.md)
+- [Debugging](docs/debugging.md)
 - [Changelog](docs/changelog.md)
 
 ## Versions
 
-The package version is dynamically derived from Git tags by setuptools-scm. The
-first public alpha package release is `0.1.0`. The package version and
-UtterPlan `schema_version` is independent from the package version. Current plans use schema version `2`; schema v1 remains frozen and supported through a pure v1-to-v2 migration.
+The package version is dynamically derived from Git tags by setuptools-scm. Package version and UtterPlan schema version are independent. Current plans use schema v3; released schema v1 and v2 remain immutable and supported through sequential v1-to-v2-to-v3 and direct v2-to-v3 migrations.
 
-Schema v2 persists final pass-B token facts, including optional POS, tag, lemma, and morphology, plus per-language-run provider provenance. Unit hashes use `utterplan-unit-v2` and include pronunciation-relevant token semantics. Migration is representation conversion only and never reruns planning or linguistic analysis.
+Schema v3 adds typed renderer-neutral SSMD semantics. Migration converts serialized plan data only. It does not reparse source, replan, or rerun linguistic analysis, G2P, rendering, or audio processing. Unit hashes retain the `utterplan-unit-v2` algorithm.
+Schema v3 persists final pass-B token facts, including optional POS, tag, lemma, and morphology, plus per-language-run provider provenance. Unit hashes include pronunciation-relevant token semantics but exclude model/audio state.
 
 ## Development
 

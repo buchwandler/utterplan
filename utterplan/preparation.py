@@ -5,7 +5,7 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Protocol
 
 from .exceptions import TextPreparationError
-from .language import LanguageRun
+from .language import LanguageRun, language_lookup_key
 from .model import AnnotationSpan, BoundaryEvent, TextPreparationInfo
 
 
@@ -53,7 +53,7 @@ class SpokenformTextPreparer:
                     and (annotation.attrs.get("ph") or annotation.attrs.get("phonemes"))
                 ]
                 kwargs: dict[str, Any] = {
-                    "language": run.language,
+                    "language": language_lookup_key(run.language),
                     "use_spacy": False,
                     "strip_outer_whitespace": False,
                     "preserve_run_boundaries": True,
@@ -208,6 +208,9 @@ def _map_annotation(annotation: AnnotationSpan, source_map: SourceToSpokenMap) -
         annotation.structural_end,
         spoken_start,
         max(spoken_start, spoken_end),
+        annotation.source_start,
+        annotation.source_end,
+        annotation.source_node_id,
     )
 
 

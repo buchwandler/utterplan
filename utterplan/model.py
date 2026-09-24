@@ -65,6 +65,8 @@ class TextPreparationInfo:
 
 @dataclass(frozen=True, slots=True)
 class AnnotationSpan:
+    """Annotation spans using structural, spoken, and original-source coordinates."""
+
     id: str
     kind: str
     attrs: Mapping[str, Any]
@@ -72,6 +74,9 @@ class AnnotationSpan:
     structural_end: int
     spoken_start: int | None = None
     spoken_end: int | None = None
+    source_start: int | None = None
+    source_end: int | None = None
+    source_node_id: str | None = None
 
     @property
     def char_start(self) -> int:
@@ -84,7 +89,7 @@ class AnnotationSpan:
         return self.structural_end
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "id": self.id,
             "kind": self.kind,
             "attrs": _plain(self.attrs),
@@ -93,6 +98,11 @@ class AnnotationSpan:
             "spoken_start": self.spoken_start,
             "spoken_end": self.spoken_end,
         }
+        for key in ("source_start", "source_end", "source_node_id"):
+            value = getattr(self, key)
+            if value is not None:
+                result[key] = value
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,10 +216,26 @@ class ResolvedPause:
 
 @dataclass(frozen=True, slots=True)
 class VoiceDirective:
-    reference: str
+    reference: str | None = None
+    name: str | None = None
+    languages: str | None = None
+    gender: str | None = None
+    age: int | None = None
+    variant: int | None = None
 
-    def to_dict(self) -> dict[str, str]:
-        return {"reference": self.reference}
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in (
+                ("reference", self.reference),
+                ("name", self.name),
+                ("languages", self.languages),
+                ("gender", self.gender),
+                ("age", self.age),
+                ("variant", self.variant),
+            )
+            if value is not None
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,6 +266,37 @@ class EmphasisDirective:
 
 
 @dataclass(frozen=True, slots=True)
+class SayAsDirective:
+    interpret_as: str
+    format: str | None = None
+    detail: str | None = None
+
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "interpret_as": self.interpret_as,
+            "format": self.format,
+            "detail": self.detail,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SubstitutionDirective:
+    alias: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"alias": self.alias}
+
+
+@dataclass(frozen=True, slots=True)
+class ExtensionDirective:
+    name: str
+    params: Mapping[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "params": dict(self.params)}
+
+
+@dataclass(frozen=True, slots=True)
 class AudioDirective:
     src: str
     alt_text: str | None = None
@@ -247,11 +304,12 @@ class AudioDirective:
     clip_end: str | None = None
     speed: str | None = None
     repeat_duration: str | None = None
-    repeat_count: int | None = None
+    repeat_count: float | None = None
     sound_level: str | None = None
+    description: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "src": self.src,
             "alt_text": self.alt_text,
             "clip_begin": self.clip_begin,
@@ -261,6 +319,9 @@ class AudioDirective:
             "repeat_count": self.repeat_count,
             "sound_level": self.sound_level,
         }
+        if self.description is not None:
+            result["description"] = self.description
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,6 +331,9 @@ class SegmentDirectives:
     prosody: ProsodyDirective | None = None
     emphasis: EmphasisDirective | None = None
     audio: AudioDirective | None = None
+    say_as: SayAsDirective | None = None
+    substitution: SubstitutionDirective | None = None
+    extensions: tuple[ExtensionDirective, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -278,10 +342,14 @@ class SegmentDirectives:
             ("pronunciation", self.pronunciation),
             ("prosody", self.prosody),
             ("emphasis", self.emphasis),
+            ("say_as", self.say_as),
+            ("substitution", self.substitution),
             ("audio", self.audio),
         ):
             if value is not None:
                 result[key] = _plain(value)
+        if self.extensions:
+            result["extensions"] = [_plain(item) for item in self.extensions]
         return result
 
 
@@ -396,14 +464,24 @@ class Diagnostic:
     message: str
     severity: str = "info"
     path: str | None = None
+    source_start: int | None = None
+    source_end: int | None = None
+    line: int | None = None
+    column: int | None = None
+    hint: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "code": self.code,
             "message": self.message,
             "severity": self.severity,
             "path": self.path,
         }
+        for key in ("source_start", "source_end", "line", "column", "hint"):
+            value = getattr(self, key)
+            if value is not None:
+                result[key] = value
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -670,30 +748,52 @@ def _directive(data: Mapping[str, Any] | None) -> SegmentDirectives:
     pronunciation = data.get("pronunciation")
     prosody = data.get("prosody")
     emphasis = data.get("emphasis")
+    say_as = data.get("say_as")
+    substitution = data.get("substitution")
     audio = data.get("audio")
     return SegmentDirectives(
-        VoiceDirective(str(voice["reference"])) if voice else None,
-        PronunciationDirective(
+        voice=VoiceDirective(
+            reference=voice.get("reference"),
+            name=voice.get("name"),
+            languages=voice.get("languages"),
+            gender=voice.get("gender"),
+            age=_optional_int(voice.get("age")),
+            variant=_optional_int(voice.get("variant")),
+        )
+        if voice
+        else None,
+        pronunciation=PronunciationDirective(
             str(pronunciation["phonemes"]), str(pronunciation.get("alphabet", "ipa"))
         )
         if pronunciation
         else None,
-        ProsodyDirective(prosody.get("rate"), prosody.get("pitch"), prosody.get("volume"))
+        prosody=ProsodyDirective(prosody.get("rate"), prosody.get("pitch"), prosody.get("volume"))
         if prosody
         else None,
-        EmphasisDirective(str(emphasis["level"])) if emphasis else None,
-        AudioDirective(
-            str(audio["src"]),
-            audio.get("alt_text"),
-            audio.get("clip_begin"),
-            audio.get("clip_end"),
-            audio.get("speed"),
-            audio.get("repeat_duration"),
-            audio.get("repeat_count"),
-            audio.get("sound_level"),
+        emphasis=EmphasisDirective(str(emphasis["level"])) if emphasis else None,
+        say_as=SayAsDirective(
+            str(say_as["interpret_as"]), say_as.get("format"), say_as.get("detail")
+        )
+        if say_as
+        else None,
+        substitution=SubstitutionDirective(str(substitution["alias"])) if substitution else None,
+        audio=AudioDirective(
+            src=str(audio["src"]),
+            description=audio.get("description"),
+            clip_begin=audio.get("clip_begin"),
+            clip_end=audio.get("clip_end"),
+            speed=audio.get("speed"),
+            repeat_duration=audio.get("repeat_duration"),
+            repeat_count=audio.get("repeat_count"),
+            sound_level=audio.get("sound_level"),
+            alt_text=audio.get("alt_text"),
         )
         if audio
         else None,
+        extensions=tuple(
+            ExtensionDirective(str(item["name"]), dict(item.get("params", {})))
+            for item in data.get("extensions", ())
+        ),
     )
 
 
@@ -749,6 +849,9 @@ def _from_current_dict(data: Mapping[str, Any]) -> UtterancePlan:
                 structural_end=int(x.get("structural_end", x.get("char_end", 0))),
                 spoken_start=_optional_int(x.get("spoken_start")),
                 spoken_end=_optional_int(x.get("spoken_end")),
+                source_start=_optional_int(x.get("source_start")),
+                source_end=_optional_int(x.get("source_end")),
+                source_node_id=x.get("source_node_id"),
             )
             for i, x in enumerate(data.get("annotations", ()))
         ),
@@ -825,7 +928,15 @@ def _from_current_dict(data: Mapping[str, Any]) -> UtterancePlan:
         warnings=tuple(data.get("warnings", ())),
         diagnostics=tuple(
             Diagnostic(
-                str(x["code"]), str(x["message"]), str(x.get("severity", "info")), x.get("path")
+                code=str(x["code"]),
+                message=str(x["message"]),
+                severity=str(x.get("severity", "info")),
+                path=x.get("path"),
+                source_start=x.get("source_start"),
+                source_end=x.get("source_end"),
+                line=x.get("line"),
+                column=x.get("column"),
+                hint=x.get("hint"),
             )
             for x in data.get("diagnostics", ())
         ),

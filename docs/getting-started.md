@@ -54,8 +54,8 @@ utterplan compile "Hello world." --lang en-us | jq '.segments'
 
 ```bash
 echo "Hello world." | utterplan compile --lang en-us > hello.utterplan.json
-utterplan compile chapter.ssmd --lang en-us -o chapter.utterplan.json
-utterplan compile --file chapter.ssmd --lang en-us -o chapter.utterplan.json
+utterplan compile chapter.ssmd.md --lang en-us -o chapter.utterplan.json
+utterplan compile --file chapter.ssmd.md --lang en-us -o chapter.utterplan.json
 ```
 
 A single existing positional path is read as a file. Use
@@ -71,13 +71,16 @@ utterplan inspect hello.utterplan.json --unit 0 --boundaries --tokens
 
 ## SSMD
 
-SSMD is selected by a `.ssmd` suffix or explicitly from stdin:
+SSMD is selected by `.ssmd` or `.ssmd.md` suffixes, an SSMD version header in Markdown, or explicitly from stdin:
 
 ```bash
 printf '[Hello]{lang="en-us"} ...s [Bonjour]{lang="fr"}.\n' \
   | utterplan compile --lang en-us --input-format ssmd
 ```
 
+UtterPlan parses SSMD dialect 0.9 only, including canonical fragments without a version header when explicitly selected. Older SSMD source must be converted first: `ssmd migrate old.ssmd --to 0.9`. `utterplan migrate` is for historical UtterPlan JSON schemas, not source files.
+
+The compiled plan preserves SSMD header metadata, declared annotations, structural events, and effective typed directives. Audio and extension references are descriptive data only; consumers decide how to interpret them.
 Structural text preserves the parsed document representation. Spoken text is
 the prepared text and is the coordinate space used by segments, tokens,
 markers, boundaries, and renderer-facing ranges.

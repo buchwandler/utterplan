@@ -1,6 +1,86 @@
 {
+  "annotations": [],
+  "boundaries": [],
+  "document_metadata": {
+    "header": {},
+    "planning": {
+      "engine_independent": true,
+      "linguistic_passes": 2,
+      "pass_a_tokens": 5
+    }
+  },
+  "language_detection": null,
+  "languages": [
+    {
+      "id": "lang-0",
+      "language": "en-us",
+      "source": "document-default",
+      "spoken_end": 35,
+      "spoken_start": 0
+    }
+  ],
+  "markers": [],
+  "preparation": {
+    "backend": "spokenform",
+    "languages": ["en-us"],
+    "replacements": [
+      {
+        "kind": "abbreviation",
+        "language": "en_US",
+        "output_end": 6,
+        "output_start": 0,
+        "replacement": "Doctor",
+        "rule": "abbr:Dr.",
+        "source": "Dr.",
+        "source_end": 3,
+        "source_start": 0
+      },
+      {
+        "kind": "structured",
+        "language": "en",
+        "output_end": 34,
+        "output_start": 20,
+        "replacement": "five kilograms",
+        "rule": "en.quantity",
+        "source": "5 kg",
+        "source_end": 21,
+        "source_start": 17
+      }
+    ]
+  },
+  "segments": [
+    {
+      "annotation_ids": [],
+      "clause": 0,
+      "directives": {},
+      "language": "en-us",
+      "paragraph": 0,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 35,
+      "spoken_start": 0,
+      "text": "Doctor Smith bought five kilograms.",
+      "token_indices": [0, 1, 2, 3, 4]
+    }
+  ],
   "texts": {
-    "structural": "Dr. Smith bought 5 kg.",
-    "spoken": "Doctor Smith bought five kilograms."
-  }
+    "spoken": "Doctor Smith bought five kilograms.",
+    "structural": "Dr. Smith bought 5 kg."
+  },
+  "units": [
+    {
+      "kind": "paragraph",
+      "marker_ids": [],
+      "segment_ids": ["seg-000000"],
+      "spoken_end": 35,
+      "spoken_start": 0
+    }
+  ]
 }

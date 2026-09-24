@@ -33,7 +33,12 @@ def render_semantic_plan(plan: object) -> list[dict[str, object]]:
 
 
 def test_public_utterplan_is_sufficient_for_a_fake_renderer() -> None:
-    text = '---\nvoice_bindings:\n  narrator: voice-a\n---\n[Hello]{voice="narrator"} @mark'
+    text = """---
+ssmd_version: "0.9"
+voice_bindings:
+  narrator: voice-a
+---
+[Hello]{voice="narrator"} @mark"""
     plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(text)
     rendered = render_semantic_plan(plan)
     assert rendered

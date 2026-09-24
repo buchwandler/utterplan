@@ -1,14 +1,36 @@
 {
-  "texts": {
-    "structural": "Hello Bonjour.",
-    "spoken": "Hello Bonjour."
+  "annotations": [
+    {
+      "attrs": {
+        "lang": "fr",
+        "tag": "lang"
+      },
+      "id": "annotation-000000",
+      "kind": "lang",
+      "source_end": 26,
+      "source_start": 6,
+      "spoken_end": 13,
+      "spoken_start": 5,
+      "structural_end": 13,
+      "structural_start": 5
+    }
+  ],
+  "boundaries": [],
+  "document_metadata": {
+    "header": {},
+    "planning": {
+      "engine_independent": true,
+      "linguistic_passes": 2,
+      "pass_a_tokens": 3
+    }
   },
+  "language_detection": null,
   "languages": [
     {
       "id": "lang-0",
       "language": "en-us",
-      "source": "explicit-span",
-      "spoken_end": 6,
+      "source": "document-default",
+      "spoken_end": 5,
       "spoken_start": 0
     },
     {
@@ -16,14 +38,95 @@
       "language": "fr",
       "source": "explicit-span",
       "spoken_end": 13,
-      "spoken_start": 6
+      "spoken_start": 5
     },
     {
       "id": "lang-2",
       "language": "en-us",
-      "source": "explicit-span",
+      "source": "document-default",
       "spoken_end": 14,
       "spoken_start": 13
+    }
+  ],
+  "markers": [],
+  "preparation": {
+    "backend": "spokenform",
+    "languages": ["en-us", "fr", "en-us"],
+    "replacements": []
+  },
+  "segments": [
+    {
+      "annotation_ids": [],
+      "clause": 0,
+      "directives": {},
+      "language": "en-us",
+      "paragraph": 0,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 5,
+      "spoken_start": 0,
+      "text": "Hello",
+      "token_indices": [0]
+    },
+    {
+      "annotation_ids": ["annotation-000000"],
+      "clause": 0,
+      "directives": {},
+      "language": "fr",
+      "paragraph": 0,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 13,
+      "spoken_start": 6,
+      "text": "Bonjour",
+      "token_indices": [1]
+    },
+    {
+      "annotation_ids": [],
+      "clause": 0,
+      "directives": {},
+      "language": "en-us",
+      "paragraph": 0,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 14,
+      "spoken_start": 13,
+      "text": ".",
+      "token_indices": [2]
+    }
+  ],
+  "texts": {
+    "spoken": "Hello Bonjour.",
+    "structural": "Hello Bonjour."
+  },
+  "units": [
+    {
+      "kind": "paragraph",
+      "marker_ids": [],
+      "segment_ids": ["seg-000000", "seg-000001", "seg-000002"],
+      "spoken_end": 14,
+      "spoken_start": 0
     }
   ]
 }

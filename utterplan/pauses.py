@@ -16,6 +16,8 @@ _AUTOMATIC_AUTO_MODE_KINDS = frozenset(
 
 
 def boundary_is_active(event: BoundaryEvent, config: PauseConfig) -> bool:
+    if event.attrs.get("structural_only"):
+        return False
     automatic = bool(event.attrs.get("automatic")) or (
         event.kind in {"paragraph", "sentence"}
         and event.seconds is None

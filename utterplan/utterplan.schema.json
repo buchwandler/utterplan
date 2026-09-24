@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/buchwandler/utterplan/schema/v2",
+  "$id": "https://github.com/buchwandler/utterplan/schema/v3",
   "title": "UtterPlan schema",
   "type": "object",
   "required": [
@@ -25,7 +25,7 @@
   ],
   "properties": {
     "format": { "const": "utterplan" },
-    "schema_version": { "const": 2 },
+    "schema_version": { "const": 3 },
     "producer": {
       "type": "object",
       "required": ["name", "version"],
@@ -162,6 +162,9 @@
         "structural_end": { "$ref": "#/$defs/range" },
         "spoken_start": { "type": ["integer", "null"], "minimum": 0 },
         "spoken_end": { "type": ["integer", "null"], "minimum": 0 },
+        "source_start": { "type": ["integer", "null"], "minimum": 0 },
+        "source_end": { "type": ["integer", "null"], "minimum": 0 },
+        "source_node_id": { "type": ["string", "null"] },
         "kind": { "type": "string" },
         "attrs": { "type": "object" }
       },
@@ -209,11 +212,99 @@
     "directives": {
       "type": "object",
       "properties": {
-        "voice": { "type": ["object", "null"] },
-        "pronunciation": { "type": ["object", "null"] },
-        "prosody": { "type": ["object", "null"] },
-        "emphasis": { "type": ["object", "null"] },
-        "audio": { "type": ["object", "null"] }
+        "voice": {
+          "type": ["object", "null"],
+          "properties": {
+            "reference": { "type": "string" },
+            "name": { "type": "string" },
+            "languages": { "type": "string" },
+            "gender": { "type": "string" },
+            "age": { "type": "integer", "minimum": 0 },
+            "variant": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "pronunciation": {
+          "type": ["object", "null"],
+          "required": ["phonemes", "alphabet"],
+          "properties": {
+            "phonemes": { "type": "string" },
+            "alphabet": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "prosody": {
+          "type": ["object", "null"],
+          "required": ["rate", "pitch", "volume"],
+          "properties": {
+            "rate": { "type": ["string", "null"] },
+            "pitch": { "type": ["string", "null"] },
+            "volume": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        },
+        "emphasis": {
+          "type": ["object", "null"],
+          "required": ["level"],
+          "properties": { "level": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "say_as": {
+          "type": ["object", "null"],
+          "required": ["interpret_as", "format", "detail"],
+          "properties": {
+            "interpret_as": { "type": "string" },
+            "format": { "type": ["string", "null"] },
+            "detail": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        },
+        "substitution": {
+          "type": ["object", "null"],
+          "required": ["alias"],
+          "properties": { "alias": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "audio": {
+          "type": ["object", "null"],
+          "required": [
+            "src",
+            "clip_begin",
+            "clip_end",
+            "speed",
+            "repeat_duration",
+            "repeat_count",
+            "sound_level",
+            "alt_text"
+          ],
+          "properties": {
+            "src": { "type": "string" },
+            "description": { "type": ["string", "null"] },
+            "clip_begin": { "type": ["string", "null"] },
+            "clip_end": { "type": ["string", "null"] },
+            "speed": { "type": ["string", "null"] },
+            "repeat_duration": { "type": ["string", "null"] },
+            "repeat_count": { "type": ["number", "null"] },
+            "sound_level": { "type": ["string", "null"] },
+            "alt_text": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "params"],
+            "properties": {
+              "name": { "type": "string" },
+              "params": {
+                "type": "object",
+                "additionalProperties": { "type": "string" }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
       },
       "additionalProperties": false
     },
@@ -303,7 +394,12 @@
         "code": { "type": "string" },
         "message": { "type": "string" },
         "severity": { "type": "string" },
-        "path": { "type": ["string", "null"] }
+        "path": { "type": ["string", "null"] },
+        "source_start": { "type": ["integer", "null"], "minimum": 0 },
+        "source_end": { "type": ["integer", "null"], "minimum": 0 },
+        "line": { "type": ["integer", "null"], "minimum": 1 },
+        "column": { "type": ["integer", "null"], "minimum": 1 },
+        "hint": { "type": ["string", "null"] }
       },
       "additionalProperties": false
     }

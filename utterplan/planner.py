@@ -7,7 +7,7 @@ from typing import Any
 from .config import PauseConfig, PlannerConfig, parse_duration
 from .directives import resolve_directives
 from .exceptions import ConfigurationError, PlanningError
-from .language import build_language_runs, spans_from_annotations
+from .language import build_language_runs, language_lookup_key, spans_from_annotations
 from .linguistics import LinguisticResourcePool, analyze_run_analyses
 from .model import (
     AnnotationSpan,
@@ -53,11 +53,14 @@ class UtterancePlanner:
         config = effective_config
         parsed = self._parse(text, config)
         pause_config = _effective_pause_config(config, parsed.header)
+        document_language = parsed.document_language or config.language
+        preserve_language_tags = config.document_format == "ssmd"
         source_runs = build_language_runs(
             parsed.structural_text,
             spans_from_annotations(parsed.annotations),
-            config.language,
+            document_language,
             dict(config.language_aliases),
+            preserve_tags=preserve_language_tags,
         )
         pass_a = analyze_run_analyses(
             parsed.structural_text, source_runs, config.linguistics, self._resources
@@ -69,7 +72,7 @@ class UtterancePlanner:
         )
         prepared = preparer.prepare(
             parsed.structural_text,
-            config.language,
+            document_language,
             source_runs,
             parsed.annotations,
             parsed.boundaries,
@@ -79,8 +82,9 @@ class UtterancePlanner:
         runs = build_language_runs(
             spoken,
             spans_from_annotations(prepared.annotations),
-            config.language,
+            document_language,
             dict(config.language_aliases),
+            preserve_tags=preserve_language_tags,
         )
         pass_b = analyze_run_analyses(spoken, runs, config.linguistics, self._resources)
         tokens = tuple(token for analysis in pass_b for token in analysis.tokens)
@@ -91,7 +95,14 @@ class UtterancePlanner:
             spoken, runs, prepared.annotations, boundaries, config, pause_config, pass_b
         )
         segments = _attach_membership(segments, tokens, prepared.annotations)
-        segments = [resolve_directives(segment, prepared.annotations) for segment in segments]
+        segments = [
+            resolve_directives(
+                segment,
+                prepared.annotations,
+                voice_defaults=parsed.metadata.get("voice_defaults"),
+            )
+            for segment in segments
+        ]
         boundaries.extend(_derived_boundaries(segments, boundaries, pause_config))
         segments = resolve_pauses(segments, boundaries, pause_config)
         markers = tuple(_map_marker(marker, prepared.source_map) for marker in parsed.markers)
@@ -103,12 +114,12 @@ class UtterancePlanner:
             "engine_independent": True,
             "pass_a_tokens": sum(len(run.tokens) for run in pass_a),
         }
-        diagnostics: tuple[Diagnostic, ...] = ()
+        diagnostics = list(parsed.diagnostics)
         if config.diagnostics:
-            diagnostics = (
+            diagnostics.append(
                 Diagnostic(
                     "planning.complete", "Plan compiled without renderer or audio processing"
-                ),
+                )
             )
         plan_config = _config_dict(config)
         plan_config["unit"] = selected_unit
@@ -127,7 +138,7 @@ class UtterancePlanner:
             markers=markers,
             document_metadata=metadata,
             warnings=tuple(parsed.warnings) + prepared.info.warnings,
-            diagnostics=diagnostics,
+            diagnostics=tuple(diagnostics),
         ).with_identity()
         plan.validate()
         return plan
@@ -292,7 +303,7 @@ def _split_run(
         # Linguistic enrichment is consumed for token annotations only. Sentence
         # topology stays on the deterministic phrasplit path.
         items = phrasplit.split_with_offsets(
-            text, mode="sentence", use_spacy=False, language=language
+            text, mode="sentence", use_spacy=False, language=language_lookup_key(language)
         )
     except ImportError:
         return [_FallbackSplit(0, len(text), 0, 0)] if text else []
@@ -405,7 +416,7 @@ def _linguistic_boundaries(
         local = text[run.spoken_start : run.spoken_end]
         try:
             clause_items = phrasplit.detect_clause_boundaries(
-                local, language=run.language, use_spacy=False
+                local, language=language_lookup_key(run.language), use_spacy=False
             )
         except (OSError, TypeError, ValueError):
             clause_items = []
@@ -431,7 +442,7 @@ def _linguistic_boundaries(
                 )
         try:
             parenthetical_items = phrasplit.detect_parenthetical_boundaries(
-                local, language=run.language
+                local, language=language_lookup_key(run.language)
             )
         except (AttributeError, OSError, TypeError, ValueError):
             parenthetical_items = []
@@ -535,24 +546,53 @@ def _language_annotation(annotation: AnnotationSpan) -> bool:
 
 
 def _semantic_annotation(annotation: AnnotationSpan) -> bool:
+    tag = str(annotation.attrs.get("tag") or annotation.kind).lower().replace("_", "-")
+    if tag in {
+        "voice",
+        "lang",
+        "phoneme",
+        "pronunciation",
+        "prosody",
+        "emphasis",
+        "say-as",
+        "sub",
+        "audio",
+        "extension",
+        "directive",
+    }:
+        return True
     return any(
         key in annotation.attrs
         for key in (
             "lang",
             "language",
             "voice",
-            "voice_name",
+            "voice-name",
+            "voice-languages",
+            "gender",
+            "age",
+            "variant",
             "ph",
-            "phonemes",
+            "alphabet",
+            "ipa",
+            "sampa",
             "rate",
             "pitch",
             "volume",
             "emphasis",
-            "level",
-            "audio",
-            "audio_src",
+            "as",
+            "format",
+            "detail",
+            "sub",
             "src",
+            "desc",
+            "clip",
             "speed",
+            "repeat",
+            "repeatdur",
+            "repeatDur",
+            "level",
+            "ext",
         )
     )
 

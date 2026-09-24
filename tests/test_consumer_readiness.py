@@ -52,36 +52,55 @@ def _ssmd_plan(text: str, **kwargs: object):
     return UtterancePlanner(config).plan(text)
 
 
-def test_ssmd_header_unknown_key_policies() -> None:
-    text = "---\nunknown: true\n---\nHello."
-    warned = _ssmd_plan(text, unknown_header="warn")
-    assert any("unknown SSMD header" in warning for warning in warned.warnings)
-    ignored = _ssmd_plan(text, unknown_header="ignore")
-    assert not ignored.warnings
-    with pytest.raises(PlanFormatError, match="header.unknown"):
-        _ssmd_plan(text, unknown_header="error")
+def test_ssmd_unknown_header_uses_parser_diagnostic() -> None:
+    plan = _ssmd_plan(
+        """---
+ssmd_version: "0.9"
+unknown: true
+---
+Hello."""
+    )
+    diagnostic = next(item for item in plan.diagnostics if item.code == "header.unknown_key")
+
+    assert diagnostic.severity == "warn"
+    assert diagnostic.path == "$.source"
+    assert diagnostic.line == 3
+    assert diagnostic.source_start == plan.source.text.index("unknown")
 
 
 def test_ssmd_header_malformed_yaml_is_public_error() -> None:
     with pytest.raises(PlanFormatError, match="header.yaml_invalid"):
-        _ssmd_plan("---\npause_defaults: [\n---\nHello.")
-
-
-def test_ssmd_header_invalid_pause_values_follow_strict_policy() -> None:
-    text = "---\npause_defaults:\n  sentence: fast\n---\nHello ...s world"
-    with pytest.raises(PlanFormatError, match="header.invalid"):
-        _ssmd_plan(text)
-    relaxed = _ssmd_plan(text, strict_header=False)
-    assert any("pause_defaults.sentence" in warning for warning in relaxed.warnings)
+        _ssmd_plan(
+            """---
+ssmd_version: "0.9"
+pause_defaults: [
+---
+Hello."""
+        )
 
 
 def test_ssmd_parse_header_false_does_not_consume_front_matter() -> None:
-    plan = _ssmd_plan("---\nunknown: [\n---\nHello.", parse_header=False)
-    assert plan.texts.structural.startswith("---")
+    plan = _ssmd_plan(
+        """---
+ssmd_version: "0.9"
+unknown: value
+---
+Hello.""",
+        parse_header=False,
+    )
+    assert "unknown: value" in plan.texts.structural
+    assert plan.document_metadata["header"] == {}
 
 
 def test_pause_defaults_enabled_disables_automatic_document_pauses() -> None:
-    plan = _ssmd_plan("---\npause_defaults:\n  enabled: false\n---\nOne. Two.")
+    plan = _ssmd_plan(
+        """---
+ssmd_version: "0.9"
+pause_defaults:
+  enabled: false
+---
+One. Two."""
+    )
     assert all(
         segment.pause_before.seconds == 0 and segment.pause_after.seconds == 0
         for segment in plan.segments
@@ -102,9 +121,14 @@ def test_voice_change_pause_uses_logical_voice_in_one_language() -> None:
 
 
 def test_prepared_contract_uses_spoken_coordinates_and_public_token_fields() -> None:
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Dr. Smith has 5 kg.")
+    source = 'Dr. Smith [has]{emphasis="moderate"} 5 kg.'
+    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan(source)
     assert plan.texts.spoken == "Doctor Smith has five kilograms."
-    assert plan.annotations[0].spoken_end == len(plan.texts.spoken)
+    annotation = plan.annotations[0]
+    assert annotation.spoken_start == 12
+    assert annotation.spoken_end == 16
+    assert annotation.source_start == source.index("[has")
+    assert annotation.source_end == source.index("}") + 1
     assert all(token.spoken_end <= len(plan.texts.spoken) for token in plan.tokens)
     assert all(
         hasattr(token, field)
@@ -118,7 +142,12 @@ def test_prepared_contract_uses_spoken_coordinates_and_public_token_fields() -> 
 
 
 def test_voice_bindings_and_segment_logical_voice_remain_separate() -> None:
-    text = '---\nvoice_bindings:\n  narrator: voice-a\n---\n[Hello]{voice="narrator"}.'
+    text = """---
+ssmd_version: "0.9"
+voice_bindings:
+  narrator: voice-a
+---
+[Hello]{voice="narrator"}."""
     plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(text)
     assert plan.document_metadata["voice_bindings"] == {"narrator": "voice-a"}
     assert plan.segments[0].directives.voice.reference == "narrator"
@@ -128,7 +157,13 @@ def test_voice_bindings_and_segment_logical_voice_remain_separate() -> None:
 
 
 def test_language_detection_header_is_preserved_as_portable_metadata() -> None:
-    text = "---\nlanguage_detection:\n  mode: auto\n  languages: [de, en]\n---\nHallo."
+    text = """---
+ssmd_version: "0.9"
+language_detection:
+  mode: auto
+  languages: [de, en]
+---
+Hallo."""
     plan = UtterancePlanner(PlannerConfig(language="en-us")).plan(text)
     assert plan.document_metadata["language_detection"] == {
         "mode": "auto",
@@ -139,12 +174,22 @@ def test_language_detection_header_is_preserved_as_portable_metadata() -> None:
 
 
 @pytest.mark.parametrize(
-    "header",
+    ("header", "code"),
     [
-        "language_detection: true",
-        "language_detection:\n  mode: auto\n  languages: [de, 1]",
+        ("language_detection: true", "header.language_detection_invalid"),
+        (
+            """language_detection:
+  mode: auto
+  languages: [de, 1]""",
+            "header.language_detection_languages_invalid",
+        ),
     ],
 )
-def test_language_detection_header_shape_is_validated(header: str) -> None:
-    with pytest.raises(PlanFormatError, match="header.invalid"):
-        UtterancePlanner(PlannerConfig(language="en-us")).plan(f"---\n{header}\n---\nHallo.")
+def test_language_detection_header_shape_is_validated(header: str, code: str) -> None:
+    document = f"""---
+{header}
+---
+Hallo."""
+    with pytest.raises(PlanFormatError) as error:
+        UtterancePlanner(PlannerConfig(language="en-us")).plan(document)
+    assert error.value.code == code

@@ -55,10 +55,14 @@ def format_explanation(plan: UtterancePlan, *, details: bool = False) -> str:
     lines = ["UtterPlan explanation", ""]
     _format_plan_summary(plan, lines, details=details)
     _format_preparation(plan, lines, details=details)
+    _format_heading_events(plan, lines)
     _format_speech_plan(plan, lines, details=details)
     if details:
         _format_language_runs(plan, lines)
         _format_metadata(plan, lines)
+    if details or any(
+        diagnostic.severity in {"warn", "warning", "error"} for diagnostic in plan.diagnostics
+    ):
         _format_diagnostics(plan, lines)
     _format_warnings(plan, lines)
     return "\n".join(lines).rstrip() + "\n"
@@ -80,6 +84,17 @@ def _format_plan_summary(plan: UtterancePlan, lines: list[str], *, details: bool
             "",
         ]
     )
+    if plan.source.format == "ssmd":
+        metadata = plan.document_metadata
+        summary: list[str] = []
+        if version := metadata.get("ssmd_version"):
+            summary.append(f"  SSMD version: {version}")
+        if title := metadata.get("title"):
+            summary.append(f"  title: {_quote(str(title))}")
+        if language := metadata.get("language"):
+            summary.append(f"  document language: {language}")
+        if summary:
+            lines[-1:-1] = summary
     if not details:
         return
 
@@ -143,6 +158,18 @@ def _replacement_label(replacement: Mapping[str, object]) -> str:
     if kind:
         return str(kind)
     return ""
+
+
+def _format_heading_events(plan: UtterancePlan, lines: list[str]) -> None:
+    headings = [boundary for boundary in plan.boundaries if boundary.kind == "heading"]
+    if not headings:
+        return
+
+    lines.append("Structural events")
+    for boundary in headings:
+        level = boundary.attrs.get("level", "?")
+        lines.append(f"  heading level {level} at spoken {boundary.position}")
+    lines.append("")
 
 
 def _format_speech_plan(plan: UtterancePlan, lines: list[str], *, details: bool) -> None:
@@ -301,16 +328,36 @@ def _format_directives(directives: SegmentDirectives) -> list[str]:
             if value is not None:
                 values.append(f"{label} {value}")
         if values:
-            result.append(f"       prosody: {', '.join(values)}")
+            result.append(f"       effective prosody: {', '.join(values)}")
     if directives.emphasis is not None:
         result.append(f"       emphasis: {directives.emphasis.level}")
+    if directives.say_as is not None:
+        values = [directives.say_as.interpret_as]
+        if directives.say_as.format is not None:
+            values.append(f"format {directives.say_as.format}")
+        if directives.say_as.detail is not None:
+            values.append(f"detail {directives.say_as.detail}")
+        result.append(f"       say-as: {', '.join(values)}")
+    if directives.substitution is not None:
+        result.append(f"       substitution: {_quote(directives.substitution.alias)}")
     if directives.audio is not None:
         result.append(f"       audio: {_format_audio(directives.audio)}")
+    if directives.extensions:
+        names = ", ".join(item.name for item in directives.extensions)
+        result.append(f"       extension refs: {names}")
     return result
 
 
 def _format_voice(directive: VoiceDirective) -> str:
-    return directive.reference
+    values = (
+        ("reference", directive.reference),
+        ("name", directive.name),
+        ("languages", directive.languages),
+        ("gender", directive.gender),
+        ("age", directive.age),
+        ("variant", directive.variant),
+    )
+    return ", ".join(f"{name}={value}" for name, value in values if value is not None)
 
 
 def _format_pronunciation(directive: PronunciationDirective) -> str:
@@ -318,15 +365,22 @@ def _format_pronunciation(directive: PronunciationDirective) -> str:
 
 
 def _format_audio(directive: AudioDirective) -> str:
-    result = _quote(directive.src)
+    values = [f"src {_quote(directive.src)}"]
+    if directive.description is not None:
+        values.append(f"description {_quote(directive.description)}")
+    if directive.alt_text is not None:
+        values.append(f"legacy alt text {_quote(directive.alt_text)}")
     if directive.clip_begin is not None or directive.clip_end is not None:
-        result += f" (clip {directive.clip_begin or ''}..{directive.clip_end or ''}"
-        if directive.speed is not None:
-            result += f", speed {directive.speed}"
-        result += ")"
-    elif directive.speed is not None:
-        result += f" (speed {directive.speed})"
-    return result
+        values.append(f"clip {directive.clip_begin or ''}..{directive.clip_end or ''}")
+    if directive.speed is not None:
+        values.append(f"speed {directive.speed}")
+    if directive.repeat_duration is not None:
+        values.append(f"repeat duration {directive.repeat_duration}")
+    if directive.repeat_count is not None:
+        values.append(f"repeat count {directive.repeat_count:g}")
+    if directive.sound_level is not None:
+        values.append(f"level {directive.sound_level}")
+    return ", ".join(values)
 
 
 def _format_language_runs(plan: UtterancePlan, lines: list[str]) -> None:
@@ -352,12 +406,40 @@ def _format_language_runs(plan: UtterancePlan, lines: list[str]) -> None:
 
 
 def _format_metadata(plan: UtterancePlan, lines: list[str]) -> None:
+    metadata = plan.document_metadata
+    displayed: list[str] = []
+    bindings = metadata.get("voice_bindings")
+    if isinstance(bindings, Mapping) and bindings:
+        values = ", ".join(f"{name}={_json(value)}" for name, value in sorted(bindings.items()))
+        displayed.append(f"  voice bindings: {values}")
+    defaults = metadata.get("voice_defaults")
+    if isinstance(defaults, Mapping) and defaults:
+        values = []
+        for name, fields in sorted(defaults.items()):
+            if isinstance(fields, Mapping):
+                values.append(f"{name} ({_format_metadata_fields(fields)})")
+        if values:
+            displayed.append(f"  voice defaults: {', '.join(values)}")
+    for key, label in (
+        ("pause_defaults", "pause defaults"),
+        ("prosody_transitions", "prosody transitions"),
+        ("language_detection", "language detection"),
+    ):
+        value = metadata.get(key)
+        if isinstance(value, Mapping) and value:
+            displayed.append(f"  {label}: {_format_metadata_fields(value)}")
+    requires = metadata.get("requires")
+    if isinstance(requires, Mapping):
+        extensions = requires.get("extensions")
+        if isinstance(extensions, (list, tuple)) and extensions:
+            displayed.append(f"  required extensions: {', '.join(map(str, extensions))}")
     lines.append("Document metadata")
-    if plan.document_metadata:
-        lines.extend(f"  {line}" for line in _json(plan.document_metadata, indent=2).splitlines())
-    else:
-        lines.append("  None.")
+    lines.extend(displayed or ["  No portable metadata."])
     lines.append("")
+
+
+def _format_metadata_fields(values: Mapping[str, object]) -> str:
+    return ", ".join(f"{key}={_json(value)}" for key, value in sorted(values.items()))
 
 
 def _format_diagnostics(plan: UtterancePlan, lines: list[str]) -> None:
@@ -366,9 +448,21 @@ def _format_diagnostics(plan: UtterancePlan, lines: list[str]) -> None:
         lines.append("  None.")
     else:
         for diagnostic in plan.diagnostics:
-            location = f" ({diagnostic.path})" if diagnostic.path else ""
+            locations = []
+            if diagnostic.path:
+                locations.append(diagnostic.path)
+            if diagnostic.source_start is not None or diagnostic.source_end is not None:
+                locations.append(
+                    f"source {diagnostic.source_start or 0}:{diagnostic.source_end or 0}"
+                )
+            if diagnostic.line is not None:
+                location = f"line {diagnostic.line}"
+                if diagnostic.column is not None:
+                    location += f", column {diagnostic.column}"
+                locations.append(location)
+            suffix = f" ({'; '.join(locations)})" if locations else ""
             lines.append(
-                f"  {diagnostic.code} [{diagnostic.severity}]{location}: {diagnostic.message}"
+                f"  {diagnostic.code} [{diagnostic.severity}]{suffix}: {diagnostic.message}"
             )
     lines.append("")
 

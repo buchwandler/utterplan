@@ -29,9 +29,22 @@ The rules are deterministic:
 5. All remaining positional tokens are joined with single spaces as literal
    text.
 
-With `auto`, only a resolved `.ssmd` file is interpreted as SSMD. Literal text
-and stdin default to plain text. Use `--input-format ssmd` explicitly for
-SSMD from stdin.
+With `auto`, `.ssmd` and `.ssmd.md` files are interpreted as SSMD. Markdown files
+with an SSMD version header are also detected as SSMD; ordinary Markdown remains
+plain text. Literal text and stdin default to plain text. Use `--input-format ssmd`
+explicitly for SSMD from stdin or unversioned canonical fragments. All SSMD inputs
+are parsed as strict dialect 0.9.
+
+## SSMD source compatibility
+
+UtterPlan accepts SSMD 0.9 syntax only. It does not auto-migrate older source or provide a legacy parser. Convert an old SSMD file before compilation:
+
+```bash
+ssmd migrate old.ssmd --to 0.9 --output migrated.ssmd
+utterplan compile migrated.ssmd --lang en-us
+```
+
+`utterplan migrate` applies only to `.utterplan.json` schema versions. It cannot migrate SSMD source.
 
 ## Output and errors
 
@@ -43,9 +56,9 @@ also emit the same plan JSON to stdout.
 Human status messages are written to stderr, never mixed into JSON stdout:
 
 ```bash
-utterplan compile chapter.ssmd --lang en-us -o chapter.utterplan.json
+utterplan compile chapter.ssmd.md --lang en-us -o chapter.utterplan.json
 # status is written to stderr
-utterplan compile chapter.ssmd --lang en-us -o chapter.utterplan.json --json | jq .
+utterplan compile chapter.ssmd.md --lang en-us -o chapter.utterplan.json --json | jq .
 ```
 
 Argparse usage errors use exit code 2. Input, planning, file, and plan
@@ -60,7 +73,7 @@ utterplan explain chapter.utterplan.json
 utterplan explain chapter.utterplan.json --details
 ```
 
-The default output shows the prepared wording, render units, ordered segments, languages, resolved pauses, directives, markers, and warnings. Add `--details` for IDs, offsets, provenance, hashes, plan identity, and token analysis beneath each segment. Use `inspect --tokens` for a compact token/provenance view.
+The default output shows prepared wording, render units, ordered segments, languages, resolved pauses, headings, SSMD version/title/document language, effective typed directives, metadata, and warning/error codes with source locations. Add `--details` for IDs, offsets, provenance, hashes, plan identity, and token analysis beneath each segment. Use `inspect --tokens` for a compact token/provenance view.
 
 ## Planning controls
 
@@ -99,5 +112,7 @@ utterplan migrate old.utterplan.json | jq .
 ```
 
 Without `-o`, migrated JSON is written to stdout. Status is written to stderr. Existing output files are refused unless `--force` is supplied. `--check` validates the route and reports source schema, target schema, and whether migration is required without writing a file. A future schema version is rejected rather than guessed or downgraded.
+
+Schema migration is a separate operation from SSMD source migration. UtterPlan preserves released schema v1 and v2 and migrates v1 plans sequentially through v2 to current schema v3. It never reparses source or replans. Use `ssmd migrate FILE --to 0.9` for older SSMD source documents.
 
 `validate` performs the same in-memory compatibility check and reports both source and current schema versions. It never modifies the input file.

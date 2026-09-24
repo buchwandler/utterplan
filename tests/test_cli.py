@@ -27,7 +27,7 @@ def test_compile_literal_text_to_stdout_json(capsys: pytest.CaptureFixture[str])
     assert main(["compile", "Hello world.", "--lang", "en-us"]) == 0
     payload = _payload(capsys)
     assert payload["format"] == "utterplan"
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["segments"]
 
 
@@ -150,7 +150,14 @@ def test_compile_invalid_ssmd_returns_one(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source = tmp_path / "broken.ssmd"
-    source.write_text("---\npause_defaults: [\n---\nHello.", encoding="utf-8")
+    source.write_text(
+        """---
+ssmd_version: "0.9"
+pause_defaults: [
+---
+Hello.""",
+        encoding="utf-8",
+    )
     assert main(["compile", str(source), "--lang", "en-us"]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -273,7 +280,7 @@ def test_migrate_check_current_plan(tmp_path: Path, capsys: pytest.CaptureFixtur
     assert main(["migrate", str(source), "--check"]) == 0
     captured = capsys.readouterr()
     assert "valid migration path" in captured.out
-    assert "source schema: 2" in captured.out
+    assert "source schema: 3" in captured.out
     assert "migration required: no" in captured.out
     assert source.exists()
 
@@ -284,7 +291,7 @@ def test_migrate_stdout_and_output_file(tmp_path: Path, capsys: pytest.CaptureFi
     assert main(["compile", "Hello.", "--lang", "en-us", "-o", str(source)]) == 0
     capsys.readouterr()
     assert main(["migrate", str(source)]) == 0
-    assert json.loads(capsys.readouterr().out)["schema_version"] == 2
+    assert json.loads(capsys.readouterr().out)["schema_version"] == 3
     assert main(["migrate", str(source), "-o", str(destination)]) == 0
     assert "migrated" in capsys.readouterr().err
     assert json.loads(destination.read_text(encoding="utf-8"))["format"] == "utterplan"
@@ -311,6 +318,6 @@ def test_validate_reports_migration_status(
     capsys.readouterr()
     assert main(["validate", str(source)]) == 0
     captured = capsys.readouterr()
-    assert "source schema version: 2" in captured.out
-    assert "current schema version: 2" in captured.out
+    assert "source schema version: 3" in captured.out
+    assert "current schema version: 3" in captured.out
     assert "migration required: no" in captured.out

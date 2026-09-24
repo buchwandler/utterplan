@@ -5,8 +5,8 @@ def test_multilingual_preparation_composes_run_offsets():
     plan = UtterancePlanner(PlannerConfig(language="en-us")).plan('Hello [Bonjour]{lang="fr"}.')
     assert plan.texts.spoken == "Hello Bonjour."
     assert [(run.language, run.spoken_start, run.spoken_end) for run in plan.languages] == [
-        ("en-us", 0, 6),
-        ("fr", 6, 13),
+        ("en-us", 0, 5),
+        ("fr", 5, 13),
         ("en-us", 13, 14),
     ]
     assert plan.preparation.languages == ("en-us", "fr", "en-us")
@@ -32,7 +32,12 @@ def test_pronunciation_annotation_is_protected_and_resolved():
 
 
 def test_header_pause_default_and_event_anchor_are_preserved():
-    text = "---\npause_defaults:\n  sentence: 0.45\n---\nHello ...s world"
+    text = """---
+ssmd_version: "0.9"
+pause_defaults:
+  sentence: 0.45
+---
+Hello ...s world"""
     plan = UtterancePlanner(PlannerConfig(language="en-us")).plan(text)
     event = next(event for event in plan.boundaries if event.kind == "explicit")
     assert event.seconds == 0.45

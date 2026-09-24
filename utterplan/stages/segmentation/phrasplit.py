@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ...config import PlannerConfig
+from ...language import language_lookup_key
 from ...model import PlanSegment
 
 
@@ -9,7 +10,7 @@ def split_text(text: str, config: PlannerConfig) -> tuple[PlanSegment, ...]:
         import phrasplit
 
         items = phrasplit.split_with_offsets(
-            text, mode="sentence", use_spacy=False, language=config.language
+            text, mode="sentence", use_spacy=False, language=language_lookup_key(config.language)
         )
     except (ImportError, OSError, TypeError, ValueError):
         items = ()

@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="input_format",
         choices=("auto", "text", "ssmd"),
         default="auto",
-        help="input interpretation; auto infers SSMD from a .ssmd file suffix",
+        help="input interpretation; auto detects .ssmd, .ssmd.md, and Markdown with SSMD version front matter",
     )
     compile_parser.add_argument("--unit", choices=("paragraph", "sentence"), default="paragraph")
     compile_parser.add_argument(
@@ -120,8 +120,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _format_for_path(path: Path) -> InputFormat:
-    return "ssmd" if path.suffix.lower() == ".ssmd" else "plain"
+def _declares_ssmd_version(source: str) -> bool:
+    try:
+        from ssmd.frontmatter import FrontMatterError, parse_front_matter
+    except ImportError:
+        return False
+    try:
+        front_matter = parse_front_matter(source)
+    except FrontMatterError:
+        return False
+    return front_matter.present and "ssmd_version" in front_matter.data
+
+
+def _format_for_path(path: Path, source: str) -> InputFormat:
+    lower_name = path.name.lower()
+    if lower_name.endswith((".ssmd.md", ".ssmd")):
+        return "ssmd"
+    if path.suffix.lower() == ".md" and _declares_ssmd_version(source):
+        return "ssmd"
+    return "plain"
 
 
 def _read_compile_input(args: argparse.Namespace) -> tuple[str, InputFormat]:
@@ -130,7 +147,7 @@ def _read_compile_input(args: argparse.Namespace) -> tuple[str, InputFormat]:
             raise ValueError("--file cannot be combined with positional text")
         source = args.file.read_text(encoding="utf-8")
         input_format = (
-            _format_for_path(args.file)
+            _format_for_path(args.file, source)
             if args.input_format == "auto"
             else _map_input_format(args.input_format)
         )
@@ -152,7 +169,7 @@ def _read_compile_input(args: argparse.Namespace) -> tuple[str, InputFormat]:
         if candidate.is_file():
             source = candidate.read_text(encoding="utf-8")
             input_format = (
-                _format_for_path(candidate)
+                _format_for_path(candidate, source)
                 if args.input_format == "auto"
                 else _map_input_format(args.input_format)
             )

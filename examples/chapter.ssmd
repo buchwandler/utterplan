@@ -1,1 +1,7 @@
+---
+ssmd_version: "0.9"
+title: Bilingual greeting
+language: en-us
+---
+
 [Hello]{lang="en-us"} ...s [Bonjour]{lang="fr"}.

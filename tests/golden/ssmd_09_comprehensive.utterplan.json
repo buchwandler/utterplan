@@ -1,0 +1,1671 @@
+{
+  "annotations": [
+    {
+      "attrs": {
+        "age": "30",
+        "gender": "female",
+        "pitch": "low",
+        "rate": "medium",
+        "tag": "voice",
+        "variant": "2",
+        "voice": "narrator",
+        "voice-languages": "sr-Latn",
+        "voice-name": "Mira"
+      },
+      "id": "annotation-000000",
+      "kind": "directive",
+      "source_end": 598,
+      "source_start": 431,
+      "spoken_end": 29,
+      "spoken_start": 14,
+      "structural_end": 29,
+      "structural_start": 14
+    },
+    {
+      "attrs": {
+        "lang": "sr-Latn",
+        "tag": "lang"
+      },
+      "id": "annotation-000001",
+      "kind": "lang",
+      "source_end": 592,
+      "source_start": 568,
+      "spoken_end": 28,
+      "spoken_start": 21,
+      "structural_end": 28,
+      "structural_start": 21
+    },
+    {
+      "attrs": {
+        "tag": "voice",
+        "voice": "narrator"
+      },
+      "id": "annotation-000002",
+      "kind": "directive",
+      "source_end": 946,
+      "source_start": 598,
+      "spoken_end": 106,
+      "spoken_start": 30,
+      "structural_end": 106,
+      "structural_start": 30
+    },
+    {
+      "attrs": {
+        "emphasis": "strong",
+        "tag": "emphasis"
+      },
+      "id": "annotation-000003",
+      "kind": "emphasis",
+      "source_end": 650,
+      "source_start": 620,
+      "spoken_end": 39,
+      "spoken_start": 30,
+      "structural_end": 39,
+      "structural_start": 30
+    },
+    {
+      "attrs": {
+        "as": "date",
+        "detail": "1",
+        "format": "dd.mm.yyyy",
+        "tag": "say-as"
+      },
+      "id": "annotation-000004",
+      "kind": "say-as",
+      "source_end": 705,
+      "source_start": 651,
+      "spoken_end": 50,
+      "spoken_start": 39,
+      "structural_end": 50,
+      "structural_start": 39
+    },
+    {
+      "attrs": {
+        "sub": "water",
+        "tag": "sub"
+      },
+      "id": "annotation-000005",
+      "kind": "sub",
+      "source_end": 725,
+      "source_start": 707,
+      "spoken_end": 55,
+      "spoken_start": 51,
+      "structural_end": 55,
+      "structural_start": 51
+    },
+    {
+      "attrs": {
+        "alphabet": "ipa",
+        "ph": "kəmˈpjuːtər",
+        "tag": "phoneme"
+      },
+      "id": "annotation-000006",
+      "kind": "phoneme",
+      "source_end": 774,
+      "source_start": 731,
+      "spoken_end": 69,
+      "spoken_start": 60,
+      "structural_end": 69,
+      "structural_start": 60
+    },
+    {
+      "attrs": {
+        "clip": "1s-2s",
+        "desc": "door chime",
+        "level": "-3dB",
+        "repeat": "1.5",
+        "speed": "110%",
+        "src": "door.wav",
+        "tag": "audio"
+      },
+      "id": "annotation-000007",
+      "kind": "audio",
+      "source_end": 871,
+      "source_start": 778,
+      "spoken_end": 78,
+      "spoken_start": 72,
+      "structural_end": 78,
+      "structural_start": 72
+    },
+    {
+      "attrs": {
+        "ext": "acme.effects.whisper",
+        "mode": "soft",
+        "tag": "extension"
+      },
+      "id": "annotation-000008",
+      "kind": "extension",
+      "source_end": 940,
+      "source_start": 891,
+      "spoken_end": 105,
+      "spoken_start": 97,
+      "structural_end": 105,
+      "structural_start": 97
+    },
+    {
+      "attrs": {
+        "pitch": "low",
+        "rate": "medium",
+        "tag": "voice",
+        "voice": "narrator"
+      },
+      "id": "annotation-000009",
+      "kind": "directive",
+      "source_end": 1151,
+      "source_start": 946,
+      "spoken_end": 225,
+      "spoken_start": 107,
+      "structural_end": 225,
+      "structural_start": 107
+    },
+    {
+      "attrs": {
+        "pitch": "high",
+        "rate": "fast",
+        "tag": "prosody"
+      },
+      "id": "annotation-000010",
+      "kind": "directive",
+      "source_end": 1115,
+      "source_start": 1034,
+      "spoken_end": 193,
+      "spoken_start": 147,
+      "structural_end": 193,
+      "structural_start": 147
+    }
+  ],
+  "boundaries": [
+    {
+      "attrs": {
+        "anchor": "before",
+        "level": "1",
+        "structural_only": true
+      },
+      "id": "boundary-000000",
+      "kind": "heading",
+      "origin": "ssmd",
+      "position": 0,
+      "seconds": 0.0,
+      "strength": null
+    },
+    {
+      "attrs": {
+        "anchor": "after",
+        "pause_origin": "header_default",
+        "source": "header_default",
+        "strength": "p"
+      },
+      "id": "boundary-000001",
+      "kind": "paragraph",
+      "origin": "ssmd",
+      "position": 12,
+      "seconds": null,
+      "strength": "paragraph"
+    },
+    {
+      "attrs": {
+        "anchor": "after",
+        "pause_origin": "header_default",
+        "source": "header_default",
+        "strength": "p"
+      },
+      "id": "boundary-000002",
+      "kind": "paragraph",
+      "origin": "ssmd",
+      "position": 145,
+      "seconds": null,
+      "strength": "paragraph"
+    },
+    {
+      "attrs": {
+        "anchor": "after",
+        "pause_origin": "header_default",
+        "source": "header_default",
+        "strength": "p"
+      },
+      "id": "boundary-000003",
+      "kind": "paragraph",
+      "origin": "ssmd",
+      "position": 193,
+      "seconds": null,
+      "strength": "paragraph"
+    },
+    {
+      "attrs": {
+        "anchor": "after",
+        "pause_origin": "header_default",
+        "source": "header_default",
+        "strength": "p"
+      },
+      "id": "boundary-000004",
+      "kind": "paragraph",
+      "origin": "ssmd",
+      "position": 225,
+      "seconds": null,
+      "strength": "paragraph"
+    },
+    {
+      "attrs": {
+        "anchor": "after",
+        "pause_origin": "explicit",
+        "time": "500ms"
+      },
+      "id": "boundary-000005",
+      "kind": "explicit",
+      "origin": "ssmd",
+      "position": 234,
+      "seconds": 0.5,
+      "strength": null
+    },
+    {
+      "attrs": {
+        "anchor": "after",
+        "pause_origin": "header_default",
+        "source": "header_default",
+        "strength": "p"
+      },
+      "id": "boundary-000006",
+      "kind": "paragraph",
+      "origin": "ssmd",
+      "position": 249,
+      "seconds": null,
+      "strength": "paragraph"
+    },
+    {
+      "attrs": {
+        "anchor": "before",
+        "level": "2",
+        "structural_only": true
+      },
+      "id": "boundary-000007",
+      "kind": "heading",
+      "origin": "ssmd",
+      "position": 251,
+      "seconds": 0.0,
+      "strength": null
+    },
+    {
+      "attrs": {
+        "anchor": "after",
+        "pause_origin": "header_default",
+        "source": "header_default",
+        "strength": "p"
+      },
+      "id": "boundary-000008",
+      "kind": "paragraph",
+      "origin": "ssmd",
+      "position": 268,
+      "seconds": null,
+      "strength": "paragraph"
+    },
+    {
+      "attrs": {
+        "automatic": true
+      },
+      "id": "boundary-000009",
+      "kind": "sentence",
+      "origin": "planner",
+      "position": 29,
+      "seconds": null,
+      "strength": "sentence"
+    },
+    {
+      "attrs": {
+        "automatic": true
+      },
+      "id": "boundary-000010",
+      "kind": "sentence",
+      "origin": "planner",
+      "position": 70,
+      "seconds": null,
+      "strength": "sentence"
+    },
+    {
+      "attrs": {
+        "automatic": true
+      },
+      "id": "boundary-000011",
+      "kind": "sentence",
+      "origin": "planner",
+      "position": 106,
+      "seconds": null,
+      "strength": "sentence"
+    }
+  ],
+  "config": {
+    "diagnostics": true,
+    "document_format": "ssmd",
+    "language": "en-us",
+    "language_aliases": {},
+    "linguistics": {
+      "require_spacy": false,
+      "spacy_model": null,
+      "spacy_model_size": null,
+      "use_spacy": null
+    },
+    "overlap_mode": "snap",
+    "pauses": {
+      "clause": 0.3,
+      "enabled": true,
+      "mode": "tts",
+      "paragraph": 1.0,
+      "parenthetical": 0.15,
+      "sentence": 0.6,
+      "voice_change": 0.15,
+      "weak": 0.15
+    },
+    "ssmd": {
+      "parse_header": true,
+      "pause_defaults": null,
+      "strict_header": true,
+      "unknown_header": "warn"
+    },
+    "text_preparation": "identity",
+    "unit": "paragraph"
+  },
+  "diagnostics": [
+    {
+      "code": "planning.complete",
+      "message": "Plan compiled without renderer or audio processing",
+      "path": null,
+      "severity": "info"
+    }
+  ],
+  "document_metadata": {
+    "header": {
+      "language": "sr-Latn",
+      "language_detection": {
+        "languages": ["sr-Latn", "en-GB"],
+        "mode": "auto"
+      },
+      "pause_defaults": {
+        "paragraph": "450ms"
+      },
+      "prosody_transitions": {
+        "enabled": true,
+        "rate": "100ms",
+        "same_voice_only": true
+      },
+      "requires": {
+        "extensions": ["acme.effects.whisper"]
+      },
+      "ssmd_version": "0.9",
+      "title": "Renderer-neutral SSMD 0.9 contract",
+      "voice_bindings": {
+        "narrator": "provider-voice"
+      },
+      "voice_defaults": {
+        "narrator": {
+          "rate": "slow",
+          "volume": "soft"
+        }
+      }
+    },
+    "language": "sr-Latn",
+    "language_detection": {
+      "languages": ["sr-Latn", "en-GB"],
+      "mode": "auto"
+    },
+    "pause_defaults": {
+      "paragraph": "450ms"
+    },
+    "planning": {
+      "engine_independent": true,
+      "linguistic_passes": 2,
+      "pass_a_tokens": 43
+    },
+    "prosody_transitions": {
+      "enabled": true,
+      "rate": "100ms",
+      "same_voice_only": true
+    },
+    "requires": {
+      "extensions": ["acme.effects.whisper"]
+    },
+    "ssmd_version": "0.9",
+    "title": "Renderer-neutral SSMD 0.9 contract",
+    "voice_bindings": {
+      "narrator": "provider-voice"
+    },
+    "voice_defaults": {
+      "narrator": {
+        "rate": "slow",
+        "volume": "soft"
+      }
+    }
+  },
+  "format": "utterplan",
+  "languages": [
+    {
+      "id": "lang-0",
+      "language": "sr-Latn",
+      "source": "document-default",
+      "spoken_end": 288,
+      "spoken_start": 0
+    }
+  ],
+  "linguistic_runs": [
+    {
+      "language_run_id": "lang-0",
+      "model": null,
+      "model_version": null,
+      "provider": "fallback",
+      "provider_version": null,
+      "token_end": 43,
+      "token_start": 0
+    }
+  ],
+  "markers": [
+    {
+      "attrs": {
+        "name": "checkpoint"
+      },
+      "id": "marker-000000",
+      "name": "checkpoint",
+      "spoken_position": 249
+    }
+  ],
+  "plan_id": "sha256:7549f4a82a1ef630cea1049d59115f7f39950801151d18abd6e379e35b108aa3",
+  "preparation": {
+    "backend": "identity",
+    "languages": ["sr-Latn"],
+    "replacements": [],
+    "version": null,
+    "warnings": []
+  },
+  "producer": {
+    "name": "utterplan",
+    "version": "0.2.0"
+  },
+  "schema_version": 3,
+  "segments": [
+    {
+      "annotation_ids": [],
+      "clause": 0,
+      "directives": {},
+      "id": "seg-000000",
+      "language": "sr-Latn",
+      "paragraph": 0,
+      "pause_after": {
+        "events": ["boundary-000001"],
+        "seconds": 0.45
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 12,
+      "spoken_start": 0,
+      "text": "Main heading",
+      "token_indices": [0, 1]
+    },
+    {
+      "annotation_ids": ["annotation-000000"],
+      "clause": 0,
+      "directives": {
+        "prosody": {
+          "pitch": "low",
+          "rate": "medium",
+          "volume": "soft"
+        },
+        "voice": {
+          "age": 30,
+          "gender": "female",
+          "languages": "sr-Latn",
+          "name": "Mira",
+          "reference": "narrator",
+          "variant": 2
+        }
+      },
+      "id": "seg-000001",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 21,
+      "spoken_start": 14,
+      "text": "Welcome",
+      "token_indices": [2]
+    },
+    {
+      "annotation_ids": ["annotation-000000", "annotation-000001"],
+      "clause": 0,
+      "directives": {
+        "prosody": {
+          "pitch": "low",
+          "rate": "medium",
+          "volume": "soft"
+        },
+        "voice": {
+          "age": 30,
+          "gender": "female",
+          "languages": "sr-Latn",
+          "name": "Mira",
+          "reference": "narrator",
+          "variant": 2
+        }
+      },
+      "id": "seg-000002",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 28,
+      "spoken_start": 21,
+      "text": " reader",
+      "token_indices": [3]
+    },
+    {
+      "annotation_ids": ["annotation-000000"],
+      "clause": 0,
+      "directives": {
+        "prosody": {
+          "pitch": "low",
+          "rate": "medium",
+          "volume": "soft"
+        },
+        "voice": {
+          "age": 30,
+          "gender": "female",
+          "languages": "sr-Latn",
+          "name": "Mira",
+          "reference": "narrator",
+          "variant": 2
+        }
+      },
+      "id": "seg-000003",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": ["boundary-000009"],
+        "seconds": 0.6
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 29,
+      "spoken_start": 28,
+      "text": ".",
+      "token_indices": [3]
+    },
+    {
+      "annotation_ids": ["annotation-000002", "annotation-000003"],
+      "clause": 0,
+      "directives": {
+        "emphasis": {
+          "level": "strong"
+        },
+        "prosody": {
+          "pitch": null,
+          "rate": "slow",
+          "volume": "soft"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000004",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 1,
+      "spoken_end": 39,
+      "spoken_start": 30,
+      "text": "Important",
+      "token_indices": [4]
+    },
+    {
+      "annotation_ids": ["annotation-000002", "annotation-000004"],
+      "clause": 1,
+      "directives": {
+        "prosody": {
+          "pitch": null,
+          "rate": "slow",
+          "volume": "soft"
+        },
+        "say_as": {
+          "detail": "1",
+          "format": "dd.mm.yyyy",
+          "interpret_as": "date"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000005",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 1,
+      "spoken_end": 50,
+      "spoken_start": 39,
+      "text": " 31.12.2024",
+      "token_indices": [5]
+    },
+    {
+      "annotation_ids": ["annotation-000002"],
+      "clause": 2,
+      "directives": {
+        "prosody": {
+          "pitch": null,
+          "rate": "slow",
+          "volume": "soft"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000006",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 1,
+      "spoken_end": 51,
+      "spoken_start": 50,
+      "text": ",",
+      "token_indices": [5]
+    },
+    {
+      "annotation_ids": ["annotation-000002", "annotation-000005"],
+      "clause": 2,
+      "directives": {
+        "prosody": {
+          "pitch": null,
+          "rate": "slow",
+          "volume": "soft"
+        },
+        "substitution": {
+          "alias": "water"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000007",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 1,
+      "spoken_end": 55,
+      "spoken_start": 51,
+      "text": " H2O",
+      "token_indices": [6]
+    },
+    {
+      "annotation_ids": ["annotation-000002"],
+      "clause": 3,
+      "directives": {
+        "prosody": {
+          "pitch": null,
+          "rate": "slow",
+          "volume": "soft"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000008",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 1,
+      "spoken_end": 60,
+      "spoken_start": 55,
+      "text": ", and",
+      "token_indices": [6, 7]
+    },
+    {
+      "annotation_ids": ["annotation-000002", "annotation-000006"],
+      "clause": 3,
+      "directives": {
+        "pronunciation": {
+          "alphabet": "ipa",
+          "phonemes": "kəmˈpjuːtər"
+        },
+        "prosody": {
+          "pitch": null,
+          "rate": "slow",
+          "volume": "soft"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000009",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 1,
+      "spoken_end": 69,
+      "spoken_start": 60,
+      "text": " computer",
+      "token_indices": [8]
+    },
+    {
+      "annotation_ids": ["annotation-000002"],
+      "clause": 4,
+      "directives": {
+        "prosody": {
+          "pitch": null,
+          "rate": "slow",
+          "volume": "soft"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000010",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": ["boundary-000010"],
+        "seconds": 0.6
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 1,
+      "spoken_end": 70,
+      "spoken_start": 69,
+      "text": ".",
+      "token_indices": [8]
+    },
+    {
+      "annotation_ids": ["annotation-000002"],
+      "clause": 0,
+      "directives": {
+        "prosody": {
+          "pitch": null,
+          "rate": "slow",
+          "volume": "soft"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000011",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 2,
+      "spoken_end": 72,
+      "spoken_start": 71,
+      "text": "A",
+      "token_indices": [9]
+    },
+    {
+      "annotation_ids": ["annotation-000002", "annotation-000007"],
+      "clause": 0,
+      "directives": {
+        "audio": {
+          "alt_text": null,
+          "clip_begin": "1s",
+          "clip_end": "2s",
+          "description": "door chime",
+          "repeat_count": 1.5,
+          "repeat_duration": null,
+          "sound_level": "-3dB",
+          "speed": "110%",
+          "src": "door.wav"
+        },
+        "prosody": {
+          "pitch": null,
+          "rate": "slow",
+          "volume": "soft"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000012",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 2,
+      "spoken_end": 78,
+      "spoken_start": 72,
+      "text": " sound",
+      "token_indices": [10]
+    },
+    {
+      "annotation_ids": ["annotation-000002"],
+      "clause": 1,
+      "directives": {
+        "prosody": {
+          "pitch": null,
+          "rate": "slow",
+          "volume": "soft"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000013",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 2,
+      "spoken_end": 97,
+      "spoken_start": 78,
+      "text": " plays, followed by",
+      "token_indices": [11, 12, 13]
+    },
+    {
+      "annotation_ids": ["annotation-000002", "annotation-000008"],
+      "clause": 1,
+      "directives": {
+        "extensions": [
+          {
+            "name": "acme.effects.whisper",
+            "params": {
+              "mode": "soft"
+            }
+          }
+        ],
+        "prosody": {
+          "pitch": null,
+          "rate": "slow",
+          "volume": "soft"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000014",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 2,
+      "spoken_end": 105,
+      "spoken_start": 97,
+      "text": " whisper",
+      "token_indices": [14]
+    },
+    {
+      "annotation_ids": ["annotation-000002"],
+      "clause": 2,
+      "directives": {
+        "prosody": {
+          "pitch": null,
+          "rate": "slow",
+          "volume": "soft"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000015",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": ["boundary-000011"],
+        "seconds": 0.6
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 2,
+      "spoken_end": 106,
+      "spoken_start": 105,
+      "text": ".",
+      "token_indices": [14]
+    },
+    {
+      "annotation_ids": ["annotation-000009"],
+      "clause": 0,
+      "directives": {
+        "prosody": {
+          "pitch": "low",
+          "rate": "medium",
+          "volume": "soft"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000016",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": ["boundary-000002"],
+        "seconds": 0.45
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 3,
+      "spoken_end": 145,
+      "spoken_start": 107,
+      "text": "Outer scope establishes block prosody.",
+      "token_indices": [15, 16, 17, 18, 19]
+    },
+    {
+      "annotation_ids": ["annotation-000009", "annotation-000010"],
+      "clause": 0,
+      "directives": {
+        "prosody": {
+          "pitch": "high",
+          "rate": "fast",
+          "volume": "soft"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000017",
+      "language": "sr-Latn",
+      "paragraph": 2,
+      "pause_after": {
+        "events": ["boundary-000003"],
+        "seconds": 0.45
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 193,
+      "spoken_start": 147,
+      "text": "Inner scope preserves explicit rate and pitch.",
+      "token_indices": [20, 21, 22, 23, 24, 25, 26]
+    },
+    {
+      "annotation_ids": ["annotation-000009"],
+      "clause": 0,
+      "directives": {
+        "prosody": {
+          "pitch": "low",
+          "rate": "medium",
+          "volume": "soft"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000018",
+      "language": "sr-Latn",
+      "paragraph": 3,
+      "pause_after": {
+        "events": ["boundary-000004"],
+        "seconds": 0.45
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 225,
+      "spoken_start": 195,
+      "text": "Back in the outer voice scope.",
+      "token_indices": [27, 28, 29, 30, 31, 32]
+    },
+    {
+      "annotation_ids": [],
+      "clause": 0,
+      "directives": {},
+      "id": "seg-000019",
+      "language": "sr-Latn",
+      "paragraph": 4,
+      "pause_after": {
+        "events": ["boundary-000005"],
+        "seconds": 0.5
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 234,
+      "spoken_start": 227,
+      "text": "A pause",
+      "token_indices": [33, 34]
+    },
+    {
+      "annotation_ids": [],
+      "clause": 1,
+      "directives": {},
+      "id": "seg-000020",
+      "language": "sr-Latn",
+      "paragraph": 4,
+      "pause_after": {
+        "events": ["boundary-000006"],
+        "seconds": 0.45
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 249,
+      "spoken_start": 234,
+      "text": " then a marker.",
+      "token_indices": [35, 36, 37]
+    },
+    {
+      "annotation_ids": [],
+      "clause": 0,
+      "directives": {},
+      "id": "seg-000021",
+      "language": "sr-Latn",
+      "paragraph": 5,
+      "pause_after": {
+        "events": ["boundary-000008"],
+        "seconds": 0.45
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 268,
+      "spoken_start": 251,
+      "text": "Secondary heading",
+      "token_indices": [38, 39]
+    },
+    {
+      "annotation_ids": [],
+      "clause": 0,
+      "directives": {},
+      "id": "seg-000022",
+      "language": "sr-Latn",
+      "paragraph": 6,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 288,
+      "spoken_start": 270,
+      "text": "After the heading.",
+      "token_indices": [40, 41, 42]
+    }
+  ],
+  "source": {
+    "format": "ssmd",
+    "text": "---\nssmd_version: \"0.9\"\ntitle: Renderer-neutral SSMD 0.9 contract\nlanguage: sr-Latn\nvoice_bindings:\n  narrator: provider-voice\nvoice_defaults:\n  narrator:\n    rate: slow\n    volume: soft\nprosody_transitions:\n  enabled: true\n  same_voice_only: true\n  rate: 100ms\npause_defaults:\n  paragraph: 450ms\nlanguage_detection:\n  mode: auto\n  languages: [sr-Latn, en-GB]\nrequires:\n  extensions:\n    - acme.effects.whisper\n---\n# Main heading\n\n:::{voice=\"narrator\" voice-name=\"Mira\" voice-languages=\"sr-Latn\" gender=\"female\" age=\"30\" variant=\"2\" rate=\"medium\" pitch=\"low\"}\nWelcome [reader]{lang=\"sr-Latn\"}.\n:::\n:::{voice=\"narrator\"}\n[Important]{emphasis=\"strong\"} [31.12.2024]{as=\"date\" format=\"dd.mm.yyyy\" detail=\"1\"}, [H2O]{sub=\"water\"}, and [computer]{ph=\"kəmˈpjuːtər\" alphabet=\"ipa\"}.\nA [sound]{src=\"door.wav\" desc=\"door chime\" clip=\"1s-2s\" speed=\"110%\" repeat=\"1.5\" level=\"-3dB\"} plays, followed by [whisper]{ext=\"acme.effects.whisper\" mode=\"soft\"}.\n:::\n::::{voice=\"narrator\" rate=\"medium\" pitch=\"low\"}\nOuter scope establishes block prosody.\n:::{rate=\"fast\" pitch=\"high\"}\nInner scope preserves explicit rate and pitch.\n:::\nBack in the outer voice scope.\n::::\n\nA pause ...500ms then a marker. @checkpoint\n\n## Secondary heading\n\nAfter the heading.\n"
+  },
+  "texts": {
+    "spoken": "Main heading\n\nWelcome reader. Important 31.12.2024, H2O, and computer. A sound plays, followed by whisper. Outer scope establishes block prosody.\n\nInner scope preserves explicit rate and pitch.\n\nBack in the outer voice scope.\n\nA pause then a marker.\n\nSecondary heading\n\nAfter the heading.",
+    "structural": "Main heading\n\nWelcome reader. Important 31.12.2024, H2O, and computer. A sound plays, followed by whisper. Outer scope establishes block prosody.\n\nInner scope preserves explicit rate and pitch.\n\nBack in the outer voice scope.\n\nA pause then a marker.\n\nSecondary heading\n\nAfter the heading."
+  },
+  "tokens": [
+    {
+      "id": "token-0",
+      "language": "sr-Latn",
+      "lemma": "main",
+      "morph": null,
+      "spoken_end": 4,
+      "spoken_start": 0,
+      "text": "Main"
+    },
+    {
+      "id": "token-1",
+      "language": "sr-Latn",
+      "lemma": "heading",
+      "morph": null,
+      "spoken_end": 12,
+      "spoken_start": 5,
+      "text": "heading"
+    },
+    {
+      "id": "token-2",
+      "language": "sr-Latn",
+      "lemma": "welcome",
+      "morph": null,
+      "spoken_end": 21,
+      "spoken_start": 14,
+      "text": "Welcome"
+    },
+    {
+      "id": "token-3",
+      "language": "sr-Latn",
+      "lemma": "reader.",
+      "morph": null,
+      "spoken_end": 29,
+      "spoken_start": 22,
+      "text": "reader."
+    },
+    {
+      "id": "token-4",
+      "language": "sr-Latn",
+      "lemma": "important",
+      "morph": null,
+      "spoken_end": 39,
+      "spoken_start": 30,
+      "text": "Important"
+    },
+    {
+      "id": "token-5",
+      "language": "sr-Latn",
+      "lemma": "31.12.2024,",
+      "morph": null,
+      "spoken_end": 51,
+      "spoken_start": 40,
+      "text": "31.12.2024,"
+    },
+    {
+      "id": "token-6",
+      "language": "sr-Latn",
+      "lemma": "h2o,",
+      "morph": null,
+      "spoken_end": 56,
+      "spoken_start": 52,
+      "text": "H2O,"
+    },
+    {
+      "id": "token-7",
+      "language": "sr-Latn",
+      "lemma": "and",
+      "morph": null,
+      "spoken_end": 60,
+      "spoken_start": 57,
+      "text": "and"
+    },
+    {
+      "id": "token-8",
+      "language": "sr-Latn",
+      "lemma": "computer.",
+      "morph": null,
+      "spoken_end": 70,
+      "spoken_start": 61,
+      "text": "computer."
+    },
+    {
+      "id": "token-9",
+      "language": "sr-Latn",
+      "lemma": "a",
+      "morph": null,
+      "spoken_end": 72,
+      "spoken_start": 71,
+      "text": "A"
+    },
+    {
+      "id": "token-10",
+      "language": "sr-Latn",
+      "lemma": "sound",
+      "morph": null,
+      "spoken_end": 78,
+      "spoken_start": 73,
+      "text": "sound"
+    },
+    {
+      "id": "token-11",
+      "language": "sr-Latn",
+      "lemma": "plays,",
+      "morph": null,
+      "spoken_end": 85,
+      "spoken_start": 79,
+      "text": "plays,"
+    },
+    {
+      "id": "token-12",
+      "language": "sr-Latn",
+      "lemma": "followed",
+      "morph": null,
+      "spoken_end": 94,
+      "spoken_start": 86,
+      "text": "followed"
+    },
+    {
+      "id": "token-13",
+      "language": "sr-Latn",
+      "lemma": "by",
+      "morph": null,
+      "spoken_end": 97,
+      "spoken_start": 95,
+      "text": "by"
+    },
+    {
+      "id": "token-14",
+      "language": "sr-Latn",
+      "lemma": "whisper.",
+      "morph": null,
+      "spoken_end": 106,
+      "spoken_start": 98,
+      "text": "whisper."
+    },
+    {
+      "id": "token-15",
+      "language": "sr-Latn",
+      "lemma": "outer",
+      "morph": null,
+      "spoken_end": 112,
+      "spoken_start": 107,
+      "text": "Outer"
+    },
+    {
+      "id": "token-16",
+      "language": "sr-Latn",
+      "lemma": "scope",
+      "morph": null,
+      "spoken_end": 118,
+      "spoken_start": 113,
+      "text": "scope"
+    },
+    {
+      "id": "token-17",
+      "language": "sr-Latn",
+      "lemma": "establishes",
+      "morph": null,
+      "spoken_end": 130,
+      "spoken_start": 119,
+      "text": "establishes"
+    },
+    {
+      "id": "token-18",
+      "language": "sr-Latn",
+      "lemma": "block",
+      "morph": null,
+      "spoken_end": 136,
+      "spoken_start": 131,
+      "text": "block"
+    },
+    {
+      "id": "token-19",
+      "language": "sr-Latn",
+      "lemma": "prosody.",
+      "morph": null,
+      "spoken_end": 145,
+      "spoken_start": 137,
+      "text": "prosody."
+    },
+    {
+      "id": "token-20",
+      "language": "sr-Latn",
+      "lemma": "inner",
+      "morph": null,
+      "spoken_end": 152,
+      "spoken_start": 147,
+      "text": "Inner"
+    },
+    {
+      "id": "token-21",
+      "language": "sr-Latn",
+      "lemma": "scope",
+      "morph": null,
+      "spoken_end": 158,
+      "spoken_start": 153,
+      "text": "scope"
+    },
+    {
+      "id": "token-22",
+      "language": "sr-Latn",
+      "lemma": "preserves",
+      "morph": null,
+      "spoken_end": 168,
+      "spoken_start": 159,
+      "text": "preserves"
+    },
+    {
+      "id": "token-23",
+      "language": "sr-Latn",
+      "lemma": "explicit",
+      "morph": null,
+      "spoken_end": 177,
+      "spoken_start": 169,
+      "text": "explicit"
+    },
+    {
+      "id": "token-24",
+      "language": "sr-Latn",
+      "lemma": "rate",
+      "morph": null,
+      "spoken_end": 182,
+      "spoken_start": 178,
+      "text": "rate"
+    },
+    {
+      "id": "token-25",
+      "language": "sr-Latn",
+      "lemma": "and",
+      "morph": null,
+      "spoken_end": 186,
+      "spoken_start": 183,
+      "text": "and"
+    },
+    {
+      "id": "token-26",
+      "language": "sr-Latn",
+      "lemma": "pitch.",
+      "morph": null,
+      "spoken_end": 193,
+      "spoken_start": 187,
+      "text": "pitch."
+    },
+    {
+      "id": "token-27",
+      "language": "sr-Latn",
+      "lemma": "back",
+      "morph": null,
+      "spoken_end": 199,
+      "spoken_start": 195,
+      "text": "Back"
+    },
+    {
+      "id": "token-28",
+      "language": "sr-Latn",
+      "lemma": "in",
+      "morph": null,
+      "spoken_end": 202,
+      "spoken_start": 200,
+      "text": "in"
+    },
+    {
+      "id": "token-29",
+      "language": "sr-Latn",
+      "lemma": "the",
+      "morph": null,
+      "spoken_end": 206,
+      "spoken_start": 203,
+      "text": "the"
+    },
+    {
+      "id": "token-30",
+      "language": "sr-Latn",
+      "lemma": "outer",
+      "morph": null,
+      "spoken_end": 212,
+      "spoken_start": 207,
+      "text": "outer"
+    },
+    {
+      "id": "token-31",
+      "language": "sr-Latn",
+      "lemma": "voice",
+      "morph": null,
+      "spoken_end": 218,
+      "spoken_start": 213,
+      "text": "voice"
+    },
+    {
+      "id": "token-32",
+      "language": "sr-Latn",
+      "lemma": "scope.",
+      "morph": null,
+      "spoken_end": 225,
+      "spoken_start": 219,
+      "text": "scope."
+    },
+    {
+      "id": "token-33",
+      "language": "sr-Latn",
+      "lemma": "a",
+      "morph": null,
+      "spoken_end": 228,
+      "spoken_start": 227,
+      "text": "A"
+    },
+    {
+      "id": "token-34",
+      "language": "sr-Latn",
+      "lemma": "pause",
+      "morph": null,
+      "spoken_end": 234,
+      "spoken_start": 229,
+      "text": "pause"
+    },
+    {
+      "id": "token-35",
+      "language": "sr-Latn",
+      "lemma": "then",
+      "morph": null,
+      "spoken_end": 239,
+      "spoken_start": 235,
+      "text": "then"
+    },
+    {
+      "id": "token-36",
+      "language": "sr-Latn",
+      "lemma": "a",
+      "morph": null,
+      "spoken_end": 241,
+      "spoken_start": 240,
+      "text": "a"
+    },
+    {
+      "id": "token-37",
+      "language": "sr-Latn",
+      "lemma": "marker.",
+      "morph": null,
+      "spoken_end": 249,
+      "spoken_start": 242,
+      "text": "marker."
+    },
+    {
+      "id": "token-38",
+      "language": "sr-Latn",
+      "lemma": "secondary",
+      "morph": null,
+      "spoken_end": 260,
+      "spoken_start": 251,
+      "text": "Secondary"
+    },
+    {
+      "id": "token-39",
+      "language": "sr-Latn",
+      "lemma": "heading",
+      "morph": null,
+      "spoken_end": 268,
+      "spoken_start": 261,
+      "text": "heading"
+    },
+    {
+      "id": "token-40",
+      "language": "sr-Latn",
+      "lemma": "after",
+      "morph": null,
+      "spoken_end": 275,
+      "spoken_start": 270,
+      "text": "After"
+    },
+    {
+      "id": "token-41",
+      "language": "sr-Latn",
+      "lemma": "the",
+      "morph": null,
+      "spoken_end": 279,
+      "spoken_start": 276,
+      "text": "the"
+    },
+    {
+      "id": "token-42",
+      "language": "sr-Latn",
+      "lemma": "heading.",
+      "morph": null,
+      "spoken_end": 288,
+      "spoken_start": 280,
+      "text": "heading."
+    }
+  ],
+  "units": [
+    {
+      "content_hash": "sha256:2fd8b30dff97fef59fe8be9f4ebb100266e40adb5912c3fbfcf2e1e4c229c52c",
+      "content_hash_schema": "utterplan-unit-v2",
+      "id": "unit-0000",
+      "index": 0,
+      "kind": "paragraph",
+      "marker_ids": [],
+      "segment_ids": ["seg-000000"],
+      "spoken_end": 12,
+      "spoken_start": 0
+    },
+    {
+      "content_hash": "sha256:07ceab4821a0e0307f00cddead811607e549790b1ad52078dae4bee407541aff",
+      "content_hash_schema": "utterplan-unit-v2",
+      "id": "unit-0001",
+      "index": 1,
+      "kind": "paragraph",
+      "marker_ids": [],
+      "segment_ids": [
+        "seg-000001",
+        "seg-000002",
+        "seg-000003",
+        "seg-000004",
+        "seg-000005",
+        "seg-000006",
+        "seg-000007",
+        "seg-000008",
+        "seg-000009",
+        "seg-000010",
+        "seg-000011",
+        "seg-000012",
+        "seg-000013",
+        "seg-000014",
+        "seg-000015",
+        "seg-000016"
+      ],
+      "spoken_end": 145,
+      "spoken_start": 14
+    },
+    {
+      "content_hash": "sha256:fb2aeedd6d31331bf6b7e79bc4ed29063be8a74dc9913c6ef8832d690ca9b1d7",
+      "content_hash_schema": "utterplan-unit-v2",
+      "id": "unit-0002",
+      "index": 2,
+      "kind": "paragraph",
+      "marker_ids": [],
+      "segment_ids": ["seg-000017"],
+      "spoken_end": 193,
+      "spoken_start": 147
+    },
+    {
+      "content_hash": "sha256:0193b76a997373a76257827988f7055e901c3f0f39856ecfc8babd4fddb6d445",
+      "content_hash_schema": "utterplan-unit-v2",
+      "id": "unit-0003",
+      "index": 3,
+      "kind": "paragraph",
+      "marker_ids": [],
+      "segment_ids": ["seg-000018"],
+      "spoken_end": 225,
+      "spoken_start": 195
+    },
+    {
+      "content_hash": "sha256:29f25326da4054b5a34e2dbb346ce130694c431da8d7bbe3ad9f6e85b8516c98",
+      "content_hash_schema": "utterplan-unit-v2",
+      "id": "unit-0004",
+      "index": 4,
+      "kind": "paragraph",
+      "marker_ids": [],
+      "segment_ids": ["seg-000019", "seg-000020"],
+      "spoken_end": 249,
+      "spoken_start": 227
+    },
+    {
+      "content_hash": "sha256:2389ea9c5748ec2b8a2a902c6f159557adfeeb5d465291d290ff6b1997cfef25",
+      "content_hash_schema": "utterplan-unit-v2",
+      "id": "unit-0005",
+      "index": 5,
+      "kind": "paragraph",
+      "marker_ids": ["marker-000000"],
+      "segment_ids": ["seg-000021"],
+      "spoken_end": 268,
+      "spoken_start": 251
+    },
+    {
+      "content_hash": "sha256:000522bdabc2e9c4c4a58eb0806605d47b02555806e2731c78a5c3a893bb2eaa",
+      "content_hash_schema": "utterplan-unit-v2",
+      "id": "unit-0006",
+      "index": 6,
+      "kind": "paragraph",
+      "marker_ids": [],
+      "segment_ids": ["seg-000022"],
+      "spoken_end": 288,
+      "spoken_start": 270
+    }
+  ],
+  "warnings": []
+}

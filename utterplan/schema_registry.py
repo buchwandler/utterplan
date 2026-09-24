@@ -9,6 +9,7 @@ from .versioning import CURRENT_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSIONS
 _SCHEMA_RESOURCES: dict[int, str] = {
     1: "schemas/v1.schema.json",
     2: "schemas/v2.schema.json",
+    3: "schemas/v3.schema.json",
 }
 
 

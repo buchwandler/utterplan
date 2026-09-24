@@ -2,13 +2,13 @@ from utterplan import PlannerConfig, UtterancePlanner
 
 
 def test_spokenform_mapping_keeps_structural_and_spoken_ranges_distinct():
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan(
-        "Dr. Smith bought 5 kg on Jan. 4."
-    )
+    source = '[Dr. Smith bought 5 kg on Jan. 4.]{emphasis="moderate"}'
+    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan(source)
     assert plan.texts.structural != plan.texts.spoken
     annotation = plan.annotations[0]
     assert (annotation.structural_start, annotation.structural_end) == (0, 32)
     assert (annotation.spoken_start, annotation.spoken_end) == (0, len(plan.texts.spoken))
+    assert (annotation.source_start, annotation.source_end) == (0, len(source))
     assert plan.texts.spoken[annotation.spoken_start : annotation.spoken_end] == plan.texts.spoken
 
 

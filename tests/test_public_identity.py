@@ -19,7 +19,7 @@ def test_public_planner_identity() -> None:
     assert isinstance(plan, UtterancePlan)
     payload = plan.to_dict()
     assert payload["format"] == "utterplan"
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["producer"]["name"] == "utterplan"
 
 

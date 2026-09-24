@@ -9,6 +9,35 @@ The Python defaults are deliberately spaCy-free: `PlannerConfig` uses `spokenfor
 For an explicit contextual-G2P configuration, use `LinguisticsConfig(use_spacy=True, spacy_model="en_core_web_sm", require_spacy=True)`. The resulting plan records final pass-B token provenance in `linguistic_runs`; no provider document is retained.
 spaCy enrichment is opt-in through the CLI's `--spacy auto` policy or an explicit `LinguisticsConfig` with a compatible local model. It may provide richer tokenization, POS tags, lemmas, and tags, but UtterPlan never downloads a model implicitly.
 
+## SSMD input and semantic plan
+
+The SSMD parser accepts dialect 0.9 only. Select SSMD explicitly for unversioned canonical fragments with `PlannerConfig(document_format="ssmd")`. Older SSMD source must be migrated with `ssmd migrate FILE --to 0.9`; `migrate_plan_data` and `utterplan migrate` apply to serialized UtterPlan JSON, not source documents.
+
+```python
+from utterplan import PlannerConfig, UtterancePlanner
+
+ssmd_source = """---
+ssmd_version: "0.9"
+title: API example
+language: en-us
+---
+Hello [world]{emphasis="strong"}.
+"""
+
+planner = UtterancePlanner(
+    PlannerConfig(language="en-us", document_format="ssmd")
+)
+plan = planner.plan(ssmd_source)
+
+assert plan.document_metadata["ssmd_version"] == "0.9"
+annotation = plan.annotations[0]
+print(annotation.source_start, annotation.source_end, annotation.source_node_id)
+directives = plan.segments[0].directives
+print(directives.voice, directives.prosody, directives.say_as)
+```
+
+SSMD annotations preserve declared source spans. Segment directives hold effective typed semantics after scope and voice-default resolution. `document_metadata` preserves portable header data and the SSMD version; `plan.boundaries` preserves heading events. Audio references and extension names are not executed by UtterPlan. See the [coordinate-space contract](coordinate-spaces) for source offset units and the [consumer guide](consumer-guide) for renderer responsibilities.
+
 ## Planner configuration
 
 ```{autoclass} utterplan.PlannerConfig
@@ -49,6 +78,53 @@ spaCy enrichment is opt-in through the CLI's `--spacy auto` policy or an explici
 ```
 
 ```{autoclass} utterplan.PlanUnit
+:members:
+:show-inheritance:
+```
+
+## Renderer-neutral SSMD directives
+
+```{autoclass} utterplan.SegmentDirectives
+:members:
+:show-inheritance:
+```
+
+```{autoclass} utterplan.VoiceDirective
+:members:
+:show-inheritance:
+```
+
+```{autoclass} utterplan.PronunciationDirective
+:members:
+:show-inheritance:
+```
+
+```{autoclass} utterplan.ProsodyDirective
+:members:
+:show-inheritance:
+```
+
+```{autoclass} utterplan.EmphasisDirective
+:members:
+:show-inheritance:
+```
+
+```{autoclass} utterplan.SayAsDirective
+:members:
+:show-inheritance:
+```
+
+```{autoclass} utterplan.SubstitutionDirective
+:members:
+:show-inheritance:
+```
+
+```{autoclass} utterplan.AudioDirective
+:members:
+:show-inheritance:
+```
+
+```{autoclass} utterplan.ExtensionDirective
 :members:
 :show-inheritance:
 ```

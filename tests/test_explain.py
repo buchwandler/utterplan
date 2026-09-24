@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from utterplan import UtterancePlan
+from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
 from utterplan.explain import format_explanation
 
 GOLDEN = Path("tests/golden")
@@ -69,9 +69,40 @@ def test_explicit_pause_uses_resolved_segment_duration() -> None:
 def test_directives_are_humanized() -> None:
     output = format_explanation(_load("directives.utterplan.json"))
 
-    assert "prosody: rate 1.2, pitch +2st, volume 80%" in output
+    assert "effective prosody: rate 1.2, pitch +2st, volume 80%" in output
     assert "emphasis: strong" in output
     assert "{'prosody'" not in output
+
+
+def test_ssmd_explanation_summarizes_semantics_and_metadata() -> None:
+    output = format_explanation(_load("ssmd_09_comprehensive.utterplan.json"), details=True)
+
+    assert "SSMD version: 0.9" in output
+    assert 'title: "Renderer-neutral SSMD 0.9 contract"' in output
+    assert "document language: sr-Latn" in output
+    assert "voice: reference=narrator, name=Mira" in output
+    assert "effective prosody: rate fast, pitch high, volume soft" in output
+    assert "say-as: date, format dd.mm.yyyy, detail 1" in output
+    assert 'substitution: "water"' in output
+    assert 'description "door chime"' in output
+    assert "repeat count 1.5, level -3dB" in output
+    assert "extension refs: acme.effects.whisper" in output
+    assert "heading level 1 at spoken" in output
+
+
+def test_ssmd_warning_diagnostic_includes_source_location() -> None:
+    text = """---
+ssmd_version: "0.9"
+unknown: true
+---
+Hello."""
+    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan(text)
+
+    output = format_explanation(plan)
+
+    assert "header.unknown_key [warn]" in output
+    assert "source " in output
+    assert "line 3, column 1" in output
 
 
 def test_multilingual_segments_are_in_render_order() -> None:
@@ -95,7 +126,7 @@ def test_details_include_technical_identity_and_correlated_ids() -> None:
     output = format_explanation(_load("parenthetical.utterplan.json"), details=True)
 
     assert "plan id: sha256:" in output
-    assert "schema: 2" in output
+    assert "schema: 3" in output
     assert "id: seg-000001" in output
     assert "spoken: 19:53" in output
     assert "content hash: sha256:" in output

@@ -36,7 +36,7 @@ def test_schema_and_determinism():
 
 def test_unsupported_schema():
     value = plan().to_dict()
-    value["schema_version"] = 3
+    value["schema_version"] = 4
     with pytest.raises(UnsupportedSchemaError):
         UtterancePlan.from_dict(value)
 

@@ -6,7 +6,7 @@ from typing import Any
 
 from .config import PlannerConfig, parse_duration
 from .exceptions import ConfigurationError, PlanFormatError, PlanningError
-from .model import AnnotationSpan, BoundaryEvent, Marker
+from .model import AnnotationSpan, BoundaryEvent, Diagnostic, Marker
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +19,8 @@ class ParsedDocument:
     header: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
+    diagnostics: tuple[Diagnostic, ...] = ()
+    document_language: str = ""
 
 
 class PlainDocumentParser:
@@ -33,29 +35,40 @@ class PlainDocumentParser:
             )
             for index, match in enumerate(re.finditer(r"\n\s*\n", text))
         )
-        return ParsedDocument(text, text, boundaries=boundaries)
+        return ParsedDocument(
+            source_text=text,
+            structural_text=text,
+            boundaries=boundaries,
+            document_language=config.language,
+        )
 
 
 class SSMDDocumentParser:
     def parse(self, text: str, config: PlannerConfig) -> ParsedDocument:
         try:
             import ssmd
+            from ssmd.frontmatter import FrontMatterError
         except ImportError as exc:
             raise PlanningError("SSMD input requires the ssmd package") from exc
 
-        warnings: list[str] = []
-        if config.ssmd.parse_header:
-            self._validate_header(text, config, warnings)
         try:
             parsed = ssmd.parse_structure(
                 text,
-                default_lang=config.language,
+                default_lang=None,
                 parse_yaml_header=config.ssmd.parse_header,
+                resolve_defaults=False,
+                dialect="0.9",
             )
-        except (ImportError, OSError) as exc:
-            raise PlanningError("SSMD parsing failed") from exc
-        except (TypeError, ValueError) as exc:
-            raise PlanFormatError(str(exc), code="header.invalid") from exc
+        except FrontMatterError as exc:
+            location = _format_location(exc.line, exc.column)
+            raise PlanFormatError(f"{exc}{location}", code=exc.code, path="$.source") from exc
+
+        diagnostics = tuple(_ssmd_diagnostic(item) for item in parsed.diagnostics)
+        errors = [item for item in diagnostics if item.severity == "error"]
+        if errors:
+            first = errors[0]
+            location = _format_location(first.line, first.column)
+            raise PlanFormatError(f"{first.message}{location}", code=first.code, path="$.source")
 
         structural = str(parsed.clean_text)
         annotations = tuple(
@@ -65,13 +78,18 @@ class SSMDDocumentParser:
                 attrs={str(k): _plain_value(v) for k, v in item.attrs.items()},
                 structural_start=int(item.char_start),
                 structural_end=int(item.char_end),
+                source_start=getattr(item, "source_start", None),
+                source_end=getattr(item, "source_end", None),
+                source_node_id=(
+                    str(item.node_id) if getattr(item, "node_id", None) is not None else None
+                ),
             )
             for i, item in enumerate(parsed.annotations)
             if int(item.char_end) > int(item.char_start)
         )
         boundaries: list[BoundaryEvent] = []
         markers: list[Marker] = []
-        warnings.extend(str(x) for x in parsed.warnings)
+        warnings = [str(value) for value in parsed.warnings]
         for event in parsed.events:
             attrs = {str(k): _plain_value(v) for k, v in event.attrs.items()}
             kind = str(event.kind)
@@ -79,7 +97,7 @@ class SSMDDocumentParser:
             event_anchor = str(getattr(event, "anchor", attrs.get("anchor", "after")))
             if kind == "mark":
                 name = attrs.get("name") or attrs.get("marker") or "marker"
-                markers.append(Marker(f"marker-{len(markers):06d}", name, position, attrs))
+                markers.append(Marker(f"marker-{len(markers):06d}", str(name), position, attrs))
             elif kind == "break":
                 seconds = _duration(attrs, config, parsed.header)
                 boundaries.append(
@@ -120,112 +138,83 @@ class SSMDDocumentParser:
                         },
                     )
                 )
-        metadata = {"header": dict(parsed.header)}
-        language_detection = _normalize_language_detection(
-            parsed.header.get("language_detection"), config, warnings
-        )
-        if language_detection is not None:
-            metadata["language_detection"] = language_detection
-        if parsed.header.get("voice_bindings") is not None:
-            metadata["voice_bindings"] = parsed.header["voice_bindings"]
+            elif kind == "heading":
+                boundaries.append(
+                    BoundaryEvent(
+                        id=f"boundary-{len(boundaries):06d}",
+                        position=position,
+                        kind="heading",
+                        seconds=0.0,
+                        origin="ssmd",
+                        attrs={**attrs, "anchor": event_anchor, "structural_only": True},
+                    )
+                )
+
+        header = _plain_value(parsed.header)
+        metadata: dict[str, Any] = {"header": header}
+        for key in (
+            "ssmd_version",
+            "title",
+            "language",
+            "voice_bindings",
+            "voice_defaults",
+            "pause_defaults",
+            "prosody_transitions",
+            "language_detection",
+            "requires",
+        ):
+            if key in header:
+                metadata[key] = header[key]
+
+        document_language = header.get("language") if config.ssmd.parse_header else None
+        if not isinstance(document_language, str) or not document_language:
+            document_language = config.language
+
         return ParsedDocument(
-            text,
-            structural,
-            annotations,
-            tuple(boundaries),
-            tuple(markers),
-            dict(parsed.header),
-            metadata,
-            tuple(warnings),
+            source_text=text,
+            structural_text=structural,
+            annotations=annotations,
+            boundaries=tuple(boundaries),
+            markers=tuple(markers),
+            header=header,
+            metadata=metadata,
+            warnings=tuple(warnings),
+            diagnostics=tuple(item for item in diagnostics if item.severity != "error"),
+            document_language=document_language,
         )
-
-    @staticmethod
-    def _validate_header(text: str, config: PlannerConfig, warnings: list[str]) -> None:
-        try:
-            from ssmd.frontmatter import parse_front_matter
-
-            front_matter = parse_front_matter(text)
-        except (ImportError, OSError) as exc:
-            raise PlanningError("SSMD header parser is unavailable") from exc
-        except ValueError as exc:
-            raise PlanFormatError(str(exc), code="header.yaml_invalid") from exc
-        if not front_matter.present:
-            return
-
-        header = front_matter.data
-        known = {"pause_defaults", "voice_bindings", "language_detection"}
-        unknown = sorted(set(header) - known)
-        if unknown:
-            message = f"unknown SSMD header key(s): {', '.join(unknown)}"
-            if config.ssmd.unknown_header == "error":
-                raise PlanFormatError(message, code="header.unknown")
-            if config.ssmd.unknown_header == "warn":
-                warnings.append(message)
-
-        _normalize_language_detection(header.get("language_detection"), config, warnings)
-
-        pause_defaults = header.get("pause_defaults")
-        if pause_defaults is None:
-            return
-        if not isinstance(pause_defaults, dict):
-            _header_invalid(config, warnings, "pause_defaults must be a mapping")
-            return
-        allowed = {
-            "enabled",
-            "weak",
-            "clause",
-            "sentence",
-            "paragraph",
-            "parenthetical",
-            "voice_change",
-        }
-        for key, value in pause_defaults.items():
-            if key not in allowed:
-                _header_invalid(config, warnings, f"unsupported pause_defaults key: {key}")
-                continue
-            try:
-                if key == "enabled":
-                    if not isinstance(value, bool):
-                        raise ConfigurationError("enabled must be a boolean")
-                else:
-                    parse_duration(value, field_name=f"pause_defaults.{key}")
-            except ConfigurationError as exc:
-                _header_invalid(config, warnings, str(exc))
-
-
-def _normalize_language_detection(
-    value: Any, config: PlannerConfig, warnings: list[str]
-) -> dict[str, Any] | None:
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        _header_invalid(config, warnings, "language_detection must be a mapping")
-        return None
-    mode = value.get("mode")
-    languages = value.get("languages")
-    if not isinstance(mode, str) or not mode:
-        _header_invalid(config, warnings, "language_detection.mode must be a non-empty string")
-        return None
-    if not isinstance(languages, (list, tuple)) or not all(
-        isinstance(language, str) and language for language in languages
-    ):
-        _header_invalid(
-            config, warnings, "language_detection.languages must be a list of non-empty strings"
-        )
-        return None
-    return {"mode": mode, "languages": list(languages)}
-
-
-def _header_invalid(config: PlannerConfig, warnings: list[str], message: str) -> None:
-    if config.ssmd.strict_header:
-        raise PlanFormatError(message, code="header.invalid")
-    warnings.append(message)
 
 
 def _plain_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _plain_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_value(item) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)
+
+
+def _ssmd_diagnostic(item: Any) -> Diagnostic:
+    return Diagnostic(
+        code=str(item.code),
+        message=str(item.message),
+        severity=str(item.severity),
+        path="$.source",
+        source_start=getattr(item, "source_start", None),
+        source_end=getattr(item, "source_end", None),
+        line=getattr(item, "line", None),
+        column=getattr(item, "column", None),
+        hint=getattr(item, "hint", None),
+    )
+
+
+def _format_location(line: int | None, column: int | None) -> str:
+    if line is None:
+        return ""
+    location = f" at line {line}"
+    if column is not None:
+        location += f", column {column}"
+    return location
 
 
 def _duration(

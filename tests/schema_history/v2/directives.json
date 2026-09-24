@@ -1,0 +1,178 @@
+{
+  "annotations": [
+    {
+      "attrs": {
+        "lang": "en-us"
+      },
+      "id": "annotation-000000",
+      "kind": "language",
+      "spoken_end": 4,
+      "spoken_start": 0,
+      "structural_end": 4,
+      "structural_start": 0
+    },
+    {
+      "attrs": {
+        "emphasis": "strong",
+        "pitch": "+2st",
+        "rate": "1.2",
+        "tag": "prosody",
+        "volume": "80%"
+      },
+      "id": "annotation-000001",
+      "kind": "inline",
+      "spoken_end": 4,
+      "spoken_start": 0,
+      "structural_end": 4,
+      "structural_start": 0
+    }
+  ],
+  "boundaries": [],
+  "config": {
+    "diagnostics": true,
+    "document_format": "ssmd",
+    "language": "en-us",
+    "language_aliases": {},
+    "linguistics": {
+      "require_spacy": false,
+      "spacy_model": null,
+      "spacy_model_size": null,
+      "use_spacy": null
+    },
+    "overlap_mode": "snap",
+    "pauses": {
+      "clause": 0.3,
+      "enabled": true,
+      "mode": "tts",
+      "paragraph": 1.0,
+      "parenthetical": 0.15,
+      "sentence": 0.6,
+      "voice_change": 0.15,
+      "weak": 0.15
+    },
+    "ssmd": {
+      "parse_header": true,
+      "pause_defaults": null,
+      "strict_header": true,
+      "unknown_header": "warn"
+    },
+    "text_preparation": "spokenform",
+    "unit": "paragraph"
+  },
+  "diagnostics": [
+    {
+      "code": "planning.complete",
+      "message": "Plan compiled without renderer or audio processing",
+      "path": null,
+      "severity": "info"
+    }
+  ],
+  "document_metadata": {
+    "header": {},
+    "planning": {
+      "engine_independent": true,
+      "linguistic_passes": 2,
+      "pass_a_tokens": 1
+    }
+  },
+  "format": "utterplan",
+  "languages": [
+    {
+      "id": "lang-0",
+      "language": "en-us",
+      "source": "explicit-span",
+      "spoken_end": 4,
+      "spoken_start": 0
+    }
+  ],
+  "linguistic_runs": [
+    {
+      "language_run_id": "lang-0",
+      "model": null,
+      "model_version": null,
+      "provider": "fallback",
+      "provider_version": null,
+      "token_end": 1,
+      "token_start": 0
+    }
+  ],
+  "markers": [],
+  "plan_id": "sha256:84f39cda7fbbc17d4501d0a52ea20519b715350ebf52d7604a1e1c15e5e10c6e",
+  "preparation": {
+    "backend": "spokenform",
+    "languages": ["en-us"],
+    "replacements": [],
+    "version": "0.4.5",
+    "warnings": []
+  },
+  "producer": {
+    "name": "utterplan",
+    "version": "0.1.3"
+  },
+  "schema_version": 2,
+  "segments": [
+    {
+      "annotation_ids": ["annotation-000000", "annotation-000001"],
+      "clause": 0,
+      "directives": {
+        "emphasis": {
+          "level": "strong"
+        },
+        "prosody": {
+          "pitch": "+2st",
+          "rate": "1.2",
+          "volume": "80%"
+        }
+      },
+      "id": "seg-000000",
+      "language": "en-us",
+      "paragraph": 0,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 4,
+      "spoken_start": 0,
+      "text": "fast",
+      "token_indices": [0]
+    }
+  ],
+  "source": {
+    "format": "ssmd",
+    "text": "[fast]{rate=\"1.2\" pitch=\"+2st\" volume=\"80%\" emphasis=\"strong\"}"
+  },
+  "texts": {
+    "spoken": "fast",
+    "structural": "fast"
+  },
+  "tokens": [
+    {
+      "id": "token-0",
+      "language": "en-us",
+      "lemma": "fast",
+      "morph": null,
+      "spoken_end": 4,
+      "spoken_start": 0,
+      "text": "fast"
+    }
+  ],
+  "units": [
+    {
+      "content_hash": "sha256:93e17e4c1016b739d6790e5e8a29c22afc95f6231f93f4ecb3ec788646fb5c01",
+      "content_hash_schema": "utterplan-unit-v2",
+      "id": "unit-0000",
+      "index": 0,
+      "kind": "paragraph",
+      "marker_ids": [],
+      "segment_ids": ["seg-000000"],
+      "spoken_end": 4,
+      "spoken_start": 0
+    }
+  ],
+  "warnings": []
+}

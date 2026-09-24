@@ -37,22 +37,38 @@ CASES = (
     MigrationCase("ssmd_voice", '[Hello]{voice="narrator"}.', SSMD_IDENTITY),
     MigrationCase(
         "ssmd_header_voice",
-        '---\nvoice_bindings:\n  narrator: voice-a\n---\n[Hello]{voice="narrator"}.',
+        """---
+ssmd_version: "0.9"
+voice_bindings:
+  narrator: voice-a
+---
+[Hello]{voice="narrator"}.""",
         SSMD_IDENTITY,
     ),
-    MigrationCase("ssmd_prosody", '[fast]{rate="1.2" pitch="+2st" volume="80%"}.', SSMD_IDENTITY),
+    MigrationCase("ssmd_prosody", '[fast]{rate="120%" pitch="high" volume="80%"}.', SSMD_IDENTITY),
     MigrationCase("ssmd_emphasis", '[important]{emphasis="strong"}.', SSMD_IDENTITY),
-    MigrationCase("ssmd_audio", '[sound]{src="clip.wav" alt_text="sound"}.', SSMD_IDENTITY),
+    MigrationCase("ssmd_audio", '[sound]{src="clip.wav" desc="sound"}.', SSMD_IDENTITY),
     MigrationCase("ssmd_break", "Hello ...c world", SSMD_IDENTITY),
     MigrationCase("ssmd_marker", "One. @mark Two.", SSMD_IDENTITY),
     MigrationCase(
         "ssmd_pause_defaults",
-        "---\npause_defaults:\n  sentence: 400ms\n---\nOne. Two.",
+        """---
+ssmd_version: "0.9"
+pause_defaults:
+  sentence: 400ms
+---
+One. Two.""",
         SSMD_IDENTITY,
     ),
     MigrationCase(
         "ssmd_language_detection",
-        "---\nlanguage_detection:\n  mode: auto\n  languages: [de, en]\n---\nHallo.",
+        """---
+ssmd_version: "0.9"
+language_detection:
+  mode: auto
+  languages: [de, en]
+---
+Hallo.""",
         SSMD_IDENTITY,
     ),
 )

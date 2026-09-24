@@ -1,0 +1,45 @@
+---
+ssmd_version: "0.9"
+title: Renderer-neutral SSMD 0.9 contract
+language: sr-Latn
+voice_bindings:
+  narrator: provider-voice
+voice_defaults:
+  narrator:
+    rate: slow
+    volume: soft
+prosody_transitions:
+  enabled: true
+  same_voice_only: true
+  rate: 100ms
+pause_defaults:
+  paragraph: 450ms
+language_detection:
+  mode: auto
+  languages: [sr-Latn, en-GB]
+requires:
+  extensions:
+    - acme.effects.whisper
+---
+# Main heading
+
+:::{voice="narrator" voice-name="Mira" voice-languages="sr-Latn" gender="female" age="30" variant="2" rate="medium" pitch="low"}
+Welcome [reader]{lang="sr-Latn"}.
+:::
+:::{voice="narrator"}
+[Important]{emphasis="strong"} [31.12.2024]{as="date" format="dd.mm.yyyy" detail="1"}, [H2O]{sub="water"}, and [computer]{ph="kəmˈpjuːtər" alphabet="ipa"}.
+A [sound]{src="door.wav" desc="door chime" clip="1s-2s" speed="110%" repeat="1.5" level="-3dB"} plays, followed by [whisper]{ext="acme.effects.whisper" mode="soft"}.
+:::
+::::{voice="narrator" rate="medium" pitch="low"}
+Outer scope establishes block prosody.
+:::{rate="fast" pitch="high"}
+Inner scope preserves explicit rate and pitch.
+:::
+Back in the outer voice scope.
+::::
+
+A pause ...500ms then a marker. @checkpoint
+
+## Secondary heading
+
+After the heading.

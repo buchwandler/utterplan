@@ -25,14 +25,26 @@ class LanguageRun:
         }
 
 
-def normalize_language(language: str, aliases: dict[str, str] | None = None) -> str:
-    if not isinstance(language, str):
+def preserve_language_tag(value: str) -> str:
+    if not isinstance(value, str):
         raise LanguagePlanError("language must be a string")
-    value = language.strip().lower().replace("_", "-")
-    if not value:
+    tag = value.strip()
+    if not tag:
         raise LanguagePlanError("language must not be empty")
-    alias_map = {key.lower().replace("_", "-"): val for key, val in (aliases or {}).items()}
-    return alias_map.get(value, value).strip().lower().replace("_", "-")
+    return tag
+
+
+def language_lookup_key(value: str) -> str:
+    return preserve_language_tag(value).lower().replace("_", "-")
+
+
+def normalize_language(language: str, aliases: dict[str, str] | None = None) -> str:
+    value = language_lookup_key(language)
+    alias_map = {
+        language_lookup_key(key): language_lookup_key(alias)
+        for key, alias in (aliases or {}).items()
+    }
+    return alias_map.get(value, value)
 
 
 def build_language_runs(
@@ -40,12 +52,14 @@ def build_language_runs(
     spans: Iterable[tuple[int, int, str, str]],
     default_language: str,
     aliases: dict[str, str] | None = None,
+    *,
+    preserve_tags: bool = False,
 ) -> tuple[LanguageRun, ...]:
-    default = normalize_language(default_language, aliases)
-    explicit = [
-        (start, end, normalize_language(lang, aliases), source)
-        for start, end, lang, source in spans
-    ]
+    normalize = (
+        preserve_language_tag if preserve_tags else lambda value: normalize_language(value, aliases)
+    )
+    default = normalize(default_language)
+    explicit = [(start, end, normalize(lang), source) for start, end, lang, source in spans]
     for start, end, _lang, _source in explicit:
         if not (0 <= start < end <= len(text)):
             raise LanguagePlanError(f"language span {start}:{end} is outside spoken text")

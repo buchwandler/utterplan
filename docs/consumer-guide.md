@@ -4,6 +4,8 @@ UtterPlan ends at a semantic planning boundary. A renderer consumes the public
 plan object and begins G2P after planning. It does not need a JSON round trip
 when planner and renderer run in the same process.
 
+UtterPlan accepts SSMD source syntax at version 0.9 only. Convert older source with `ssmd migrate FILE --to 0.9` before planning. This is separate from `UtterancePlan` schema migration, which operates only on serialized plan JSON. SSMD annotations and header semantics are preserved as portable data; UtterPlan does not execute audio or extension directives.
+
 ## Planning defaults
 
 UtterPlan's default text-preparation backend is `spokenform`, its default pause mode is `tts`, and the default CLI linguistic-resource policy is `spacy off`. The default path uses deterministic fallback tokenization and analysis and does not depend on an installed spaCy model.
@@ -19,17 +21,14 @@ Use these public fields:
   `segment.spoken_start:segment.spoken_end`.
 - `segment.language` identifies the language for the segment.
 - `plan.languages` provides language runs.
-- `plan.annotations` and `segment.annotation_ids` provide semantic spans.
+- `plan.annotations` and `segment.annotation_ids` preserve declared semantic spans and source provenance.
 - `plan.tokens` and `segment.token_indices` provide linguistic token metadata.
-- `plan.boundaries` explains semantic boundary events.
+- `plan.boundaries` explains semantic boundary events, including headings.
 - `segment.pause_before` and `segment.pause_after` are already-resolved pauses.
-- `segment.directives` contains typed semantic intent, such as a logical voice
-  reference or prosody request.
+- `segment.directives` carries effective typed renderer-neutral intent, including voice, pronunciation, prosody, emphasis, say-as, substitution, audio reference, and extension reference.
 - `plan.markers` and `unit.marker_ids` identify marker ownership.
 - `plan.units` groups segments for paragraph or sentence rendering.
-- `plan.document_metadata` contains document-level metadata such as logical
-  voice bindings.
-  Consumers may rely on these plan-level fields: `texts.spoken`, `preparation`, `languages`, `linguistic_runs`, `tokens`, `annotations`, `boundaries`, `segments`, `units`, `markers`, and `document_metadata`. Each segment additionally provides its ID, spoken text range, language, paragraph/sentence/clause ownership, resolved pauses, typed directives, token indices, and annotation IDs.
+- `plan.document_metadata` preserves portable SSMD header metadata, including voice bindings and defaults.
 
 `TokenAnnotation` stores the exact spoken slice plus normalized language, lemma, coarse POS, fine-grained tag, and compact morphology. `LinguisticRun` records actual provider/model provenance.
 
@@ -37,13 +36,11 @@ Use these public fields:
 All segment ranges and renderer-facing ranges are spoken-text coordinates.
 
 Preparation provenance is diagnostic metadata for consumers. Do not depend on a serialized coordinate map. All structural-to-spoken conversion has already been resolved by the planner.
-Voice bindings are logical names, not backend voice IDs. Consumers must not
-recompute pause policy, resolve engine voices in UtterPlan, or depend on provider
-documents that were used during planning.
+Voice bindings and directive voice references are logical names, not backend voice IDs. Consumers translate them to engine-specific resources. UtterPlan resolves SSMD scopes and defaults but does not make engine choices, fetch audio, execute extension handlers, or recompute pause policy.
 
 ## Stable renderer input view
 
-Consumers may rely on these plan-level fields: `texts.spoken`, `preparation`, `languages`, `tokens`, `annotations`, `boundaries`, `segments`, `units`, `markers`, and `document_metadata`. Each segment additionally provides its ID, spoken text range, language, paragraph/sentence/clause ownership, resolved pauses, typed directives, token indices, and annotation IDs.
+Consumers may rely on these plan-level fields: `texts.spoken`, `preparation`, `languages`, `linguistic_runs`, `tokens`, `annotations`, `boundaries`, `segments`, `units`, `markers`, and `document_metadata`. The SSMD version is in `document_metadata["ssmd_version"]`; heading events are preserved in `boundaries`. Each segment additionally provides its ID, spoken text range, language, paragraph/sentence/clause ownership, resolved pauses, typed directives, token indices, and annotation IDs.
 
 A completed plan is immutable consumer input. Consumers may inspect and adapt the data for G2P or rendering, but must not rewrite planning decisions or mutate the plan. The canonical invariant is:
 
