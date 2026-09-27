@@ -71,6 +71,7 @@ class SSMDDocumentParser:
             raise PlanFormatError(f"{first.message}{location}", code=first.code, path="$.source")
 
         structural = str(parsed.clean_text)
+        recovered_audio = _recover_zero_width_audio_annotations(ssmd, text, parsed, config)
         annotations = tuple(
             AnnotationSpan(
                 id=f"annotation-{i:06d}",
@@ -86,6 +87,17 @@ class SSMDDocumentParser:
             )
             for i, item in enumerate(parsed.annotations)
             if _keep_ssmd_annotation(item)
+        ) + tuple(
+            AnnotationSpan(
+                id=f"annotation-{len(parsed.annotations) + i:06d}",
+                kind=kind,
+                attrs=attrs,
+                structural_start=position,
+                structural_end=position,
+                source_start=source_start,
+                source_end=source_end,
+            )
+            for i, (position, kind, attrs, source_start, source_end) in enumerate(recovered_audio)
         )
         boundaries: list[BoundaryEvent] = []
         markers: list[Marker] = []
@@ -195,6 +207,95 @@ def _keep_ssmd_annotation(item: Any) -> bool:
     kind = str(getattr(item, "kind", "annotation")).lower().replace("_", "-")
     tag = str(attrs.get("tag") or kind).lower().replace("_", "-")
     return tag == "audio" or attrs.get("src") is not None
+
+
+def _recover_zero_width_audio_annotations(
+    ssmd: Any, text: str, parsed: Any, config: PlannerConfig
+) -> tuple[tuple[int, str, dict[str, Any], int, int], ...]:
+    """Recover empty audio spans omitted by older supported SSMD parsers.
+
+    SSMD 0.9.0 drops all zero-width annotations. Reparse only empty audio
+    annotations with a one-character sentinel so the parser supplies their
+    structural position and attributes; the original clean text remains canonical.
+    """
+    candidates = [
+        match
+        for match in re.finditer(
+            r"\[\]\{(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^{}'\"])*\}",
+            text,
+            re.DOTALL,
+        )
+        if re.search(r"(?:^|\s)src\s*=", match.group(0)[3:-1])
+    ]
+    existing_sources = {
+        (getattr(item, "source_start", None), getattr(item, "source_end", None))
+        for item in parsed.annotations
+        if getattr(item, "attrs", {}).get("src") is not None
+    }
+    missing = [
+        match for match in candidates if (match.start(), match.end()) not in existing_sources
+    ]
+    if not missing:
+        return ()
+
+    sentinel = "\ue000"
+    pieces: list[str] = []
+    candidate_by_temp_start: dict[int, re.Match[str]] = {}
+    cursor = 0
+    for index, match in enumerate(missing):
+        pieces.append(text[cursor : match.start()])
+        temp_start = match.start() + index
+        candidate_by_temp_start[temp_start] = match
+        pieces.append("[" + sentinel + "]" + match.group(0)[2:])
+        cursor = match.end()
+    pieces.append(text[cursor:])
+    reparsed = ssmd.parse_structure(
+        "".join(pieces),
+        default_lang=None,
+        parse_yaml_header=config.ssmd.parse_yaml_header,
+        resolve_defaults=False,
+        dialect="0.9",
+    )
+    recovered: list[tuple[int, int, str, dict[str, Any], int, int]] = []
+    for item in reparsed.annotations:
+        source_start = getattr(item, "source_start", None)
+        candidate_match = (
+            candidate_by_temp_start.get(source_start) if isinstance(source_start, int) else None
+        )
+        if candidate_match is None:
+            continue
+        attrs = getattr(item, "attrs", {})
+        kind = str(getattr(item, "kind", "annotation"))
+        tag = str(attrs.get("tag") or kind).lower().replace("_", "-")
+        char_start = int(item.char_start)
+        char_end = int(item.char_end)
+        if (tag != "audio" and attrs.get("src") is None) or sentinel not in reparsed.clean_text[
+            char_start:char_end
+        ]:
+            continue
+        recovered.append(
+            (
+                char_start,
+                candidate_match.start(),
+                kind,
+                {str(key): _plain_value(value) for key, value in attrs.items()},
+                candidate_match.start(),
+                candidate_match.end(),
+            )
+        )
+    recovered.sort(key=lambda item: (item[0], item[1]))
+    return tuple(
+        (
+            char_start - index,
+            kind,
+            attrs,
+            source_start,
+            source_end,
+        )
+        for index, (char_start, _source_order, kind, attrs, source_start, source_end) in enumerate(
+            recovered
+        )
+    )
 
 
 def _plain_value(value: Any) -> Any:
