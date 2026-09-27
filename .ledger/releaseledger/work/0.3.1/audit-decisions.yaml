@@ -1,0 +1,23 @@
+rows:
+  - sha: 70adac05bf008abfed0e8ea46eb9d0973ba1cd82
+    inspected: true
+    inspected_paths:
+      - docs/consumer-guide.md
+      - docs/python-api.md
+      - tests/test_consumer_contract.py
+      - tests/test_directives.py
+      - tests/test_fake_renderer.py
+      - tests/test_format.py
+      - tests/test_identity_units.py
+      - tests/test_planner.py
+      - tests/test_preparation.py
+      - tests/test_ssmd_09_parser.py
+      - utterplan/parsers.py
+      - utterplan/planner.py
+    observed_behavior: Each SSMD audio annotation maps to one renderer-neutral segment; audio sources remain opaque, fallback text is optional, zero-width occurrences are retained, and unsupported audio topologies fail planning
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false

@@ -1,0 +1,37 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.3.1
+git_base_ref: ad398fd2c943113966bb6ad0a247c2c6c90c676b
+git_base_sha: ad398fd2c943113966bb6ad0a247c2c6c90c676b
+git_head_ref: 70adac05bf008abfed0e8ea46eb9d0973ba1cd82
+git_head_sha: 70adac05bf008abfed0e8ea46eb9d0973ba1cd82
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: Added renderer-neutral SSMD audio segments with opaque sources and optional spoken fallback
+    status: accepted
+    body: >-
+      Each SSMD audio annotation maps to one segment carrying `directives.audio`; the source remains opaque and `segment.text` is optional fallback (empty when absent). Repeated sources remain distinct occurrences.
+    source_refs:
+      - git:70adac05bf008abfed0e8ea46eb9d0973ba1cd82
+    paths:
+      - docs/consumer-guide.md
+      - docs/python-api.md
+      - tests/test_consumer_contract.py
+      - tests/test_directives.py
+      - tests/test_fake_renderer.py
+      - tests/test_format.py
+      - tests/test_identity_units.py
+      - tests/test_planner.py
+      - tests/test_preparation.py
+      - tests/test_ssmd_09_parser.py
+      - utterplan/parsers.py
+      - utterplan/planner.py
+    sources:
+      - git:70adac05bf008abfed0e8ea46eb9d0973ba1cd82
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

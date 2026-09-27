@@ -1,0 +1,916 @@
+ docs/consumer-guide.md          |  22 ++-
+ docs/python-api.md              |  19 +++
+ tests/test_consumer_contract.py |  20 +++
+ tests/test_directives.py        |  21 +++
+ tests/test_fake_renderer.py     |  21 +++
+ tests/test_format.py            |  18 +++
+ tests/test_identity_units.py    |  21 +++
+ tests/test_planner.py           | 218 +++++++++++++++++++++++++++-
+ tests/test_preparation.py       |  10 ++
+ tests/test_ssmd_09_parser.py    |  41 ++++++
+ utterplan/parsers.py            |  15 +-
+ utterplan/planner.py            | 308 ++++++++++++++++++++++++++++++++++++++--
+ 12 files changed, 719 insertions(+), 15 deletions(-)
+
+diff --git a/docs/consumer-guide.md b/docs/consumer-guide.md
+index 6cbc80b..05e3f5f 100644
+--- a/docs/consumer-guide.md
++++ b/docs/consumer-guide.md
+@@ -62,6 +62,17 @@ Use these public fields:
+ - `plan.units` groups segments for paragraph or sentence rendering.
+ - `plan.document_metadata` preserves portable SSMD header metadata, including voice bindings and defaults.
+
++Audio/media segments are exposed through the same renderer-neutral segment contract:
++one SSMD audio annotation produces exactly one segment with
++`segment.directives.audio` set. Consumers should choose media from that directive,
++not infer it from the fallback text or reparse raw SSMD. `audio.src` is an opaque
++source string for an external resolver; UtterPlan does not select or invoke one.
++
++For an audio-bearing segment, `segment.text` is the optional spoken fallback. An
++empty string means there is no spoken fallback. Identical source URIs on separate
++segments are distinct timeline occurrences and must not be deduplicated as
++playback events.
++
+ `TokenAnnotation` stores the exact spoken slice plus normalized language, lemma, coarse POS, fine-grained tag, and compact morphology. `LinguisticRun` records actual provider/model provenance.
+
+ `plan.linguistic_runs` records the actual final pass-B analysis for each language run. `provider` is `spacy`, `fallback`, or `unknown`; model and version fields are provenance, not renderer inputs. A contextual G2P consumer should use `plan.tokens_for_segment(segment)` (or `segment.token_indices`) and must explicitly fail or use a documented fallback when the relevant provider is not `spacy`.
+@@ -96,11 +107,16 @@ for unit in plan.units:
+         segment = next(item for item in plan.segments if item.id == segment_id)
+         prepared_text = segment.text
+         language = segment.language
+-        segment_tokens = plan.tokens_for_segment(segment)
+-        # Pass segment_tokens to contextual G2P without rerunning spaCy.
+         pause_before = segment.pause_before.seconds
+         pause_after = segment.pause_after.seconds
+-        # G2P and backend-specific rendering start here.
++        audio = segment.directives.audio
++        if audio is not None:
++            # One segment represents one media occurrence; resolve externally.
++            resolve_audio(audio.src, fallback_text=prepared_text)
++        else:
++            segment_tokens = plan.tokens_for_segment(segment)
++            # Pass tokens to contextual G2P without rerunning spaCy.
++            render_speech(prepared_text, language, segment_tokens, pause_before, pause_after)
+ ```
+
+ A consumer may instead index segments, tokens, annotations, and markers by
+diff --git a/docs/python-api.md b/docs/python-api.md
+index f21006f..f3f5848 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -42,6 +42,25 @@ print(directives.voice, directives.prosody, directives.say_as)
+
+ SSMD annotations preserve declared source spans. Segment directives hold effective typed semantics after scope and voice-default resolution. `document_metadata` preserves portable header data and the SSMD version; `plan.boundaries` preserves heading events. Audio references and extension names are not executed by UtterPlan. See the [coordinate-space contract](coordinate-spaces) for source offset units and the [consumer guide](consumer-guide) for renderer responsibilities.
+
++## Audio/media segments
++
++`AudioDirective` is already part of the public API. Inspect it on the segment; its
++`src` is an opaque renderer input, and `segment.text` is optional spoken fallback:
++
++```python
++segment = plan.segments[0]
++audio = segment.directives.audio
++if audio is not None:
++    print(audio.src)  # Resolve externally; do not parse SFX URI syntax here.
++    fallback_text = segment.text  # May be "" when no spoken fallback exists.
++else:
++    spoken_text = segment.text
++```
++
++Each SSMD audio annotation is represented by one audio-bearing segment. Separate
++occurrences may have the same `src`; `segment.text` is not the media identity and
++consumers do not need to inspect raw SSMD annotations to find media.
++
+ ## Planner configuration
+
+ ```{autoclass} utterplan.PlannerConfig
+diff --git a/tests/test_consumer_contract.py b/tests/test_consumer_contract.py
+index c1beae9..dbccf6e 100644
+--- a/tests/test_consumer_contract.py
++++ b/tests/test_consumer_contract.py
+@@ -164,3 +164,23 @@ def test_markers_and_unit_ownership_are_public(unit: str) -> None:
+     owned = [marker_id for item in plan.units for marker_id in item.marker_ids]
+     assert owned == [plan.markers[0].id]
+     assert_public_consumer_contract(plan)
++
++
++def test_zero_width_media_uses_only_public_consumer_fields() -> None:
++    uri = "sfx:impact.knock?seed=42"
++    plan = UtterancePlanner(
++        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
++    ).plan(f'Before. []{{src="{uri}"}} After.')
++    assert_public_consumer_contract(plan)
++
++    rendered = []
++    for segment in plan.segments:
++        audio = segment.directives.audio
++        if audio is not None:
++            rendered.append(("audio", audio.src, segment.text))
++        else:
++            rendered.append(("speech", None, segment.text))
++
++    assert [item[0] for item in rendered] == ["speech", "audio", "speech"]
++    media = next(item for item in rendered if item[0] == "audio")
++    assert media == ("audio", uri, "")
+diff --git a/tests/test_directives.py b/tests/test_directives.py
+index 6d8e10c..4402a85 100644
+--- a/tests/test_directives.py
++++ b/tests/test_directives.py
+@@ -141,6 +141,27 @@ def test_audio_annotation_text_remains_spoken_fallback() -> None:
+     assert segments[0].directives.audio.description == "Door chime"
+
+
++def test_sfx_uri_is_opaque_and_generic_audio_values_are_preserved() -> None:
++    uri = "sfx:impact.knock?material=oak&count=3&force=0.7&seed=42"
++    _plan, segments = _directives(
++        f'[knock]{{src="{uri}" desc="Three knocks" clip="100ms-800ms" '
++        'speed="90%" repeat="2.5" repeatdur="3s" level="-4dB"}'
++    )
++    audio_segments = [segment for segment in segments if segment.directives.audio is not None]
++
++    assert len(audio_segments) == 1
++    audio = audio_segments[0].directives.audio
++    assert audio is not None
++    assert audio.src == uri
++    assert audio.description == "Three knocks"
++    assert audio.clip_begin == "100ms"
++    assert audio.clip_end == "800ms"
++    assert audio.speed == "90%"
++    assert audio.repeat_count == 2.5
++    assert audio.repeat_duration == "3s"
++    assert audio.sound_level == "-4dB"
++
++
+ def test_extension_name_and_parameters_are_preserved() -> None:
+     _plan, segments = _directives('[whispered text]{ext="whisper" amount="soft" mode="quiet"}')
+     extensions = segments[0].directives.extensions
+diff --git a/tests/test_fake_renderer.py b/tests/test_fake_renderer.py
+index 89de1ee..0478ac0 100644
+--- a/tests/test_fake_renderer.py
++++ b/tests/test_fake_renderer.py
+@@ -13,9 +13,12 @@ def render_semantic_plan(plan: object) -> list[dict[str, object]]:
+     for unit in plan.units:  # type: ignore[attr-defined]
+         for segment_id in unit.segment_ids:
+             segment = segments[segment_id]
++            audio = segment.directives.audio
+             rendered.append(
+                 {
+                     "unit": unit.id,
++                    "kind": "audio" if audio is not None else "speech",
++                    "audio_src": audio.src if audio is not None else None,
+                     "text": segment.text,
+                     "language": segment.language,
+                     "tokens": [tokens[index].text for index in segment.token_indices],
+@@ -49,3 +52,21 @@ voice_bindings:
+     assert rendered[0]["directives"]["voice"]["reference"] == "narrator"  # type: ignore[index]
+     assert "voice_bindings" in rendered[0]["metadata"]  # type: ignore[operator]
+     assert "mark" in {marker.name for marker in plan.markers}
++
++
++def test_fake_renderer_selects_zero_width_media_from_public_directive() -> None:
++    uri = "sfx:unknown.effect?x=y"
++    plan = UtterancePlanner(
++        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
++    ).plan(f'[]{{src="{uri}"}}')
++
++    rendered = render_semantic_plan(plan)
++
++    assert len(rendered) == 1
++    item = rendered[0]
++    assert item["kind"] == "audio"
++    assert item["audio_src"] == uri
++    assert item["text"] == ""
++    assert item["tokens"] == []
++    assert item["annotations"] == ["audio"]
++    assert item["directives"] == plan.segments[0].directives.to_dict()
+diff --git a/tests/test_format.py b/tests/test_format.py
+index 8b2e054..ac51ff5 100644
+--- a/tests/test_format.py
++++ b/tests/test_format.py
+@@ -71,3 +71,21 @@ def test_json_is_plain_data():
+     value = json.loads(plan().to_json())
+     assert "phonemes" not in json.dumps(value)
+     assert "numpy" not in json.dumps(value)
++
++
++def test_zero_width_media_roundtrip_validates_schema_v3() -> None:
++    import jsonschema
++
++    plan = UtterancePlanner(
++        PlannerConfig(
++            language="en-us",
++            document_format="ssmd",
++            text_preparation="identity",
++        )
++    ).plan('[]{src="sfx:impact.knock?seed=42"}')
++
++    payload = plan.to_dict()
++    jsonschema.validate(payload, schema())
++
++    assert payload["schema_version"] == 3
++    assert UtterancePlan.from_json(plan.to_json()) == plan
+diff --git a/tests/test_identity_units.py b/tests/test_identity_units.py
+index 2562644..a5430d4 100644
+--- a/tests/test_identity_units.py
++++ b/tests/test_identity_units.py
+@@ -19,3 +19,24 @@ def test_marker_at_sentence_unit_boundary_has_one_owner():
+     ).plan("One. @mark Two.")
+     memberships = [marker_id for unit in plan.units for marker_id in unit.marker_ids]
+     assert memberships == [plan.markers[0].id]
++
++
++def test_audio_source_and_occurrence_position_change_plan_and_unit_identity() -> None:
++    planner = UtterancePlanner(
++        PlannerConfig(
++            language="en-us",
++            document_format="ssmd",
++            text_preparation="identity",
++        )
++    )
++    uri_a = "sfx:impact.knock?force=0.7&seed=42"
++    uri_b = "sfx:impact.knock?force=0.9&seed=42"
++    first = planner.plan(f'[]{{src="{uri_a}"}}Before. After.')
++    changed_source = planner.plan(f'[]{{src="{uri_b}"}}Before. After.')
++    moved = planner.plan(f'Before. []{{src="{uri_a}"}}After.')
++
++    assert first.texts.spoken == changed_source.texts.spoken == moved.texts.spoken
++    assert first.plan_id != changed_source.plan_id
++    assert first.units[0].content_hash != changed_source.units[0].content_hash
++    assert first.plan_id != moved.plan_id
++    assert first.units[0].content_hash != moved.units[0].content_hash
+diff --git a/tests/test_planner.py b/tests/test_planner.py
+index 1e00b16..eb7f1aa 100644
+--- a/tests/test_planner.py
++++ b/tests/test_planner.py
+@@ -1,4 +1,6 @@
+-from utterplan import PauseConfig, PlannerConfig, UtterancePlanner
++import pytest
++
++from utterplan import PauseConfig, PlannerConfig, PlanningError, UtterancePlanner
+
+
+ def test_plain_sentences_paragraphs_and_pauses():
+@@ -50,3 +52,217 @@ def test_pass_a_tokens_counts_tokens_not_language_runs():
+
+     assert plan.document_metadata["planning"]["pass_a_tokens"] == 3
+     assert plan.texts.spoken == "One two three."
++
++
++@pytest.mark.parametrize(
++    ("source", "message"),
++    [
++        (
++            '[outer [inner]{src="inner.wav"} text]{src="outer.wav"}',
++            "Overlapping audio annotations",
++        ),
++        (
++            '[]{src="first.wav"}[]{src="second.wav"}',
++            "Multiple zero-width audio annotations",
++        ),
++        (
++            '[Audio []{src="point.wav"} fallback]{src="span.wav"}',
++            "inside another audio fallback",
++        ),
++        (
++            '[Hello [Bonjour]{lang="fr"} there]{src="multi.wav"}',
++            "multiple effective languages",
++        ),
++        (
++            ':::{src="paragraph.wav"}\nFirst.\n\nSecond.\n:::',
++            "multiple paragraphs",
++        ),
++        (
++            '[Audio [fallback]{emphasis="strong"} text]{src="nested.wav"}',
++            "nested inside an audio fallback",
++        ),
++    ],
++)
++def test_unrepresentable_audio_topology_is_rejected(source: str, message: str) -> None:
++    planner = UtterancePlanner(
++        PlannerConfig(
++            language="en-us",
++            document_format="ssmd",
++            text_preparation="identity",
++        )
++    )
++
++    with pytest.raises(PlanningError, match=message):
++        planner.plan(source)
++
++
++def test_adjacent_audio_annotations_are_distinct_and_supported() -> None:
++    planner = UtterancePlanner(
++        PlannerConfig(
++            language="en-us",
++            document_format="ssmd",
++            text_preparation="identity",
++        )
++    )
++    plan = planner.plan('[first]{src="same.wav"}[second]{src="same.wav"}')
++    audio_segments = [segment for segment in plan.segments if segment.directives.audio is not None]
++
++    assert len(audio_segments) == 2
++    first_audio = audio_segments[0].directives.audio
++    second_audio = audio_segments[1].directives.audio
++
++    assert first_audio is not None
++    assert second_audio is not None
++    assert first_audio.src == second_audio.src
++    assert audio_segments[0].id != audio_segments[1].id
++    assert audio_segments[0].spoken_start < audio_segments[1].spoken_start
++
++
++def test_audio_fallback_is_atomic_across_sentence_segmentation() -> None:
++    planner = UtterancePlanner(
++        PlannerConfig(
++            language="en-us",
++            document_format="ssmd",
++            text_preparation="identity",
++        )
++    )
++    uri = "sfx:impact.knock?seed=42"
++    plan = planner.plan(f'[Audio failed. Continue listening.]{{src="{uri}"}}')
++    audio_segments = [segment for segment in plan.segments if segment.directives.audio is not None]
++
++    assert len(audio_segments) == 1
++    assert audio_segments[0].text == "Audio failed. Continue listening."
++    audio = audio_segments[0].directives.audio
++    assert audio is not None
++    assert audio.src == uri
++
++
++def test_atomic_audio_fallback_does_not_change_neighboring_speech() -> None:
++    planner = UtterancePlanner(
++        PlannerConfig(
++            language="en-us",
++            document_format="ssmd",
++            text_preparation="identity",
++        )
++    )
++    plan = planner.plan(
++        'First sentence.[Audio failed. Continue listening.]{src="sfx:impact.knock"} Last sentence.'
++    )
++    audio_segments = [segment for segment in plan.segments if segment.directives.audio is not None]
++    assert len(audio_segments) == 1
++    media = audio_segments[0]
++
++    assert media.text == "Audio failed. Continue listening."
++    assert any(
++        segment.directives.audio is None and segment.spoken_end <= media.spoken_start
++        for segment in plan.segments
++    )
++    assert any(
++        segment.directives.audio is None and segment.spoken_start >= media.spoken_end
++        for segment in plan.segments
++    )
++
++
++def test_positive_width_whitespace_fallback_still_gets_one_media_segment() -> None:
++    from utterplan.language import LanguageRun
++    from utterplan.model import AnnotationSpan
++    from utterplan.planner import _apply_atomic_audio_segments
++
++    annotation = AnnotationSpan(
++        id="annotation-audio",
++        kind="audio",
++        attrs={"tag": "audio", "src": "opaque:whitespace"},
++        structural_start=0,
++        structural_end=3,
++        spoken_start=0,
++        spoken_end=3,
++    )
++    segments = _apply_atomic_audio_segments(
++        "   ",
++        [],
++        (LanguageRun("lang-0", 0, 3, "en-us"),),
++        (annotation,),
++        "en-us",
++    )
++
++    assert len(segments) == 1
++    assert segments[0].text == "   "
++    assert segments[0].spoken_start == 0
++    assert segments[0].spoken_end == 3
++    assert segments[0].language == "en-us"
++
++
++def test_zero_width_audio_segment_is_ordered_owned_and_included_in_a_unit() -> None:
++    planner = UtterancePlanner(
++        PlannerConfig(
++            language="en-us",
++            document_format="ssmd",
++            text_preparation="identity",
++        )
++    )
++    uri = "sfx:impact.knock?seed=42"
++    plan = planner.plan(f'Before. []{{src="{uri}"}} After.')
++    media = next(segment for segment in plan.segments if segment.directives.audio is not None)
++    media_index = plan.segments.index(media)
++    annotation = next(item for item in plan.annotations if item.attrs.get("src") == uri)
++
++    assert media.text == ""
++    assert media.spoken_start == media.spoken_end
++    assert media.token_indices == ()
++    assert annotation.id in media.annotation_ids
++    assert media.directives.audio is not None and media.directives.audio.src == uri
++    assert media_index > 0 and media_index < len(plan.segments) - 1
++    assert plan.segments[media_index - 1].spoken_end == media.spoken_start
++    assert plan.segments[media_index + 1].spoken_start >= media.spoken_start
++    assert media.sentence == plan.segments[media_index - 1].sentence
++    assert [segment.id for segment in plan.segments] == [
++        f"seg-{index:06d}" for index in range(len(plan.segments))
++    ]
++    assert any(media.id in unit.segment_ids for unit in plan.units)
++    assert media.text == plan.texts.spoken[media.spoken_start : media.spoken_end]
++
++    plan.validate()
++
++
++def test_media_only_document_uses_declared_language_and_round_trips() -> None:
++    source = (
++        '---\nssmd_version: "0.9"\nlanguage: en-US\n---\n'
++        '[]{src="sfx:door.open?seed=42" desc="Door opening"}'
++    )
++    planner = UtterancePlanner(
++        PlannerConfig(
++            language="en-us",
++            document_format="ssmd",
++            text_preparation="identity",
++        )
++    )
++    plan = planner.plan(source)
++
++    assert plan.texts.spoken == ""
++    assert plan.languages == ()
++    assert len(plan.segments) == 1
++    assert plan.segments[0].text == ""
++    assert plan.segments[0].language == "en-US"
++    assert plan.segments[0].token_indices == ()
++    assert plan.segments[0].directives.audio is not None
++    assert len(plan.units) == 1
++    plan.validate()
++    assert type(plan).from_json(plan.to_json()) == plan
++
++
++def test_point_audio_at_document_start_uses_following_language_context() -> None:
++    planner = UtterancePlanner(
++        PlannerConfig(
++            language="en-us",
++            document_format="ssmd",
++            text_preparation="identity",
++        )
++    )
++    plan = planner.plan('[]{src="clip.wav"}[Bonjour]{lang="fr"}.')
++    media = next(segment for segment in plan.segments if segment.directives.audio is not None)
++
++    assert media.language == "fr"
++    assert media.spoken_start == media.spoken_end == 0
++    media_index = plan.segments.index(media)
++    assert media_index == 0
++    assert plan.segments[media_index + 1].spoken_start == media.spoken_start
+diff --git a/tests/test_preparation.py b/tests/test_preparation.py
+index cf37ce3..dad7957 100644
+--- a/tests/test_preparation.py
++++ b/tests/test_preparation.py
+@@ -55,3 +55,13 @@ def test_zero_break_is_not_a_paragraph_event():
+     )
+     assert any(event.kind == "explicit" and event.seconds == 0.0 for event in plan.boundaries)
+     assert not any(event.kind == "paragraph" for event in plan.boundaries)
++
++
++def test_zero_width_audio_annotation_maps_to_spoken_point():
++    source = 'Before. []{src="clip.wav"} After.'
++    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(source)
++    annotation = next(item for item in plan.annotations if item.attrs.get("src") == "clip.wav")
++
++    assert annotation.structural_start == annotation.structural_end
++    assert annotation.spoken_start == annotation.spoken_end
++    assert plan.texts.spoken[annotation.spoken_start : annotation.spoken_end] == ""
+diff --git a/tests/test_ssmd_09_parser.py b/tests/test_ssmd_09_parser.py
+index d115d94..22272e8 100644
+--- a/tests/test_ssmd_09_parser.py
++++ b/tests/test_ssmd_09_parser.py
+@@ -218,3 +218,44 @@ def test_parser_warnings_retain_structured_source_diagnostics(
+     assert diagnostic.column == 3
+     assert diagnostic.hint == "Check this span"
+     assert diagnostic.to_dict()["source_start"] == 2
++
++
++def test_zero_width_audio_annotation_is_preserved() -> None:
++    uri = "sfx:impact.knock?seed=42"
++    plan = _planner().plan(f'Before. []{{src="{uri}" desc="Knock"}} After.')
++
++    audio_annotations = [item for item in plan.annotations if item.attrs.get("src") == uri]
++
++    assert len(audio_annotations) == 1
++    annotation = audio_annotations[0]
++    assert annotation.structural_start == annotation.structural_end
++    assert annotation.spoken_start == annotation.spoken_end
++
++
++def test_zero_width_non_media_annotation_is_not_preserved(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    import ssmd
++
++    from utterplan.parsers import SSMDDocumentParser
++
++    parsed = SimpleNamespace(
++        clean_text="",
++        annotations=[
++            SimpleNamespace(
++                kind="emphasis",
++                attrs={"tag": "emphasis"},
++                char_start=0,
++                char_end=0,
++            )
++        ],
++        events=[],
++        header={},
++        warnings=[],
++        diagnostics=[],
++    )
++    monkeypatch.setattr(ssmd, "parse_structure", lambda *args, **kwargs: parsed)
++
++    result = SSMDDocumentParser().parse("", _planner().config)
++
++    assert result.annotations == ()
+diff --git a/utterplan/parsers.py b/utterplan/parsers.py
+index 30dce8d..d740472 100644
+--- a/utterplan/parsers.py
++++ b/utterplan/parsers.py
+@@ -85,7 +85,7 @@ class SSMDDocumentParser:
+                 ),
+             )
+             for i, item in enumerate(parsed.annotations)
+-            if int(item.char_end) > int(item.char_start)
++            if _keep_ssmd_annotation(item)
+         )
+         boundaries: list[BoundaryEvent] = []
+         markers: list[Marker] = []
+@@ -184,6 +184,19 @@ class SSMDDocumentParser:
+         )
+
+
++def _keep_ssmd_annotation(item: Any) -> bool:
++    start = int(item.char_start)
++    end = int(item.char_end)
++    if end > start:
++        return True
++    if end < start:
++        return False
++    attrs = getattr(item, "attrs", {})
++    kind = str(getattr(item, "kind", "annotation")).lower().replace("_", "-")
++    tag = str(attrs.get("tag") or kind).lower().replace("_", "-")
++    return tag == "audio" or attrs.get("src") is not None
++
++
+ def _plain_value(value: Any) -> Any:
+     if isinstance(value, dict):
+         return {str(key): _plain_value(item) for key, item in value.items()}
+diff --git a/utterplan/planner.py b/utterplan/planner.py
+index 8609f67..1c8488e 100644
+--- a/utterplan/planner.py
++++ b/utterplan/planner.py
+@@ -7,7 +7,7 @@ from typing import Any
+ from .config import PauseConfig, PlannerConfig, parse_duration
+ from .directives import resolve_directives
+ from .exceptions import ConfigurationError, PlanningError
+-from .language import build_language_runs, language_lookup_key, spans_from_annotations
++from .language import LanguageRun, build_language_runs, language_lookup_key, spans_from_annotations
+ from .linguistics import LinguisticResourcePool, RunAnalysis, analyze_run_analyses
+ from .model import (
+     AnnotationSpan,
+@@ -91,7 +91,9 @@ class UtterancePlanner:
+         linguistic_runs = _linguistic_runs(runs, pass_b)
+         boundaries = list(prepared.boundaries)
+         boundaries.extend(_linguistic_boundaries(spoken, runs, pass_b, start_id=len(boundaries)))
+-        segments = _segment(spoken, runs, prepared.annotations, boundaries, pause_config)
++        segments = _segment(
++            spoken, runs, prepared.annotations, boundaries, pause_config, document_language
++        )
+         segments = _attach_membership(segments, tokens, prepared.annotations)
+         segments = [
+             resolve_directives(
+@@ -217,6 +219,19 @@ def _linguistic_runs(runs: tuple[Any, ...], analyses: tuple[Any, ...]) -> tuple[
+
+
+ def _segment(
++    text: str,
++    runs: tuple[LanguageRun, ...],
++    annotations: tuple[AnnotationSpan, ...],
++    boundaries: list[BoundaryEvent],
++    pause_config: PauseConfig,
++    default_language: str,
++) -> list[PlanSegment]:
++    base_segments = _segment_text(text, runs, annotations, boundaries, pause_config)
++    _validate_audio_topology(annotations, runs, base_segments)
++    return _apply_atomic_audio_segments(text, base_segments, runs, annotations, default_language)
++
++
++def _segment_text(
+     text: str,
+     runs: tuple[Any, ...],
+     annotations: tuple[AnnotationSpan, ...],
+@@ -289,6 +304,273 @@ def _segment(
+     return result
+
+
++def _audio_annotation(annotation: AnnotationSpan) -> bool:
++    tag = str(annotation.attrs.get("tag") or annotation.kind).lower().replace("_", "-")
++    return tag == "audio" or annotation.attrs.get("src") is not None
++
++
++def _audio_annotations(
++    annotations: tuple[AnnotationSpan, ...],
++) -> tuple[AnnotationSpan, ...]:
++    mapped = [
++        annotation
++        for annotation in annotations
++        if _audio_annotation(annotation)
++        and annotation.spoken_start is not None
++        and annotation.spoken_end is not None
++    ]
++    return tuple(
++        sorted(
++            mapped,
++            key=lambda annotation: (
++                annotation.spoken_start or 0,
++                annotation.spoken_end or 0,
++                annotation.id,
++            ),
++        )
++    )
++
++
++def _validate_audio_topology(
++    annotations: tuple[AnnotationSpan, ...],
++    runs: tuple[LanguageRun, ...],
++    segments: list[PlanSegment],
++) -> None:
++    audio_annotations = _audio_annotations(annotations)
++    positive = tuple(
++        annotation
++        for annotation in audio_annotations
++        if annotation.spoken_start is not None
++        and annotation.spoken_end is not None
++        and annotation.spoken_start < annotation.spoken_end
++    )
++    points = tuple(
++        annotation
++        for annotation in audio_annotations
++        if annotation.spoken_start is not None
++        and annotation.spoken_end is not None
++        and annotation.spoken_start == annotation.spoken_end
++    )
++
++    for previous, current in zip(positive, positive[1:], strict=False):
++        previous_end = previous.spoken_end
++        current_start = current.spoken_start
++        if previous_end is not None and current_start is not None and current_start < previous_end:
++            raise PlanningError(
++                "Overlapping audio annotations are not supported by UtterPlan schema-v3 segment semantics"
++            )
++
++    point_position: int | None = None
++    for point in points:
++        position = point.spoken_start
++        if position is None:
++            continue
++        if position == point_position:
++            raise PlanningError(
++                "Multiple zero-width audio annotations at the same spoken position are not supported"
++            )
++        point_position = position
++
++    positive_index = 0
++    for point in points:
++        position = point.spoken_start
++        if position is None:
++            continue
++        while positive_index < len(positive):
++            positive_end = positive[positive_index].spoken_end
++            if positive_end is None or positive_end > position:
++                break
++            positive_index += 1
++        if positive_index == len(positive):
++            break
++        candidate = positive[positive_index]
++        start, end = candidate.spoken_start, candidate.spoken_end
++        if start is not None and end is not None and start < position < end:
++            raise PlanningError(
++                "A zero-width audio occurrence inside another audio fallback is not supported"
++            )
++
++    for audio in positive:
++        start, end = audio.spoken_start, audio.spoken_end
++        if start is None or end is None:
++            continue
++        languages = {
++            language_lookup_key(run.language)
++            for run in runs
++            if run.spoken_start < end and run.spoken_end > start
++        }
++        if len(languages) > 1:
++            raise PlanningError(
++                "Audio fallback spans multiple effective languages and cannot be represented as one atomic media segment"
++            )
++
++        paragraphs = {
++            segment.paragraph
++            for segment in segments
++            if segment.spoken_start < end and segment.spoken_end > start
++        }
++        if len(paragraphs) > 1:
++            raise PlanningError(
++                "Audio fallback spans multiple paragraphs and cannot be represented as one atomic media segment"
++            )
++
++        for annotation in annotations:
++            if (
++                annotation.id == audio.id
++                or _audio_annotation(annotation)
++                or not _semantic_annotation(annotation)
++                or annotation.spoken_start is None
++                or annotation.spoken_end is None
++            ):
++                continue
++            if start < annotation.spoken_start and annotation.spoken_end < end:
++                raise PlanningError(
++                    "Renderer-affecting annotations nested inside an audio fallback are not supported"
++                )
++
++
++def _apply_atomic_audio_segments(
++    text: str,
++    segments: list[PlanSegment],
++    runs: tuple[LanguageRun, ...],
++    annotations: tuple[AnnotationSpan, ...],
++    default_language: str,
++) -> list[PlanSegment]:
++    positive = tuple(
++        annotation
++        for annotation in _audio_annotations(annotations)
++        if annotation.spoken_start is not None
++        and annotation.spoken_end is not None
++        and annotation.spoken_start < annotation.spoken_end
++    )
++    consumed_ids: set[str] = set()
++    media_segments: list[PlanSegment] = []
++
++    for annotation in positive:
++        start, end = annotation.spoken_start, annotation.spoken_end
++        if start is None or end is None:
++            continue
++        intersecting = [
++            segment
++            for segment in segments
++            if segment.spoken_start < end and segment.spoken_end > start
++        ]
++        for segment in intersecting:
++            if segment.spoken_start < start or segment.spoken_end > end:
++                raise PlanningError(
++                    "Audio fallback boundaries do not align with base PlanSegment boundaries"
++                )
++
++        if (
++            len(intersecting) == 1
++            and intersecting[0].spoken_start == start
++            and intersecting[0].spoken_end == end
++        ):
++            continue
++
++        language, paragraph, sentence, clause = _media_context(
++            start, end, segments, runs, default_language
++        )
++        media_segments.append(
++            PlanSegment(
++                id="",
++                text=text[start:end],
++                spoken_start=start,
++                spoken_end=end,
++                language=language,
++                paragraph=paragraph,
++                sentence=sentence,
++                clause=clause,
++            )
++        )
++        consumed_ids.update(segment.id for segment in intersecting)
++
++    points = tuple(
++        annotation
++        for annotation in _audio_annotations(annotations)
++        if annotation.spoken_start is not None
++        and annotation.spoken_end is not None
++        and annotation.spoken_start == annotation.spoken_end
++    )
++    for annotation in points:
++        position = annotation.spoken_start
++        if position is None:
++            continue
++        language, paragraph, sentence, clause = _media_context(
++            position, position, segments, runs, default_language
++        )
++        media_segments.append(
++            PlanSegment(
++                id="",
++                text="",
++                spoken_start=position,
++                spoken_end=position,
++                language=language,
++                paragraph=paragraph,
++                sentence=sentence,
++                clause=clause,
++                annotation_ids=(annotation.id,),
++            )
++        )
++
++    kept = [segment for segment in segments if segment.id not in consumed_ids]
++    ordered = sorted(
++        enumerate(kept + media_segments),
++        key=lambda item: (
++            item[1].spoken_start,
++            0 if item[1].spoken_start == item[1].spoken_end else 1,
++            item[0],
++        ),
++    )
++    return [
++        replace(segment, id=f"seg-{index:06d}")
++        for index, (_original_order, segment) in enumerate(ordered)
++    ]
++
++
++def _media_context(
++    start: int,
++    end: int,
++    segments: list[PlanSegment],
++    runs: tuple[LanguageRun, ...],
++    default_language: str,
++) -> tuple[str, int, int, int]:
++    covered = [
++        segment
++        for segment in segments
++        if start <= segment.spoken_start
++        and segment.spoken_end <= end
++        and segment.spoken_start < end
++        and segment.spoken_end > start
++    ]
++    if covered:
++        context = covered[0]
++        return context.language, context.paragraph, context.sentence, context.clause
++
++    preceding = [segment for segment in segments if segment.spoken_end <= start]
++    if preceding:
++        context = max(preceding, key=lambda segment: (segment.spoken_end, segment.spoken_start))
++        return context.language, context.paragraph, context.sentence, context.clause
++
++    following = [segment for segment in segments if segment.spoken_start >= end]
++    if following:
++        context = min(following, key=lambda segment: (segment.spoken_start, segment.spoken_end))
++        return context.language, context.paragraph, context.sentence, context.clause
++
++    preceding_runs = [run for run in runs if run.spoken_end <= start]
++    if preceding_runs:
++        return max(preceding_runs, key=lambda run: run.spoken_end).language, 0, 0, 0
++
++    following_runs = [run for run in runs if run.spoken_start >= end]
++    if following_runs:
++        return min(following_runs, key=lambda run: run.spoken_start).language, 0, 0, 0
++
++    overlapping_runs = [run for run in runs if run.spoken_start < end and run.spoken_end > start]
++    if overlapping_runs:
++        return overlapping_runs[0].language, 0, 0, 0
++    return default_language, 0, 0, 0
++
++
+ def _split_run(text: str, language: str) -> list[Any]:
+     try:
+         import phrasplit
+@@ -527,15 +809,21 @@ def _attach_membership(
+             for index, token in enumerate(tokens)
+             if token.spoken_start < segment.spoken_end and token.spoken_end > segment.spoken_start
+         )
+-        annotation_ids = tuple(
+-            annotation.id
+-            for annotation in annotations
+-            if annotation.spoken_start is not None
+-            and annotation.spoken_end is not None
+-            and annotation.spoken_start < segment.spoken_end
+-            and annotation.spoken_end > segment.spoken_start
++        annotation_ids = list(segment.annotation_ids)
++        for annotation in annotations:
++            start = annotation.spoken_start
++            end = annotation.spoken_end
++            if start is None or end is None:
++                continue
++            if (
++                start < segment.spoken_end
++                and end > segment.spoken_start
++                and annotation.id not in annotation_ids
++            ):
++                annotation_ids.append(annotation.id)
++        output.append(
++            replace(segment, token_indices=token_indices, annotation_ids=tuple(annotation_ids))
+         )
+-        output.append(replace(segment, token_indices=token_indices, annotation_ids=annotation_ids))
+     return output

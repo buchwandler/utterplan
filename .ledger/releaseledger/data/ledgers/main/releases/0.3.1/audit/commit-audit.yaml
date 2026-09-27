@@ -1,0 +1,57 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.3.1
+git_base_ref: v0.3.0
+git_base_sha: ad398fd2c943113966bb6ad0a247c2c6c90c676b
+git_head_ref: HEAD
+git_head_sha: 70adac05bf008abfed0e8ea46eb9d0973ba1cd82
+git_range: ad398fd2c943113966bb6ad0a247c2c6c90c676b..70adac05bf008abfed0e8ea46eb9d0973ba1cd82
+commit_count: 1
+rows:
+  - sha: 70adac05bf008abfed0e8ea46eb9d0973ba1cd82
+    source_ref: git:70adac05bf008abfed0e8ea46eb9d0973ba1cd82
+    short_sha: 70adac0
+    changed_paths:
+      - docs/consumer-guide.md
+      - docs/python-api.md
+      - tests/test_consumer_contract.py
+      - tests/test_directives.py
+      - tests/test_fake_renderer.py
+      - tests/test_format.py
+      - tests/test_identity_units.py
+      - tests/test_planner.py
+      - tests/test_preparation.py
+      - tests/test_ssmd_09_parser.py
+      - utterplan/parsers.py
+      - utterplan/planner.py
+    stats:
+      files_changed: 12
+      insertions: 719
+      deletions: 15
+    inspected: true
+    inspected_paths:
+      - docs/consumer-guide.md
+      - docs/python-api.md
+      - tests/test_consumer_contract.py
+      - tests/test_directives.py
+      - tests/test_fake_renderer.py
+      - tests/test_format.py
+      - tests/test_identity_units.py
+      - tests/test_planner.py
+      - tests/test_preparation.py
+      - tests/test_ssmd_09_parser.py
+      - utterplan/parsers.py
+      - utterplan/planner.py
+    observed_behavior:
+      Each SSMD audio annotation maps to one renderer-neutral segment;
+      audio sources remain opaque, fallback text is optional, zero-width occurrences
+      are retained, and unsupported audio topologies fail planning
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: handle audio media segments"
+    target_entry_id: entry-0001
+    notes: ""

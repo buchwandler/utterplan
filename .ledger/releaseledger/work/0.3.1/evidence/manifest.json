@@ -1,0 +1,36 @@
+{
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "additions": 719,
+      "deletions": 15,
+      "patch_file": "70adac0.patch",
+      "patch_sha256": "d508da8d77a43ab60e6c8eeeaf96fb0f4793a796e0e0728005a45014399767d5",
+      "paths": [
+        "docs/consumer-guide.md",
+        "docs/python-api.md",
+        "tests/test_consumer_contract.py",
+        "tests/test_directives.py",
+        "tests/test_fake_renderer.py",
+        "tests/test_format.py",
+        "tests/test_identity_units.py",
+        "tests/test_planner.py",
+        "tests/test_preparation.py",
+        "tests/test_ssmd_09_parser.py",
+        "utterplan/parsers.py",
+        "utterplan/planner.py"
+      ],
+      "sha": "70adac05bf008abfed0e8ea46eb9d0973ba1cd82",
+      "short_sha": "70adac0",
+      "source_ref": "git:70adac05bf008abfed0e8ea46eb9d0973ba1cd82"
+    }
+  ],
+  "git_base_ref": "ad398fd2c943113966bb6ad0a247c2c6c90c676b",
+  "git_base_sha": "ad398fd2c943113966bb6ad0a247c2c6c90c676b",
+  "git_head_ref": "70adac05bf008abfed0e8ea46eb9d0973ba1cd82",
+  "git_head_sha": "70adac05bf008abfed0e8ea46eb9d0973ba1cd82",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.3.1",
+  "schema_version": 1
+}
