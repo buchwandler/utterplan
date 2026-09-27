@@ -71,3 +71,21 @@ def test_json_is_plain_data():
     value = json.loads(plan().to_json())
     assert "phonemes" not in json.dumps(value)
     assert "numpy" not in json.dumps(value)
+
+
+def test_zero_width_media_roundtrip_validates_schema_v3() -> None:
+    import jsonschema
+
+    plan = UtterancePlanner(
+        PlannerConfig(
+            language="en-us",
+            document_format="ssmd",
+            text_preparation="identity",
+        )
+    ).plan('[]{src="sfx:impact.knock?seed=42"}')
+
+    payload = plan.to_dict()
+    jsonschema.validate(payload, schema())
+
+    assert payload["schema_version"] == 3
+    assert UtterancePlan.from_json(plan.to_json()) == plan

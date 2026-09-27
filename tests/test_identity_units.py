@@ -19,3 +19,24 @@ def test_marker_at_sentence_unit_boundary_has_one_owner():
     ).plan("One. @mark Two.")
     memberships = [marker_id for unit in plan.units for marker_id in unit.marker_ids]
     assert memberships == [plan.markers[0].id]
+
+
+def test_audio_source_and_occurrence_position_change_plan_and_unit_identity() -> None:
+    planner = UtterancePlanner(
+        PlannerConfig(
+            language="en-us",
+            document_format="ssmd",
+            text_preparation="identity",
+        )
+    )
+    uri_a = "sfx:impact.knock?force=0.7&seed=42"
+    uri_b = "sfx:impact.knock?force=0.9&seed=42"
+    first = planner.plan(f'[]{{src="{uri_a}"}}Before. After.')
+    changed_source = planner.plan(f'[]{{src="{uri_b}"}}Before. After.')
+    moved = planner.plan(f'Before. []{{src="{uri_a}"}}After.')
+
+    assert first.texts.spoken == changed_source.texts.spoken == moved.texts.spoken
+    assert first.plan_id != changed_source.plan_id
+    assert first.units[0].content_hash != changed_source.units[0].content_hash
+    assert first.plan_id != moved.plan_id
+    assert first.units[0].content_hash != moved.units[0].content_hash

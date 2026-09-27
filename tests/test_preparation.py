@@ -55,3 +55,13 @@ def test_zero_break_is_not_a_paragraph_event():
     )
     assert any(event.kind == "explicit" and event.seconds == 0.0 for event in plan.boundaries)
     assert not any(event.kind == "paragraph" for event in plan.boundaries)
+
+
+def test_zero_width_audio_annotation_maps_to_spoken_point():
+    source = 'Before. []{src="clip.wav"} After.'
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(source)
+    annotation = next(item for item in plan.annotations if item.attrs.get("src") == "clip.wav")
+
+    assert annotation.structural_start == annotation.structural_end
+    assert annotation.spoken_start == annotation.spoken_end
+    assert plan.texts.spoken[annotation.spoken_start : annotation.spoken_end] == ""

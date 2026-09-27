@@ -13,9 +13,12 @@ def render_semantic_plan(plan: object) -> list[dict[str, object]]:
     for unit in plan.units:  # type: ignore[attr-defined]
         for segment_id in unit.segment_ids:
             segment = segments[segment_id]
+            audio = segment.directives.audio
             rendered.append(
                 {
                     "unit": unit.id,
+                    "kind": "audio" if audio is not None else "speech",
+                    "audio_src": audio.src if audio is not None else None,
                     "text": segment.text,
                     "language": segment.language,
                     "tokens": [tokens[index].text for index in segment.token_indices],
@@ -49,3 +52,21 @@ voice_bindings:
     assert rendered[0]["directives"]["voice"]["reference"] == "narrator"  # type: ignore[index]
     assert "voice_bindings" in rendered[0]["metadata"]  # type: ignore[operator]
     assert "mark" in {marker.name for marker in plan.markers}
+
+
+def test_fake_renderer_selects_zero_width_media_from_public_directive() -> None:
+    uri = "sfx:unknown.effect?x=y"
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
+    ).plan(f'[]{{src="{uri}"}}')
+
+    rendered = render_semantic_plan(plan)
+
+    assert len(rendered) == 1
+    item = rendered[0]
+    assert item["kind"] == "audio"
+    assert item["audio_src"] == uri
+    assert item["text"] == ""
+    assert item["tokens"] == []
+    assert item["annotations"] == ["audio"]
+    assert item["directives"] == plan.segments[0].directives.to_dict()

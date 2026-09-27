@@ -85,7 +85,7 @@ class SSMDDocumentParser:
                 ),
             )
             for i, item in enumerate(parsed.annotations)
-            if int(item.char_end) > int(item.char_start)
+            if _keep_ssmd_annotation(item)
         )
         boundaries: list[BoundaryEvent] = []
         markers: list[Marker] = []
@@ -182,6 +182,19 @@ class SSMDDocumentParser:
             diagnostics=tuple(item for item in diagnostics if item.severity != "error"),
             document_language=document_language,
         )
+
+
+def _keep_ssmd_annotation(item: Any) -> bool:
+    start = int(item.char_start)
+    end = int(item.char_end)
+    if end > start:
+        return True
+    if end < start:
+        return False
+    attrs = getattr(item, "attrs", {})
+    kind = str(getattr(item, "kind", "annotation")).lower().replace("_", "-")
+    tag = str(attrs.get("tag") or kind).lower().replace("_", "-")
+    return tag == "audio" or attrs.get("src") is not None
 
 
 def _plain_value(value: Any) -> Any:

@@ -7,7 +7,7 @@ from typing import Any
 from .config import PauseConfig, PlannerConfig, parse_duration
 from .directives import resolve_directives
 from .exceptions import ConfigurationError, PlanningError
-from .language import build_language_runs, language_lookup_key, spans_from_annotations
+from .language import LanguageRun, build_language_runs, language_lookup_key, spans_from_annotations
 from .linguistics import LinguisticResourcePool, RunAnalysis, analyze_run_analyses
 from .model import (
     AnnotationSpan,
@@ -91,7 +91,9 @@ class UtterancePlanner:
         linguistic_runs = _linguistic_runs(runs, pass_b)
         boundaries = list(prepared.boundaries)
         boundaries.extend(_linguistic_boundaries(spoken, runs, pass_b, start_id=len(boundaries)))
-        segments = _segment(spoken, runs, prepared.annotations, boundaries, pause_config)
+        segments = _segment(
+            spoken, runs, prepared.annotations, boundaries, pause_config, document_language
+        )
         segments = _attach_membership(segments, tokens, prepared.annotations)
         segments = [
             resolve_directives(
@@ -218,6 +220,19 @@ def _linguistic_runs(runs: tuple[Any, ...], analyses: tuple[Any, ...]) -> tuple[
 
 def _segment(
     text: str,
+    runs: tuple[LanguageRun, ...],
+    annotations: tuple[AnnotationSpan, ...],
+    boundaries: list[BoundaryEvent],
+    pause_config: PauseConfig,
+    default_language: str,
+) -> list[PlanSegment]:
+    base_segments = _segment_text(text, runs, annotations, boundaries, pause_config)
+    _validate_audio_topology(annotations, runs, base_segments)
+    return _apply_atomic_audio_segments(text, base_segments, runs, annotations, default_language)
+
+
+def _segment_text(
+    text: str,
     runs: tuple[Any, ...],
     annotations: tuple[AnnotationSpan, ...],
     boundaries: list[BoundaryEvent],
@@ -287,6 +302,273 @@ def _segment(
                 if part_end in clause_breaks:
                     current_clause += 1
     return result
+
+
+def _audio_annotation(annotation: AnnotationSpan) -> bool:
+    tag = str(annotation.attrs.get("tag") or annotation.kind).lower().replace("_", "-")
+    return tag == "audio" or annotation.attrs.get("src") is not None
+
+
+def _audio_annotations(
+    annotations: tuple[AnnotationSpan, ...],
+) -> tuple[AnnotationSpan, ...]:
+    mapped = [
+        annotation
+        for annotation in annotations
+        if _audio_annotation(annotation)
+        and annotation.spoken_start is not None
+        and annotation.spoken_end is not None
+    ]
+    return tuple(
+        sorted(
+            mapped,
+            key=lambda annotation: (
+                annotation.spoken_start or 0,
+                annotation.spoken_end or 0,
+                annotation.id,
+            ),
+        )
+    )
+
+
+def _validate_audio_topology(
+    annotations: tuple[AnnotationSpan, ...],
+    runs: tuple[LanguageRun, ...],
+    segments: list[PlanSegment],
+) -> None:
+    audio_annotations = _audio_annotations(annotations)
+    positive = tuple(
+        annotation
+        for annotation in audio_annotations
+        if annotation.spoken_start is not None
+        and annotation.spoken_end is not None
+        and annotation.spoken_start < annotation.spoken_end
+    )
+    points = tuple(
+        annotation
+        for annotation in audio_annotations
+        if annotation.spoken_start is not None
+        and annotation.spoken_end is not None
+        and annotation.spoken_start == annotation.spoken_end
+    )
+
+    for previous, current in zip(positive, positive[1:], strict=False):
+        previous_end = previous.spoken_end
+        current_start = current.spoken_start
+        if previous_end is not None and current_start is not None and current_start < previous_end:
+            raise PlanningError(
+                "Overlapping audio annotations are not supported by UtterPlan schema-v3 segment semantics"
+            )
+
+    point_position: int | None = None
+    for point in points:
+        position = point.spoken_start
+        if position is None:
+            continue
+        if position == point_position:
+            raise PlanningError(
+                "Multiple zero-width audio annotations at the same spoken position are not supported"
+            )
+        point_position = position
+
+    positive_index = 0
+    for point in points:
+        position = point.spoken_start
+        if position is None:
+            continue
+        while positive_index < len(positive):
+            positive_end = positive[positive_index].spoken_end
+            if positive_end is None or positive_end > position:
+                break
+            positive_index += 1
+        if positive_index == len(positive):
+            break
+        candidate = positive[positive_index]
+        start, end = candidate.spoken_start, candidate.spoken_end
+        if start is not None and end is not None and start < position < end:
+            raise PlanningError(
+                "A zero-width audio occurrence inside another audio fallback is not supported"
+            )
+
+    for audio in positive:
+        start, end = audio.spoken_start, audio.spoken_end
+        if start is None or end is None:
+            continue
+        languages = {
+            language_lookup_key(run.language)
+            for run in runs
+            if run.spoken_start < end and run.spoken_end > start
+        }
+        if len(languages) > 1:
+            raise PlanningError(
+                "Audio fallback spans multiple effective languages and cannot be represented as one atomic media segment"
+            )
+
+        paragraphs = {
+            segment.paragraph
+            for segment in segments
+            if segment.spoken_start < end and segment.spoken_end > start
+        }
+        if len(paragraphs) > 1:
+            raise PlanningError(
+                "Audio fallback spans multiple paragraphs and cannot be represented as one atomic media segment"
+            )
+
+        for annotation in annotations:
+            if (
+                annotation.id == audio.id
+                or _audio_annotation(annotation)
+                or not _semantic_annotation(annotation)
+                or annotation.spoken_start is None
+                or annotation.spoken_end is None
+            ):
+                continue
+            if start < annotation.spoken_start and annotation.spoken_end < end:
+                raise PlanningError(
+                    "Renderer-affecting annotations nested inside an audio fallback are not supported"
+                )
+
+
+def _apply_atomic_audio_segments(
+    text: str,
+    segments: list[PlanSegment],
+    runs: tuple[LanguageRun, ...],
+    annotations: tuple[AnnotationSpan, ...],
+    default_language: str,
+) -> list[PlanSegment]:
+    positive = tuple(
+        annotation
+        for annotation in _audio_annotations(annotations)
+        if annotation.spoken_start is not None
+        and annotation.spoken_end is not None
+        and annotation.spoken_start < annotation.spoken_end
+    )
+    consumed_ids: set[str] = set()
+    media_segments: list[PlanSegment] = []
+
+    for annotation in positive:
+        start, end = annotation.spoken_start, annotation.spoken_end
+        if start is None or end is None:
+            continue
+        intersecting = [
+            segment
+            for segment in segments
+            if segment.spoken_start < end and segment.spoken_end > start
+        ]
+        for segment in intersecting:
+            if segment.spoken_start < start or segment.spoken_end > end:
+                raise PlanningError(
+                    "Audio fallback boundaries do not align with base PlanSegment boundaries"
+                )
+
+        if (
+            len(intersecting) == 1
+            and intersecting[0].spoken_start == start
+            and intersecting[0].spoken_end == end
+        ):
+            continue
+
+        language, paragraph, sentence, clause = _media_context(
+            start, end, segments, runs, default_language
+        )
+        media_segments.append(
+            PlanSegment(
+                id="",
+                text=text[start:end],
+                spoken_start=start,
+                spoken_end=end,
+                language=language,
+                paragraph=paragraph,
+                sentence=sentence,
+                clause=clause,
+            )
+        )
+        consumed_ids.update(segment.id for segment in intersecting)
+
+    points = tuple(
+        annotation
+        for annotation in _audio_annotations(annotations)
+        if annotation.spoken_start is not None
+        and annotation.spoken_end is not None
+        and annotation.spoken_start == annotation.spoken_end
+    )
+    for annotation in points:
+        position = annotation.spoken_start
+        if position is None:
+            continue
+        language, paragraph, sentence, clause = _media_context(
+            position, position, segments, runs, default_language
+        )
+        media_segments.append(
+            PlanSegment(
+                id="",
+                text="",
+                spoken_start=position,
+                spoken_end=position,
+                language=language,
+                paragraph=paragraph,
+                sentence=sentence,
+                clause=clause,
+                annotation_ids=(annotation.id,),
+            )
+        )
+
+    kept = [segment for segment in segments if segment.id not in consumed_ids]
+    ordered = sorted(
+        enumerate(kept + media_segments),
+        key=lambda item: (
+            item[1].spoken_start,
+            0 if item[1].spoken_start == item[1].spoken_end else 1,
+            item[0],
+        ),
+    )
+    return [
+        replace(segment, id=f"seg-{index:06d}")
+        for index, (_original_order, segment) in enumerate(ordered)
+    ]
+
+
+def _media_context(
+    start: int,
+    end: int,
+    segments: list[PlanSegment],
+    runs: tuple[LanguageRun, ...],
+    default_language: str,
+) -> tuple[str, int, int, int]:
+    covered = [
+        segment
+        for segment in segments
+        if start <= segment.spoken_start
+        and segment.spoken_end <= end
+        and segment.spoken_start < end
+        and segment.spoken_end > start
+    ]
+    if covered:
+        context = covered[0]
+        return context.language, context.paragraph, context.sentence, context.clause
+
+    preceding = [segment for segment in segments if segment.spoken_end <= start]
+    if preceding:
+        context = max(preceding, key=lambda segment: (segment.spoken_end, segment.spoken_start))
+        return context.language, context.paragraph, context.sentence, context.clause
+
+    following = [segment for segment in segments if segment.spoken_start >= end]
+    if following:
+        context = min(following, key=lambda segment: (segment.spoken_start, segment.spoken_end))
+        return context.language, context.paragraph, context.sentence, context.clause
+
+    preceding_runs = [run for run in runs if run.spoken_end <= start]
+    if preceding_runs:
+        return max(preceding_runs, key=lambda run: run.spoken_end).language, 0, 0, 0
+
+    following_runs = [run for run in runs if run.spoken_start >= end]
+    if following_runs:
+        return min(following_runs, key=lambda run: run.spoken_start).language, 0, 0, 0
+
+    overlapping_runs = [run for run in runs if run.spoken_start < end and run.spoken_end > start]
+    if overlapping_runs:
+        return overlapping_runs[0].language, 0, 0, 0
+    return default_language, 0, 0, 0
 
 
 def _split_run(text: str, language: str) -> list[Any]:
@@ -527,15 +809,21 @@ def _attach_membership(
             for index, token in enumerate(tokens)
             if token.spoken_start < segment.spoken_end and token.spoken_end > segment.spoken_start
         )
-        annotation_ids = tuple(
-            annotation.id
-            for annotation in annotations
-            if annotation.spoken_start is not None
-            and annotation.spoken_end is not None
-            and annotation.spoken_start < segment.spoken_end
-            and annotation.spoken_end > segment.spoken_start
+        annotation_ids = list(segment.annotation_ids)
+        for annotation in annotations:
+            start = annotation.spoken_start
+            end = annotation.spoken_end
+            if start is None or end is None:
+                continue
+            if (
+                start < segment.spoken_end
+                and end > segment.spoken_start
+                and annotation.id not in annotation_ids
+            ):
+                annotation_ids.append(annotation.id)
+        output.append(
+            replace(segment, token_indices=token_indices, annotation_ids=tuple(annotation_ids))
         )
-        output.append(replace(segment, token_indices=token_indices, annotation_ids=annotation_ids))
     return output
 
 

@@ -62,6 +62,17 @@ Use these public fields:
 - `plan.units` groups segments for paragraph or sentence rendering.
 - `plan.document_metadata` preserves portable SSMD header metadata, including voice bindings and defaults.
 
+Audio/media segments are exposed through the same renderer-neutral segment contract:
+one SSMD audio annotation produces exactly one segment with
+`segment.directives.audio` set. Consumers should choose media from that directive,
+not infer it from the fallback text or reparse raw SSMD. `audio.src` is an opaque
+source string for an external resolver; UtterPlan does not select or invoke one.
+
+For an audio-bearing segment, `segment.text` is the optional spoken fallback. An
+empty string means there is no spoken fallback. Identical source URIs on separate
+segments are distinct timeline occurrences and must not be deduplicated as
+playback events.
+
 `TokenAnnotation` stores the exact spoken slice plus normalized language, lemma, coarse POS, fine-grained tag, and compact morphology. `LinguisticRun` records actual provider/model provenance.
 
 `plan.linguistic_runs` records the actual final pass-B analysis for each language run. `provider` is `spacy`, `fallback`, or `unknown`; model and version fields are provenance, not renderer inputs. A contextual G2P consumer should use `plan.tokens_for_segment(segment)` (or `segment.token_indices`) and must explicitly fail or use a documented fallback when the relevant provider is not `spacy`.
@@ -96,11 +107,16 @@ for unit in plan.units:
         segment = next(item for item in plan.segments if item.id == segment_id)
         prepared_text = segment.text
         language = segment.language
-        segment_tokens = plan.tokens_for_segment(segment)
-        # Pass segment_tokens to contextual G2P without rerunning spaCy.
         pause_before = segment.pause_before.seconds
         pause_after = segment.pause_after.seconds
-        # G2P and backend-specific rendering start here.
+        audio = segment.directives.audio
+        if audio is not None:
+            # One segment represents one media occurrence; resolve externally.
+            resolve_audio(audio.src, fallback_text=prepared_text)
+        else:
+            segment_tokens = plan.tokens_for_segment(segment)
+            # Pass tokens to contextual G2P without rerunning spaCy.
+            render_speech(prepared_text, language, segment_tokens, pause_before, pause_after)
 ```
 
 A consumer may instead index segments, tokens, annotations, and markers by

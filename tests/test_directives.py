@@ -141,6 +141,27 @@ def test_audio_annotation_text_remains_spoken_fallback() -> None:
     assert segments[0].directives.audio.description == "Door chime"
 
 
+def test_sfx_uri_is_opaque_and_generic_audio_values_are_preserved() -> None:
+    uri = "sfx:impact.knock?material=oak&count=3&force=0.7&seed=42"
+    _plan, segments = _directives(
+        f'[knock]{{src="{uri}" desc="Three knocks" clip="100ms-800ms" '
+        'speed="90%" repeat="2.5" repeatdur="3s" level="-4dB"}'
+    )
+    audio_segments = [segment for segment in segments if segment.directives.audio is not None]
+
+    assert len(audio_segments) == 1
+    audio = audio_segments[0].directives.audio
+    assert audio is not None
+    assert audio.src == uri
+    assert audio.description == "Three knocks"
+    assert audio.clip_begin == "100ms"
+    assert audio.clip_end == "800ms"
+    assert audio.speed == "90%"
+    assert audio.repeat_count == 2.5
+    assert audio.repeat_duration == "3s"
+    assert audio.sound_level == "-4dB"
+
+
 def test_extension_name_and_parameters_are_preserved() -> None:
     _plan, segments = _directives('[whispered text]{ext="whisper" amount="soft" mode="quiet"}')
     extensions = segments[0].directives.extensions

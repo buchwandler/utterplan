@@ -164,3 +164,23 @@ def test_markers_and_unit_ownership_are_public(unit: str) -> None:
     owned = [marker_id for item in plan.units for marker_id in item.marker_ids]
     assert owned == [plan.markers[0].id]
     assert_public_consumer_contract(plan)
+
+
+def test_zero_width_media_uses_only_public_consumer_fields() -> None:
+    uri = "sfx:impact.knock?seed=42"
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
+    ).plan(f'Before. []{{src="{uri}"}} After.')
+    assert_public_consumer_contract(plan)
+
+    rendered = []
+    for segment in plan.segments:
+        audio = segment.directives.audio
+        if audio is not None:
+            rendered.append(("audio", audio.src, segment.text))
+        else:
+            rendered.append(("speech", None, segment.text))
+
+    assert [item[0] for item in rendered] == ["speech", "audio", "speech"]
+    media = next(item for item in rendered if item[0] == "audio")
+    assert media == ("audio", uri, "")

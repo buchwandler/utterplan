@@ -42,6 +42,25 @@ print(directives.voice, directives.prosody, directives.say_as)
 
 SSMD annotations preserve declared source spans. Segment directives hold effective typed semantics after scope and voice-default resolution. `document_metadata` preserves portable header data and the SSMD version; `plan.boundaries` preserves heading events. Audio references and extension names are not executed by UtterPlan. See the [coordinate-space contract](coordinate-spaces) for source offset units and the [consumer guide](consumer-guide) for renderer responsibilities.
 
+## Audio/media segments
+
+`AudioDirective` is already part of the public API. Inspect it on the segment; its
+`src` is an opaque renderer input, and `segment.text` is optional spoken fallback:
+
+```python
+segment = plan.segments[0]
+audio = segment.directives.audio
+if audio is not None:
+    print(audio.src)  # Resolve externally; do not parse SFX URI syntax here.
+    fallback_text = segment.text  # May be "" when no spoken fallback exists.
+else:
+    spoken_text = segment.text
+```
+
+Each SSMD audio annotation is represented by one audio-bearing segment. Separate
+occurrences may have the same `src`; `segment.text` is not the media identity and
+consumers do not need to inspect raw SSMD annotations to find media.
+
 ## Planner configuration
 
 ```{autoclass} utterplan.PlannerConfig

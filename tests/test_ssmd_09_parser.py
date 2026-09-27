@@ -218,3 +218,44 @@ def test_parser_warnings_retain_structured_source_diagnostics(
     assert diagnostic.column == 3
     assert diagnostic.hint == "Check this span"
     assert diagnostic.to_dict()["source_start"] == 2
+
+
+def test_zero_width_audio_annotation_is_preserved() -> None:
+    uri = "sfx:impact.knock?seed=42"
+    plan = _planner().plan(f'Before. []{{src="{uri}" desc="Knock"}} After.')
+
+    audio_annotations = [item for item in plan.annotations if item.attrs.get("src") == uri]
+
+    assert len(audio_annotations) == 1
+    annotation = audio_annotations[0]
+    assert annotation.structural_start == annotation.structural_end
+    assert annotation.spoken_start == annotation.spoken_end
+
+
+def test_zero_width_non_media_annotation_is_not_preserved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ssmd
+
+    from utterplan.parsers import SSMDDocumentParser
+
+    parsed = SimpleNamespace(
+        clean_text="",
+        annotations=[
+            SimpleNamespace(
+                kind="emphasis",
+                attrs={"tag": "emphasis"},
+                char_start=0,
+                char_end=0,
+            )
+        ],
+        events=[],
+        header={},
+        warnings=[],
+        diagnostics=[],
+    )
+    monkeypatch.setattr(ssmd, "parse_structure", lambda *args, **kwargs: parsed)
+
+    result = SSMDDocumentParser().parse("", _planner().config)
+
+    assert result.annotations == ()
