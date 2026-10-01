@@ -50,7 +50,9 @@ class SpokenformTextPreparer:
                     for annotation in annotations
                     if annotation.structural_start >= run.spoken_start
                     and annotation.structural_end <= run.spoken_end
-                    and (annotation.attrs.get("ph") or annotation.attrs.get("phonemes"))
+                    and any(
+                        key in annotation.attrs for key in ("sub", "as", "say-as", "ph", "phonemes")
+                    )
                 ]
                 kwargs: dict[str, Any] = {
                     "language": language_lookup_key(run.language),

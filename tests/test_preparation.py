@@ -65,3 +65,40 @@ def test_zero_width_audio_annotation_maps_to_spoken_point():
     assert annotation.structural_start == annotation.structural_end
     assert annotation.spoken_start == annotation.spoken_end
     assert plan.texts.spoken[annotation.spoken_start : annotation.spoken_end] == ""
+
+
+def test_author_speech_annotations_are_protected_and_keep_source_offsets():
+    source = (
+        '[H2O]{sub="water"} '
+        '[31.12.2024]{as="date" format="dd.mm.yyyy"} '
+        '[04/05/2024]{say-as="date" format="MM/dd/yyyy"} '
+        '[tomato]{ph="təˈmeɪtoʊ"} '
+        '[AWS]{phonemes="eɪ dʌbəljuː ɛs"} ordinary 5 kg.'
+    )
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(source)
+
+    assert plan.texts.spoken == ("H2O 31.12.2024 04/05/2024 tomato AWS ordinary five kilograms.")
+    protected = [
+        annotation
+        for annotation in plan.annotations
+        if any(key in annotation.attrs for key in ("sub", "as", "say-as", "ph", "phonemes"))
+    ]
+    assert len(protected) == 5
+    for annotation in protected:
+        structural = plan.texts.structural[annotation.structural_start : annotation.structural_end]
+        spoken = plan.texts.spoken[annotation.spoken_start : annotation.spoken_end]
+        assert spoken == structural
+
+    assert any(annotation.attrs.get("sub") == "water" for annotation in protected)
+    assert any(annotation.attrs.get("as") == "date" for annotation in protected)
+    assert any(annotation.attrs.get("say-as") == "date" for annotation in protected)
+    assert any("ph" in annotation.attrs for annotation in protected)
+    assert any("phonemes" in annotation.attrs for annotation in protected)
+
+    assert len(plan.preparation.replacements) == 1
+    replacement = plan.preparation.replacements[0]
+    assert plan.texts.structural[replacement["source_start"] : replacement["source_end"]] == "5 kg"
+    assert (
+        plan.texts.spoken[replacement["output_start"] : replacement["output_end"]]
+        == "five kilograms"
+    )
