@@ -3,18 +3,20 @@
 UtterPlan's command-line compiler accepts literal text, stdin, and files:
 
 ```text
-usage: utterplan compile [-h] [--file FILE] --language LANGUAGE
-                       [--input-format {auto,text,ssmd}]
-                       [--unit {paragraph,sentence}]
-                       [--text-preparation {spokenform,identity}]
-                       [--pause-mode {tts,manual,auto}]
-                       [--spacy {auto,off,sm,md,lg,trf}] [-o OUTPUT]
-                       [--force] [--json]
-                       [text ...]
+usage: utterplan compile [-h] [--file FILE] [--language LANGUAGE]
+                         [--input-format {auto,text,plain,ssmd}]
+                         [--unit {paragraph,sentence}]
+                         [--text-preparation {spokenform,identity}]
+                         [--pause-mode {tts,manual,auto}]
+                         [--spacy {auto,off,sm,md,lg,trf}] [-o OUTPUT]
+                         [--force] [--json]
+                         [text ...]
 ```
 
-`--lang` is an alias for `--language`. The older `--format` spelling is
-accepted as an alias for `--input-format`.
+`--lang` is an alias for `--language`; the older `--format` spelling is accepted
+as an alias for `--input-format`. `--language` is a fallback language: it is
+required for plain input, optional for SSMD with a header `language`, and never
+forces a language over SSMD document semantics.
 
 ## Input resolution
 
@@ -24,16 +26,26 @@ The rules are deterministic:
    positional text.
 2. With no positional text or `--file`, stdin is read. An empty terminal or
    empty stdin is an error.
-3. `--input-format text` always joins positional tokens as literal text.
+3. `--input-format text` and `--input-format plain` interpret positional tokens as literal text.
 4. Otherwise, one positional token naming an existing regular file is read.
 5. All remaining positional tokens are joined with single spaces as literal
    text.
 
 With `auto`, `.ssmd` and `.ssmd.md` files are interpreted as SSMD. Markdown files
 with an SSMD version header are also detected as SSMD; ordinary Markdown remains
-plain text. Literal text and stdin default to plain text. Use `--input-format ssmd`
+plain text; literal text and stdin default to plain. Use `--input-format ssmd`
 explicitly for SSMD from stdin or unversioned canonical fragments. All SSMD inputs
 are parsed as strict dialect 0.9.
+
+The SSMD header's `language` wins over `--language`. When the header declares a
+language, no CLI language is needed. If it does not, provide `--language` as the
+fallback; plain input always requires that option:
+
+```bash
+utterplan compile chapter.ssmd.md
+utterplan compile legacy.ssmd.md --language de-DE
+utterplan compile plain.txt --input-format plain --language de-DE
+```
 
 ## SSMD source compatibility
 
@@ -56,9 +68,9 @@ also emit the same plan JSON to stdout.
 Human status messages are written to stderr, never mixed into JSON stdout:
 
 ```bash
-utterplan compile chapter.ssmd.md --lang en-us -o chapter.utterplan.json
+utterplan compile chapter.ssmd.md -o chapter.utterplan.json
 # status is written to stderr
-utterplan compile chapter.ssmd.md --lang en-us -o chapter.utterplan.json --json | jq .
+utterplan compile chapter.ssmd.md -o chapter.utterplan.json --json | jq .
 ```
 
 Argparse usage errors use exit code 2. Input, planning, file, and plan
@@ -94,6 +106,8 @@ Use `--spacy auto` only as an opt-in enrichment policy. If a compatible local mo
 ```bash
 utterplan --version
 utterplan validate chapter.utterplan.json
+utterplan validate chapter.ssmd.md
+utterplan validate plain.txt --input-format plain --language en-us
 utterplan inspect chapter.utterplan.json --segment 0
 utterplan inspect chapter.utterplan.json --unit 0 --boundaries --tokens
 utterplan inspect chapter.utterplan.json --preparation
@@ -115,4 +129,4 @@ Without `-o`, migrated JSON is written to stdout. Status is written to stderr. E
 
 Schema migration is a separate operation from SSMD source migration. UtterPlan preserves released schema v1 and v2 and migrates v1 plans sequentially through v2 to current schema v3. It never reparses source or replans. Use `ssmd migrate FILE --to 0.9` for older SSMD source documents.
 
-`validate` performs the same in-memory compatibility check and reports both source and current schema versions. It never modifies the input file.
+For a saved JSON plan, `validate` performs the in-memory schema compatibility check and reports source/current schema versions without modifying the file. For an SSMD or plain-text source document, it runs the canonical one-document semantic compiler without writing a plan; plain input requires `--language`, while SSMD can use its header language or an explicit fallback.

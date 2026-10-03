@@ -321,3 +321,52 @@ def test_validate_reports_migration_status(
     assert "source schema version: 3" in captured.out
     assert "current schema version: 3" in captured.out
     assert "migration required: no" in captured.out
+
+
+def test_compile_ssmd_header_language_without_cli_language(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "chapter.ssmd.md"
+    source.write_text('---\nssmd_version: "0.9"\nlanguage: de-DE\n---\nHallo.', encoding="utf-8")
+
+    assert main(["compile", str(source)]) == 0
+    payload = _payload(capsys)
+    assert payload["segments"][0]["language"] == "de-DE"
+
+
+def test_compile_ssmd_cli_language_is_fallback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "chapter.ssmd"
+    source.write_text("Hallo.", encoding="utf-8")
+
+    assert main(["compile", str(source), "--language", "de-DE"]) == 0
+    payload = _payload(capsys)
+    assert payload["segments"][0]["language"] == "de-DE"
+
+
+def test_compile_requires_language_for_plain_input(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["compile", "Hello."]) == 1
+    captured = capsys.readouterr()
+    assert "plain input requires --language" in captured.err
+
+
+def test_compile_plain_input_with_required_language(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["compile", "Hallo.", "--input-format", "plain", "--language", "de-DE"]) == 0
+    assert _payload(capsys)["segments"][0]["language"] == "de-de"
+
+
+def test_validate_source_documents_and_preserve_saved_plan_validation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ssmd = tmp_path / "chapter.ssmd.md"
+    ssmd.write_text('---\nssmd_version: "0.9"\nlanguage: de-DE\n---\nHallo.', encoding="utf-8")
+    assert main(["validate", str(ssmd)]) == 0
+    assert "input format: ssmd" in capsys.readouterr().out
+
+    plain = tmp_path / "plain.txt"
+    plain.write_text("Hello.", encoding="utf-8")
+    assert main(["validate", str(plain)]) == 1
+    assert "plain input requires --language" in capsys.readouterr().err
+    assert main(["validate", str(plain), "--input-format", "plain", "--language", "en-us"]) == 0
+    assert "valid" in capsys.readouterr().out

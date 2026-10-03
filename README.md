@@ -5,24 +5,28 @@
 
 # UtterPlan
 
-UtterPlan is an engine-independent TTS planning compiler and interchange
-format. It converts text and SSMD into deterministic semantic speech plans
-containing prepared spoken text, language runs, segments, pauses, directives,
-markers, and render units. It stops before G2P and produces no audio.
+UtterPlan is the canonical, engine-independent semantic compiler from one SSMD
+document (or explicitly selected plain-text document) to an executable speech
+plan. It produces deterministic language runs, prepared text, segments, resolved
+pauses, portable metadata, directives, markers, and render units shared by
+independent consumers such as ttsready and Readio. It does not manage books or
+consumer workspaces, and stops before G2P, synthesis, and audio.
 
 ## CLI
 
 Compile literal text directly:
 
 ```bash
-utterplan compile "Doctor Smith bought 5 kg." --lang en-us --json
+utterplan compile "Doctor Smith bought 5 kg." --input-format plain --language en-us --json
 ```
 
 Compile a file to a plan file:
 
 ```bash
-utterplan compile examples/chapter.ssmd --lang en-us -o chapter.utterplan.json
+utterplan compile examples/chapter.ssmd -o chapter.utterplan.json
 ```
+
+SSMD header `language` is authoritative, so `--language` is optional when it is present. Otherwise pass `--language` as the fallback; plain input always requires a language. `--language` never forces a language over SSMD semantics.
 
 Use stdin and shell pipelines:
 
@@ -70,17 +74,32 @@ Python `PlannerConfig` defaults to `document_format="plain"`; set it to `"ssmd"`
 ## Python API
 
 ```python
-from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
+from utterplan import PlannerConfig, UtterancePlan, compile_document
 
-planner = UtterancePlanner(PlannerConfig(language="en-us"))
-plan = planner.plan("Doctor Smith bought 5 kg of apples.")
+ssmd_source = """---
+ssmd_version: "0.9"
+language: en-GB
+---
+Hello [world]{emphasis="strong"}.
+"""
+result = compile_document(
+    ssmd_source,
+    input_format="ssmd",
+    config=PlannerConfig(language="en-us"),  # fallback; header language wins
+    trace=True,
+)
+plan = result.plan
+assert result.trace is not None
 plan.save("example.utterplan.json")
 assert UtterancePlan.load("example.utterplan.json") == plan
 ```
 
-The stable in-process boundary is `PlannerConfig`, `UtterancePlanner`, and the
-immutable `UtterancePlan` object. JSON is the portable persistence and interchange
-format; an in-process renderer can consume the Python object directly.
+`compile_document` is the stable public one-document API shared by consumers. The
+immutable `CompileResult` contains the semantic plan, diagnostics, and optional
+explanatory trace. Trace is not serialized in the plan and does not affect its
+identity. Plain text must be explicitly selected in Python and always requires a
+language fallback. Existing `UtterancePlanner.plan` remains supported and returns
+only the plan; JSON is the portable persistence and interchange format.
 
 ## Renderer-consumer boundary
 

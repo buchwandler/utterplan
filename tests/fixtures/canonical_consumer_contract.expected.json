@@ -1,0 +1,10 @@
+{
+  "segments": [
+    ["Hello.", "en-GB"],
+    ["Next.", "en-GB"]
+  ],
+  "voice_reference": "narrator",
+  "prosody_rate": "slow",
+  "pause_after_seconds": 0.25,
+  "voice_binding": "renderer-owned-choice"
+}

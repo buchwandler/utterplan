@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from .compiler import CompileResult, PreparationTrace
 
 from .config import PauseConfig, PlannerConfig, parse_duration
 from .directives import resolve_directives
@@ -42,9 +45,36 @@ class UtterancePlanner:
         self.config = config
         self._resources = LinguisticResourcePool()
 
+    def compile(
+        self,
+        text: str,
+        *,
+        config: PlannerConfig | None = None,
+        unit: str | None = None,
+        trace: bool = False,
+    ) -> CompileResult:
+        """Compile one document and return its plan with compiler diagnostics."""
+        if not isinstance(trace, bool):
+            raise TypeError("trace must be a boolean")
+        from .compiler import CompileResult
+
+        plan, preparation_trace = self._plan(text, config=config, unit=unit, trace=trace)
+        return CompileResult(plan=plan, diagnostics=plan.diagnostics, trace=preparation_trace)
+
     def plan(
         self, text: str, *, config: PlannerConfig | None = None, unit: str | None = None
     ) -> UtterancePlan:
+        """Compatibility API returning only the compiled semantic plan."""
+        return self.compile(text, config=config, unit=unit).plan
+
+    def _plan(
+        self,
+        text: str,
+        *,
+        config: PlannerConfig | None = None,
+        unit: str | None = None,
+        trace: bool = False,
+    ) -> tuple[UtterancePlan, PreparationTrace | None]:
         if not isinstance(text, str):
             raise TypeError("text must be a string")
         effective_config = config if config is not None else self.config
@@ -146,7 +176,12 @@ class UtterancePlanner:
             diagnostics=tuple(diagnostics),
         ).with_identity()
         plan.validate()
-        return plan
+        preparation_trace = (
+            _make_preparation_trace(parsed, prepared, plan, document_language, fallback_mode)
+            if trace
+            else None
+        )
+        return plan, preparation_trace
 
     def _parse(self, text: str, config: PlannerConfig) -> Any:
         if config.document_format == "plain":
@@ -157,6 +192,76 @@ class UtterancePlanner:
 
     def close(self) -> None:
         self._resources.clear()
+
+
+def _make_preparation_trace(
+    parsed: Any,
+    prepared: Any,
+    plan: UtterancePlan,
+    document_language: str,
+    fallback_mode: Literal["spell", "preserve"],
+) -> PreparationTrace:
+    from .compiler import PreparationChange, PreparationTrace, PreparationTraceUnit
+
+    changes = tuple(
+        PreparationChange(
+            source_start=item.get("source_start"),
+            source_end=item.get("source_end"),
+            output_start=item.get("output_start"),
+            output_end=item.get("output_end"),
+            source=item.get("source"),
+            replacement=item.get("replacement"),
+            kind=item.get("kind"),
+            rule=item.get("rule"),
+            language=item.get("language"),
+        )
+        for item in prepared.info.replacements
+    )
+    segments_by_id = {segment.id: segment for segment in plan.segments}
+    trace_units: list[PreparationTraceUnit] = []
+    for unit in plan.units:
+        source_start, source_end = prepared.source_map.map_output_span(
+            unit.spoken_start, unit.spoken_end
+        )
+        source_start = max(0, min(len(parsed.structural_text), source_start))
+        source_end = max(source_start, min(len(parsed.structural_text), source_end))
+        unit_changes = tuple(
+            change
+            for change in changes
+            if change.source_start is not None
+            and change.source_end is not None
+            and (
+                change.source_start < source_end
+                and change.source_end > source_start
+                or source_start == source_end == change.source_start
+            )
+        )
+        languages = tuple(
+            dict.fromkeys(
+                segments_by_id[segment_id].language
+                for segment_id in unit.segment_ids
+                if segment_id in segments_by_id
+            )
+        )
+        trace_units.append(
+            PreparationTraceUnit(
+                source_start=source_start,
+                source_end=source_end,
+                source_text=parsed.structural_text[source_start:source_end],
+                prepared_text=plan.texts.spoken[unit.spoken_start : unit.spoken_end],
+                effective_language=languages[0] if len(languages) == 1 else None,
+                effective_languages=languages,
+                transformations=unit_changes,
+                split_reason=f"{unit.kind} segmentation",
+                warnings=tuple(parsed.warnings) + prepared.info.warnings,
+            )
+        )
+    return PreparationTrace(
+        document_language=document_language,
+        sequence_fallback_mode=fallback_mode,
+        diagnostics=plan.diagnostics,
+        units=tuple(trace_units),
+    )
 
 
 def _effective_pause_config(config: PlannerConfig, header: dict[str, Any]) -> PauseConfig:

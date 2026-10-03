@@ -1,0 +1,21 @@
+---
+ssmd_version: "0.9"
+language: en-GB
+voice_bindings:
+  narrator: renderer-owned-choice
+voice_defaults:
+  narrator:
+    rate: slow
+pause_defaults:
+  sentence: 250ms
+prosody_transitions:
+  enabled: true
+  same_voice_only: true
+language_detection:
+  mode: auto
+  languages: [en-GB, fr-FR]
+requires:
+  extensions:
+    - acme.effects.whisper
+---
+[Hello.]{voice="narrator"} Next.

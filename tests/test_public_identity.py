@@ -27,6 +27,7 @@ def test_public_package_resources() -> None:
     package = importlib.resources.files("utterplan")
 
     assert (package / "py.typed").is_file()
+    assert (package / "compiler.py").is_file()
     assert (package / "utterplan.schema.json").is_file()
     schemas = package / "schemas"
     assert all((schemas / f"v{version}.schema.json").is_file() for version in (1, 2, 3))

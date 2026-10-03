@@ -1,13 +1,45 @@
 # Python API
 
-The supported in-process boundary is the immutable `UtterancePlan` object returned
-by `UtterancePlanner`. JSON is the portable persistence and interchange format, but
-an in-process consumer does not need to serialize and reload a plan.
+The canonical public entry point is `compile_document`, which compiles one SSMD
+document or explicitly configured plain-text document and returns a `CompileResult`.
+Its `plan` is the immutable, round-trippable renderer-independent `UtterancePlan`;
+its `diagnostics` explain compilation, and an optional `PreparationTrace` is
+separate diagnostic output. `UtterancePlanner.plan` remains supported for
+compatibility and returns only the plan.
 
 The Python defaults are deliberately spaCy-free: `PlannerConfig` uses `spokenform` text preparation, and `PauseConfig().mode` is `"tts"`. The CLI additionally defaults to the `spacy off` linguistic-resource policy, which uses deterministic fallback tokenization and analysis without requiring an installed spaCy model.
 
 For an explicit contextual-G2P configuration, use `LinguisticsConfig(use_spacy=True, spacy_model="en_core_web_sm", require_spacy=True)`. The resulting plan records final pass-B token provenance in `linguistic_runs`; no provider document is retained.
 spaCy enrichment is opt-in through the CLI's `--spacy auto` policy or an explicit `LinguisticsConfig` with a compatible local model. It may provide richer tokenization, POS tags, lemmas, and tags, but UtterPlan never downloads a model implicitly.
+
+## Canonical single-document compiler
+
+`compile_document` is the shared semantic interpretation boundary for independent
+consumers. It does not load books, traverse chapters, or manage consumer workspaces.
+SSMD header language takes precedence over a fallback; the explicit
+`fallback_language` keyword is a per-call fallback override, never a forced language.
+`PlannerConfig.language` remains required for compatibility and supplies the fallback
+when `fallback_language` is omitted. Plain input must have a language fallback.
+
+```python
+from utterplan import PlannerConfig, compile_document
+
+result = compile_document(
+    ssmd_source,
+    input_format="ssmd",
+    config=PlannerConfig(language="en-us"),
+    trace=True,
+)
+plan = result.plan
+assert result.diagnostics == plan.diagnostics
+assert result.trace is not None
+```
+
+Use `input_format="plain"` only for explicitly configured plain text. A trace
+contains explanatory per-unit preparation information but is not serialized into
+the plan, is not renderer input, and does not change `plan.plan_id`. Its source
+ranges index SSMD-clean structural text; transformation output ranges index prepared
+spoken text, using Python string character offsets.
 
 ## SSMD input and semantic plan
 
@@ -84,6 +116,22 @@ consumers do not need to inspect raw SSMD annotations to find media.
 ```
 
 ## Planning and plan records
+
+```{autofunction} utterplan.compile_document
+
+```
+
+```{autoclass} utterplan.CompileResult
+:members:
+```
+
+```{autoclass} utterplan.PreparationTrace
+:members:
+```
+
+```{autoclass} utterplan.PreparationTraceUnit
+:members:
+```
 
 ```{autoclass} utterplan.UtterancePlanner
 :members:

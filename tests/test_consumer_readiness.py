@@ -263,3 +263,64 @@ Hallo."""
     with pytest.raises(PlanFormatError) as error:
         UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(document)
     assert error.value.code == code
+
+
+def test_portable_header_defaults_resolve_once_and_round_trip() -> None:
+    text = """---
+ssmd_version: "0.9"
+language: de-DE
+voice_bindings:
+  narrator: opaque-logical-target
+voice_defaults:
+  narrator:
+    rate: slow
+    pitch: high
+    volume: soft
+pause_defaults:
+  sentence: 250ms
+  paragraph: 400ms
+prosody_transitions:
+  enabled: true
+  same_voice_only: true
+  rate: 100ms
+language_detection:
+  mode: auto
+  languages: [de-DE, en-GB]
+requires:
+  extensions: [acme.effects.whisper]
+x-acme-contract:
+  revision: 2
+---
+:::{voice="narrator"}
+Hallo. Welt.
+:::
+
+Next paragraph."""
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
+    ).plan(text)
+
+    assert {segment.language for segment in plan.segments} == {"de-DE"}
+    assert plan.segments[0].directives.voice.reference == "narrator"
+    assert plan.segments[0].directives.prosody.rate == "slow"
+    assert plan.segments[0].directives.prosody.pitch == "high"
+    assert plan.segments[0].directives.prosody.volume == "soft"
+    assert plan.segments[0].pause_after.seconds == pytest.approx(0.25)
+    assert plan.document_metadata["prosody_transitions"]["same_voice_only"] is True
+    assert plan.document_metadata["language_detection"]["languages"] == ["de-DE", "en-GB"]
+    assert plan.document_metadata["requires"]["extensions"] == ["acme.effects.whisper"]
+    assert plan.document_metadata["header"]["x-acme-contract"] == {"revision": 2}
+    restored = type(plan).from_json(plan.to_json())
+    assert restored.document_metadata == plan.document_metadata
+    assert restored.segments == plan.segments
+
+
+def test_requires_shape_is_validated_as_portable_metadata() -> None:
+    document = """---
+ssmd_version: "0.9"
+requires: [acme.effects.whisper]
+---
+Hello."""
+    with pytest.raises(PlanFormatError) as error:
+        UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(document)
+    assert error.value.code == "header.requires_invalid"

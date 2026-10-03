@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 
 import pytest
 
-from utterplan import PauseConfig, PlannerConfig, UtterancePlan, UtterancePlanner
+from utterplan import (
+    PauseConfig,
+    PlannerConfig,
+    UtterancePlan,
+    UtterancePlanner,
+    compile_document,
+)
 
 
 def _fake_renderer(plan: UtterancePlan) -> None:
@@ -184,3 +192,32 @@ def test_zero_width_media_uses_only_public_consumer_fields() -> None:
     assert [item[0] for item in rendered] == ["speech", "audio", "speech"]
     media = next(item for item in rendered if item[0] == "audio")
     assert media == ("audio", uri, "")
+
+
+def test_shared_consumer_fixture_has_one_canonical_semantic_interpretation() -> None:
+    fixtures = Path(__file__).parent / "fixtures"
+    source = (fixtures / "canonical_consumer_contract.ssmd").read_text(encoding="utf-8")
+    expected = json.loads(
+        (fixtures / "canonical_consumer_contract.expected.json").read_text(encoding="utf-8")
+    )
+    result = compile_document(
+        source,
+        input_format="ssmd",
+        config=PlannerConfig(
+            language="fr-FR", document_format="plain", text_preparation="identity"
+        ),
+    )
+    plan = result.plan
+    assert len(plan.segments) == len(expected["segments"]) == 2
+    segment = plan.segments[0]
+
+    ttsready_report = tuple((item.text.strip(), item.language) for item in plan.segments)
+    readio_lowering = tuple((item.text.strip(), item.language) for item in plan.segments)
+    expected_segments = tuple(tuple(item) for item in expected["segments"])
+    assert ttsready_report == readio_lowering == expected_segments
+    assert segment.directives.voice.reference == expected["voice_reference"]
+    assert segment.directives.prosody.rate == expected["prosody_rate"]
+    assert segment.pause_after.seconds == pytest.approx(expected["pause_after_seconds"])
+    assert plan.document_metadata["voice_bindings"]["narrator"] == expected["voice_binding"]
+    assert plan.document_metadata["requires"]["extensions"] == ["acme.effects.whisper"]
+    assert_public_consumer_contract(plan)

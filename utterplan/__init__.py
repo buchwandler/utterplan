@@ -1,4 +1,12 @@
 from ._version import __version__
+from .compiler import (
+    CompileResult,
+    InputFormat,
+    PreparationChange,
+    PreparationTrace,
+    PreparationTraceUnit,
+    compile_document,
+)
 from .config import (
     LinguisticsConfig,
     PauseConfig,
@@ -55,6 +63,12 @@ from .versioning import (
 
 __all__ = [
     "__version__",
+    "CompileResult",
+    "PreparationChange",
+    "InputFormat",
+    "PreparationTrace",
+    "PreparationTraceUnit",
+    "compile_document",
     "PlannerConfig",
     "PauseConfig",
     "LinguisticsConfig",

@@ -15,6 +15,8 @@ class SourceToSpokenMap(Protocol):
 
     def map_source_span(self, start: int, end: int) -> tuple[int, int]: ...
 
+    def map_output_span(self, start: int, end: int) -> tuple[int, int]: ...
+
 
 @dataclass(frozen=True, slots=True)
 class PreparedText:
@@ -142,6 +144,11 @@ class _IdentitySourceMap:
     def map_source_span(self, start: int, end: int) -> tuple[int, int]:
         return start, end
 
+    def map_output_span(self, start: int, end: int) -> tuple[int, int]:
+        start = max(0, min(self.output_length, start))
+        end = max(start, min(self.output_length, end))
+        return start, end
+
 
 class _CompositeSourceMap:
     def __init__(
@@ -160,6 +167,27 @@ class _CompositeSourceMap:
         start = max(0, min(self.source_length, start))
         end = max(start, min(self.source_length, end))
         return self.source_left[start], self.source_right[end]
+
+    def map_output_span(self, start: int, end: int) -> tuple[int, int]:
+        start = max(0, min(self.output_length, start))
+        end = max(start, min(self.output_length, end))
+        start_candidates = [
+            index
+            for index, (left, right) in enumerate(
+                zip(self.source_left, self.source_right, strict=True)
+            )
+            if left <= start <= right
+        ]
+        end_candidates = [
+            index
+            for index, (left, right) in enumerate(
+                zip(self.source_left, self.source_right, strict=True)
+            )
+            if left <= end <= right
+        ]
+        source_start = min(start_candidates) if start_candidates else self.source_length
+        source_end = max(end_candidates) if end_candidates else source_start
+        return source_start, max(source_start, source_end)
 
 
 def _compose_offsets(text: str, prepared_runs: list[Any]) -> SourceToSpokenMap:

@@ -6,19 +6,20 @@ import sys
 from pathlib import Path
 from typing import Literal, cast
 
-from . import PlannerConfig, UtterancePlan, UtterancePlanner, __version__
+from . import PlannerConfig, UtterancePlan, __version__
+from .compiler import InputFormat, compile_document
 from .config import LinguisticsConfig, PauseConfig
 from .exceptions import PlanFormatError, UtterPlanError
 from .explain import format_explanation
 from .migration import MigrationResult, migrate_plan_data
 
-InputFormat = Literal["plain", "ssmd"]
-
-
 _EXAMPLES = """examples:
-  utterplan compile "Hello world." --lang en-us
-  echo "Hello world." | utterplan compile --lang en-us | jq .
-  utterplan compile chapter.ssmd --lang en-us -o chapter.utterplan.json
+  utterplan compile chapter.ssmd.md
+  utterplan compile chapter.ssmd.md --language de-DE
+  utterplan compile plain.txt --input-format plain --language de-DE
+  utterplan compile chapter.ssmd.md --json
+  utterplan validate chapter.ssmd.md
+  utterplan validate plain.txt --input-format plain --language de-DE
   utterplan validate chapter.utterplan.json
   utterplan inspect chapter.utterplan.json --segment 0
   utterplan explain chapter.utterplan.json
@@ -53,12 +54,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="read UTF-8 text from this file (cannot be combined with positional text)",
     )
-    compile_parser.add_argument("--language", "--lang", required=True, dest="language")
+    compile_parser.add_argument(
+        "--language",
+        "--lang",
+        dest="language",
+        help="fallback language when SSMD does not declare one (required for plain input)",
+    )
     compile_parser.add_argument(
         "--input-format",
         "--format",
         dest="input_format",
-        choices=("auto", "text", "ssmd"),
+        choices=("auto", "text", "plain", "ssmd"),
         default="auto",
         help="input interpretation; auto detects .ssmd, .ssmd.md, and Markdown with SSMD version front matter",
     )
@@ -85,8 +91,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="also print the complete plan JSON when --output is used",
     )
 
-    validate_parser = commands.add_parser("validate", help="validate a saved TTS plan")
+    validate_parser = commands.add_parser(
+        "validate", help="validate a source document or saved semantic plan"
+    )
     validate_parser.add_argument("input", type=Path)
+
+    validate_parser.add_argument("--language", "--lang", dest="language")
+    validate_parser.add_argument(
+        "--input-format",
+        choices=("auto", "text", "plain", "ssmd"),
+        default="auto",
+        help="source input interpretation; auto detects SSMD by suffix or version metadata",
+    )
 
     migrate_parser = commands.add_parser(
         "migrate", help="migrate a saved plan to the current schema"
@@ -132,6 +148,32 @@ def _declares_ssmd_version(source: str) -> bool:
     return front_matter.present and "ssmd_version" in front_matter.data
 
 
+def _ssmd_header_language(source: str) -> str | None:
+    try:
+        from ssmd.frontmatter import FrontMatterError, parse_front_matter
+    except ImportError:
+        return None
+    try:
+        front_matter = parse_front_matter(source)
+    except FrontMatterError as exc:
+        raise PlanFormatError(str(exc), code=exc.code, path="$.source") from exc
+    language = front_matter.data.get("language") if front_matter.present else None
+    return language.strip() if isinstance(language, str) and language.strip() else None
+
+
+def _language_fallback(source: str, input_format: InputFormat, requested: str | None) -> str:
+    if requested is not None:
+        if not requested.strip():
+            raise ValueError("--language must be a non-empty fallback language")
+        return requested.strip()
+    if input_format == "ssmd":
+        language = _ssmd_header_language(source)
+        if language is not None:
+            return language
+        raise ValueError("SSMD input without a header language requires --language")
+    raise ValueError("plain input requires --language")
+
+
 def _format_for_path(path: Path, source: str) -> InputFormat:
     lower_name = path.name.lower()
     if lower_name.endswith((".ssmd.md", ".ssmd")):
@@ -161,7 +203,7 @@ def _read_compile_input(args: argparse.Namespace) -> tuple[str, InputFormat]:
             raise ValueError("stdin is empty; provide meaningful input text")
         return source, _map_input_format(args.input_format, default="plain")
 
-    if args.input_format == "text":
+    if args.input_format in {"text", "plain"}:
         return " ".join(args.text), "plain"
 
     if len(args.text) == 1:
@@ -179,7 +221,7 @@ def _read_compile_input(args: argparse.Namespace) -> tuple[str, InputFormat]:
 
 
 def _map_input_format(value: str, *, default: InputFormat = "plain") -> InputFormat:
-    if value == "text":
+    if value in {"text", "plain"}:
         return "plain"
     if value == "ssmd":
         return "ssmd"
@@ -203,15 +245,21 @@ def _compile(args: argparse.Namespace) -> int:
     if args.output is not None and args.output.exists() and not args.force:
         raise ValueError(f"output exists: {args.output}; use --force to replace it")
 
+    fallback_language = _language_fallback(source, input_format, args.language)
     config = PlannerConfig(
-        language=args.language,
+        language=fallback_language,
         document_format=input_format,
         text_preparation=args.text_preparation,
         unit=args.unit,
         pauses=PauseConfig(mode=args.pause_mode),
         linguistics=_linguistics_config(args.spacy),
     )
-    plan = UtterancePlanner(config).plan(source)
+    plan = compile_document(
+        source,
+        input_format=input_format,
+        config=config,
+        fallback_language=args.language,
+    ).plan
     payload = plan.to_json()
     if args.output is None:
         print(payload, end="")
@@ -269,17 +317,55 @@ def _migrate(args: argparse.Namespace) -> int:
     return 0
 
 
-def _validate(path: Path) -> int:
-    result = _migration_result(path)
-    plan = UtterancePlan.from_dict(result.data)
+def _is_saved_plan(path: Path, source: str) -> bool:
+    if path.suffix.lower() in {".json", ".utterplan"}:
+        return True
+    try:
+        value = json.loads(source)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(value, dict) and value.get("format") == "utterplan"
+
+
+def _validate(args: argparse.Namespace) -> int:
+    path: Path = args.input
+    source = path.read_text(encoding="utf-8")
+    if args.input_format == "auto" and _is_saved_plan(path, source):
+        result = _migration_result(path)
+        plan = UtterancePlan.from_dict(result.data)
+        print("valid")
+        print(f"source schema version: {result.source_version}")
+        print(f"current schema version: {plan.schema_version}")
+        print(f"migration required: {'yes' if result.changed else 'no'}")
+        print(f"plan ID: {plan.plan_id}")
+        print(f"segments: {len(plan.segments)}")
+        print(f"units: {len(plan.units)}")
+        print(f"warnings: {len(plan.warnings)}")
+        return 0
+
+    input_format = (
+        _format_for_path(path, source)
+        if args.input_format == "auto"
+        else _map_input_format(args.input_format)
+    )
+    fallback_language = _language_fallback(source, input_format, args.language)
+    config = PlannerConfig(
+        language=fallback_language,
+        document_format=input_format,
+        text_preparation="identity",
+        linguistics=LinguisticsConfig(use_spacy=False),
+    )
+    result = compile_document(
+        source,
+        input_format=input_format,
+        config=config,
+        fallback_language=args.language,
+    )
     print("valid")
-    print(f"source schema version: {result.source_version}")
-    print(f"current schema version: {plan.schema_version}")
-    print(f"migration required: {'yes' if result.changed else 'no'}")
-    print(f"plan ID: {plan.plan_id}")
-    print(f"segments: {len(plan.segments)}")
-    print(f"units: {len(plan.units)}")
-    print(f"warnings: {len(plan.warnings)}")
+    print(f"input format: {input_format}")
+    print(f"segments: {len(result.plan.segments)}")
+    print(f"units: {len(result.plan.units)}")
+    print(f"warnings: {len(result.plan.warnings)}")
     return 0
 
 
@@ -291,7 +377,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "migrate":
             return _migrate(args)
         if args.command == "validate":
-            return _validate(args.input)
+            return _validate(args)
         plan = UtterancePlan.load(args.input)
         if args.command == "explain":
             print(format_explanation(plan, details=args.details), end="")
