@@ -355,7 +355,7 @@ def _validate(args: argparse.Namespace) -> int:
         text_preparation="identity",
         linguistics=LinguisticsConfig(use_spacy=False),
     )
-    result = compile_document(
+    compile_result = compile_document(
         source,
         input_format=input_format,
         config=config,
@@ -363,9 +363,9 @@ def _validate(args: argparse.Namespace) -> int:
     )
     print("valid")
     print(f"input format: {input_format}")
-    print(f"segments: {len(result.plan.segments)}")
-    print(f"units: {len(result.plan.units)}")
-    print(f"warnings: {len(result.plan.warnings)}")
+    print(f"segments: {len(compile_result.plan.segments)}")
+    print(f"units: {len(compile_result.plan.units)}")
+    print(f"warnings: {len(compile_result.plan.warnings)}")
     return 0
 
 
