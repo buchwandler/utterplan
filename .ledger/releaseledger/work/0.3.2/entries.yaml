@@ -1,0 +1,54 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.3.2
+git_base_ref: b0415758f6c1d1890d8015ce40c1e52d6120cf46
+git_base_sha: b0415758f6c1d1890d8015ce40c1e52d6120cf46
+git_head_ref: ba3b5afb6c619cf91e482db16b19d53f199eb1e2
+git_head_sha: ba3b5afb6c619cf91e482db16b19d53f199eb1e2
+include_merges: nontrivial
+entries:
+  - kind: fixed
+    summary: Fixed text preparation so authored SSMD substitutions and say-as annotations remain unchanged
+    status: accepted
+    body: >-
+      Spoken-text preparation excludes spans with `sub`, `as`, and `say-as` attributes from automatic spoken-form replacement, preserving author-provided text while retaining existing pronunciation protections.
+    source_refs:
+      - git:6c2a1ac444c76ea183a791b59af2e92fb60dbb23
+    paths:
+      - tests/test_preparation.py
+      - utterplan/preparation.py
+    sources:
+      - git:6c2a1ac444c76ea183a791b59af2e92fb60dbb23
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: Added SSMD sequence fallback mode controls for spoken-form preparation
+    status: accepted
+    body: >-
+      SSMD headers can choose `spell` or `preserve` for sequence fallback behavior. The default remains `spell`; the selected mode is carried in plan metadata, and invalid values are rejected during planning.
+    source_refs:
+      - git:ba3b5afb6c619cf91e482db16b19d53f199eb1e2
+    paths:
+      - tests/golden/ssmd_09_comprehensive.utterplan.json
+      - tests/migration/goldens/multilingual_preparation.json
+      - tests/migration/goldens/spokenform_numbers.json
+      - tests/migration/goldens/ssmd_break.json
+      - tests/migration/goldens/ssmd_language_detection.json
+      - tests/migration/goldens/ssmd_marker.json
+      - tests/migration/goldens/ssmd_pronunciation.json
+      - tests/test_consumer_readiness.py
+      - tests/test_preparation.py
+      - tests/test_ssmd_09_parser.py
+      - utterplan/parsers.py
+      - utterplan/planner.py
+      - utterplan/preparation.py
+    sources:
+      - git:ba3b5afb6c619cf91e482db16b19d53f199eb1e2
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

@@ -1,0 +1,48 @@
+rows:
+  - sha: 6c2a1ac444c76ea183a791b59af2e92fb60dbb23
+    inspected: true
+    inspected_paths:
+      - tests/test_preparation.py
+      - utterplan/preparation.py
+    observed_behavior: Spoken-text preparation protects annotation spans using sub, as, say-as, ph, or phonemes from automated replacement while preserving source offset mappings.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
+  - sha: a2bc20d5d25f880688886f1867f0fd398a5b8c7e
+    inspected: true
+    inspected_paths:
+      - 01_todo.md
+      - plan.md
+    observed_behavior: Removed planning-only repository files; no runtime or public package behavior changed.
+    public_impact: internal
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: Repository planning artifacts only, with no user-facing change.
+    stale: false
+  - sha: ba3b5afb6c619cf91e482db16b19d53f199eb1e2
+    inspected: true
+    inspected_paths:
+      - tests/golden/ssmd_09_comprehensive.utterplan.json
+      - tests/migration/goldens/multilingual_preparation.json
+      - tests/migration/goldens/spokenform_numbers.json
+      - tests/migration/goldens/ssmd_break.json
+      - tests/migration/goldens/ssmd_language_detection.json
+      - tests/migration/goldens/ssmd_marker.json
+      - tests/migration/goldens/ssmd_pronunciation.json
+      - tests/test_consumer_readiness.py
+      - tests/test_preparation.py
+      - tests/test_ssmd_09_parser.py
+      - utterplan/parsers.py
+      - utterplan/planner.py
+      - utterplan/preparation.py
+    observed_behavior: SSMD sequence_fallback_mode accepts spell or preserve, defaults to spell, is forwarded to spoken-form preparation and serialized in plan metadata and identity, and rejects invalid values.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false

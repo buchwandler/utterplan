@@ -1,0 +1,57 @@
+{
+  "candidate_count": 3,
+  "candidates": [
+    {
+      "additions": 40,
+      "deletions": 1,
+      "patch_file": "6c2a1ac.patch",
+      "patch_sha256": "59de3eae6488719f4dc6447cccadfa64d254da9b8b7fbf139c3b19399321726c",
+      "paths": ["tests/test_preparation.py", "utterplan/preparation.py"],
+      "sha": "6c2a1ac444c76ea183a791b59af2e92fb60dbb23",
+      "short_sha": "6c2a1ac",
+      "source_ref": "git:6c2a1ac444c76ea183a791b59af2e92fb60dbb23"
+    },
+    {
+      "additions": 0,
+      "deletions": 1907,
+      "patch_file": "a2bc20d.patch",
+      "patch_sha256": "145ce032a4f42dcdb2ff2b877c2529b86374e5325388f93b83cbe193eed8122a",
+      "paths": ["01_todo.md", "plan.md"],
+      "sha": "a2bc20d5d25f880688886f1867f0fd398a5b8c7e",
+      "short_sha": "a2bc20d",
+      "source_ref": "git:a2bc20d5d25f880688886f1867f0fd398a5b8c7e"
+    },
+    {
+      "additions": 183,
+      "deletions": 7,
+      "patch_file": "ba3b5af.patch",
+      "patch_sha256": "09446989cfd05616f64f1efadb9b6ae52c3ec279cff3efb49dd6ae6bde4743e7",
+      "paths": [
+        "tests/golden/ssmd_09_comprehensive.utterplan.json",
+        "tests/migration/goldens/multilingual_preparation.json",
+        "tests/migration/goldens/spokenform_numbers.json",
+        "tests/migration/goldens/ssmd_break.json",
+        "tests/migration/goldens/ssmd_language_detection.json",
+        "tests/migration/goldens/ssmd_marker.json",
+        "tests/migration/goldens/ssmd_pronunciation.json",
+        "tests/test_consumer_readiness.py",
+        "tests/test_preparation.py",
+        "tests/test_ssmd_09_parser.py",
+        "utterplan/parsers.py",
+        "utterplan/planner.py",
+        "utterplan/preparation.py"
+      ],
+      "sha": "ba3b5afb6c619cf91e482db16b19d53f199eb1e2",
+      "short_sha": "ba3b5af",
+      "source_ref": "git:ba3b5afb6c619cf91e482db16b19d53f199eb1e2"
+    }
+  ],
+  "git_base_ref": "b0415758f6c1d1890d8015ce40c1e52d6120cf46",
+  "git_base_sha": "b0415758f6c1d1890d8015ce40c1e52d6120cf46",
+  "git_head_ref": "ba3b5afb6c619cf91e482db16b19d53f199eb1e2",
+  "git_head_sha": "ba3b5afb6c619cf91e482db16b19d53f199eb1e2",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.3.2",
+  "schema_version": 1
+}
