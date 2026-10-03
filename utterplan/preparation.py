@@ -26,6 +26,11 @@ class PreparedText:
 
 
 class SpokenformTextPreparer:
+    def __init__(self, *, sequence_fallback_mode: str = "spell") -> None:
+        if sequence_fallback_mode not in ("spell", "preserve"):
+            raise ValueError("sequence_fallback_mode must be 'spell' or 'preserve'")
+        self.sequence_fallback_mode = sequence_fallback_mode
+
     def prepare(
         self,
         text: str,
@@ -60,6 +65,7 @@ class SpokenformTextPreparer:
                     "strip_outer_whitespace": False,
                     "preserve_run_boundaries": True,
                     "protected_spans": protected,
+                    "sequence_fallback_mode": self.sequence_fallback_mode,
                 }
                 if run_index < len(analyses) and analyses[run_index].provider_doc is not None:
                     kwargs["nlp"] = analyses[run_index].provider_doc

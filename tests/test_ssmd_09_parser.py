@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -259,3 +260,19 @@ def test_zero_width_non_media_annotation_is_not_preserved(
     result = SSMDDocumentParser().parse("", _planner().config)
 
     assert result.annotations == ()
+
+
+def test_sequence_fallback_mode_roundtrips_and_is_part_of_plan_identity() -> None:
+    source = '---\nssmd_version: "0.9"\nsequence_fallback_mode: preserve\n---\nHello.'
+    plan = _planner().plan(source)
+    jsonschema.validate(plan.to_dict(), schema())
+
+    restored = type(plan).from_dict(plan.to_dict())
+    assert restored.document_metadata["sequence_fallback_mode"] == "preserve"
+    assert type(plan).from_json(plan.to_json()) == plan
+
+    changed_policy = replace(
+        plan,
+        document_metadata={**plan.document_metadata, "sequence_fallback_mode": "spell"},
+    ).with_identity()
+    assert changed_policy.plan_id != plan.plan_id

@@ -399,6 +399,7 @@
         }
       }
     },
+    "sequence_fallback_mode": "spell",
     "language": "sr-Latn",
     "language_detection": {
       "languages": ["sr-Latn", "en-GB"],
@@ -463,7 +464,7 @@
       "spoken_position": 249
     }
   ],
-  "plan_id": "sha256:16e2df79328dec10d56c247526c7ece988f22066f160d26f0b8fd920dc3a4cc2",
+  "plan_id": "sha256:c06853d7554c71e4085b38270e146589456462b252f6642103a08be9c4b48bba",
   "preparation": {
     "backend": "identity",
     "languages": ["sr-Latn"],

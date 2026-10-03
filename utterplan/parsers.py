@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from .config import PlannerConfig, parse_duration
 from .exceptions import ConfigurationError, PlanFormatError, PlanningError
@@ -21,6 +22,21 @@ class ParsedDocument:
     warnings: tuple[str, ...] = ()
     diagnostics: tuple[Diagnostic, ...] = ()
     document_language: str = ""
+
+
+def effective_sequence_fallback_mode(
+    header: Mapping[str, Any],
+) -> Literal["spell", "preserve"]:
+    value = header.get("sequence_fallback_mode", "spell")
+    if value == "spell":
+        return "spell"
+    if value == "preserve":
+        return "preserve"
+    raise PlanFormatError(
+        "sequence_fallback_mode must be 'spell' or 'preserve'",
+        code="header.sequence_fallback_mode_invalid",
+        path="$.source",
+    )
 
 
 class PlainDocumentParser:
@@ -63,7 +79,14 @@ class SSMDDocumentParser:
             location = _format_location(exc.line, exc.column)
             raise PlanFormatError(f"{exc}{location}", code=exc.code, path="$.source") from exc
 
-        diagnostics = tuple(_ssmd_diagnostic(item) for item in parsed.diagnostics)
+        header = _plain_value(parsed.header)
+        fallback_mode = effective_sequence_fallback_mode(header)
+
+        diagnostics = tuple(
+            _ssmd_diagnostic(item)
+            for item in parsed.diagnostics
+            if not _is_sequence_fallback_unknown_key(item, text)
+        )
         errors = [item for item in diagnostics if item.severity == "error"]
         if errors:
             first = errors[0]
@@ -162,8 +185,7 @@ class SSMDDocumentParser:
                     )
                 )
 
-        header = _plain_value(parsed.header)
-        metadata: dict[str, Any] = {"header": header}
+        metadata: dict[str, Any] = {"header": header, "sequence_fallback_mode": fallback_mode}
         for key in (
             "ssmd_version",
             "title",
@@ -306,6 +328,19 @@ def _plain_value(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)
+
+
+def _is_sequence_fallback_unknown_key(item: Any, text: str) -> bool:
+    if str(getattr(item, "code", "")) != "header.unknown_key":
+        return False
+    start = getattr(item, "source_start", None)
+    end = getattr(item, "source_end", None)
+    return (
+        isinstance(start, int)
+        and isinstance(end, int)
+        and 0 <= start <= end <= len(text)
+        and text[start:end] == "sequence_fallback_mode"
+    )
 
 
 def _ssmd_diagnostic(item: Any) -> Diagnostic:

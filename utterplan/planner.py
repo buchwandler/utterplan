@@ -20,7 +20,11 @@ from .model import (
     PlanTexts,
     UtterancePlan,
 )
-from .parsers import PlainDocumentParser, SSMDDocumentParser
+from .parsers import (
+    PlainDocumentParser,
+    SSMDDocumentParser,
+    effective_sequence_fallback_mode,
+)
 from .pauses import boundary_is_active, resolve_pauses
 from .preparation import IdentityTextPreparer, SourceToSpokenMap, SpokenformTextPreparer
 from .units import make_units
@@ -53,6 +57,7 @@ class UtterancePlanner:
         config = effective_config
         parsed = self._parse(text, config)
         pause_config = _effective_pause_config(config, parsed.header)
+        fallback_mode = effective_sequence_fallback_mode(parsed.header)
         document_language = parsed.document_language or config.language
         preserve_language_tags = config.document_format == "ssmd"
         source_runs = build_language_runs(
@@ -68,7 +73,7 @@ class UtterancePlanner:
         preparer = (
             IdentityTextPreparer()
             if config.text_preparation == "identity"
-            else SpokenformTextPreparer()
+            else SpokenformTextPreparer(sequence_fallback_mode=fallback_mode)
         )
         prepared = preparer.prepare(
             parsed.structural_text,

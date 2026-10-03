@@ -102,6 +102,36 @@ Hello."""
     assert diagnostic.source_start == plan.source.text.index("unknown")
 
 
+def test_ssmd_sequence_fallback_mode_metadata_and_unknown_header_diagnostics() -> None:
+    plan = _ssmd_plan(
+        """---
+ssmd_version: "0.9"
+sequence_fallback_mode: preserve
+custom_key: true
+---
+Hello."""
+    )
+
+    assert plan.document_metadata["sequence_fallback_mode"] == "preserve"
+    assert plan.document_metadata["header"]["sequence_fallback_mode"] == "preserve"
+    unknown = [item for item in plan.diagnostics if item.code == "header.unknown_key"]
+    assert len(unknown) == 1
+    assert unknown[0].source_start == plan.source.text.index("custom_key")
+
+
+def test_ssmd_sequence_fallback_mode_defaults_to_spell() -> None:
+    plan = _ssmd_plan('---\nssmd_version: "0.9"\n---\nHello.')
+    assert plan.document_metadata["sequence_fallback_mode"] == "spell"
+
+
+@pytest.mark.parametrize("value", ["unknown", "SPELL", "false", "1", "true", "null", "[]"])
+def test_ssmd_sequence_fallback_mode_rejects_invalid_values(value: str) -> None:
+    with pytest.raises(PlanFormatError) as error:
+        _ssmd_plan(f'---\nssmd_version: "0.9"\nsequence_fallback_mode: {value}\n---\nHello.')
+    assert error.value.code == "header.sequence_fallback_mode_invalid"
+    assert error.value.path == "$.source"
+
+
 def test_ssmd_header_malformed_yaml_is_public_error() -> None:
     with pytest.raises(PlanFormatError, match="header.yaml_invalid"):
         _ssmd_plan(
@@ -124,6 +154,7 @@ Hello.""",
     )
     assert "unknown: value" in plan.texts.structural
     assert plan.document_metadata["header"] == {}
+    assert plan.document_metadata["sequence_fallback_mode"] == "spell"
 
 
 def test_pause_defaults_enabled_disables_automatic_document_pauses() -> None:

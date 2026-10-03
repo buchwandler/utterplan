@@ -16,6 +16,7 @@
   ],
   "document_metadata": {
     "header": {},
+    "sequence_fallback_mode": "spell",
     "planning": {
       "engine_independent": true,
       "linguistic_passes": 2,

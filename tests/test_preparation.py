@@ -1,4 +1,79 @@
+import sys
+
+import pytest
+import spokenform
+
 from utterplan import PlannerConfig, UtterancePlanner
+from utterplan.exceptions import PlanFormatError
+
+
+def _record_sequence_fallback_modes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    modes: list[str] = []
+    prepare = spokenform.prepare
+
+    def record(text, **kwargs):
+        modes.append(kwargs["sequence_fallback_mode"])
+        return prepare(text, **kwargs)
+
+    monkeypatch.setattr(spokenform, "prepare", record)
+    return modes
+
+
+@pytest.mark.parametrize(
+    ("setting", "expected"),
+    [
+        ("", "spell"),
+        ("sequence_fallback_mode: spell\n", "spell"),
+        ("sequence_fallback_mode: preserve\n", "preserve"),
+    ],
+)
+def test_sequence_fallback_mode_is_forwarded(
+    setting: str, expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    modes = _record_sequence_fallback_modes(monkeypatch)
+    source = f'---\nssmd_version: "0.9"\n{setting}---\nin-system'
+    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(source)
+
+    assert modes == [expected]
+    assert plan.document_metadata["sequence_fallback_mode"] == expected
+
+
+def test_plain_input_forwards_spell_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    modes = _record_sequence_fallback_modes(monkeypatch)
+    UtterancePlanner(PlannerConfig(language="en-us", document_format="plain")).plan("in-system")
+    assert modes == ["spell"]
+
+
+@pytest.mark.parametrize("value", ["unknown", "null"])
+def test_invalid_sequence_fallback_mode_fails_before_spokenform(
+    value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("spokenform.prepare must not run for invalid metadata")
+
+    monkeypatch.setattr(spokenform, "prepare", fail_if_called)
+    source = f'---\nssmd_version: "0.9"\nsequence_fallback_mode: {value}\n---\nin-system'
+
+    with pytest.raises(PlanFormatError) as error:
+        UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(source)
+    assert error.value.code == "header.sequence_fallback_mode_invalid"
+
+
+def test_identity_preparation_keeps_sequence_fallback_mode_without_spokenform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "spokenform", None)
+    source = '---\nssmd_version: "0.9"\nsequence_fallback_mode: preserve\n---\nin-system'
+    plan = UtterancePlanner(
+        PlannerConfig(
+            language="en-us",
+            document_format="ssmd",
+            text_preparation="identity",
+        )
+    ).plan(source)
+
+    assert plan.texts.spoken == "in-system"
+    assert plan.document_metadata["sequence_fallback_mode"] == "preserve"
 
 
 def test_multilingual_preparation_composes_run_offsets():

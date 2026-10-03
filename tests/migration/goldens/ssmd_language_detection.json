@@ -9,6 +9,7 @@
       },
       "ssmd_version": "0.9"
     },
+    "sequence_fallback_mode": "spell",
     "language_detection": {
       "languages": ["de", "en"],
       "mode": "auto"
