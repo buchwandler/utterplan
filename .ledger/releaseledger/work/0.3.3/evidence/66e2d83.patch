@@ -1,0 +1,1339 @@
+ README.md                                          |  45 +++++--
+ docs/architecture.md                               |  89 ++++++++++++--
+ docs/cli.md                                        |  44 ++++---
+ docs/python-api.md                                 |  54 +++++++-
+ .../canonical_consumer_contract.expected.json      |  10 ++
+ tests/fixtures/canonical_consumer_contract.ssmd    |  21 ++++
+ tests/test_cli.py                                  |  49 ++++++++
+ tests/test_compiler.py                             | 130 ++++++++++++++++++++
+ tests/test_consumer_contract.py                    |  39 +++++-
+ tests/test_consumer_readiness.py                   |  61 +++++++++
+ tests/test_import_boundaries.py                    |  10 +-
+ tests/test_public_identity.py                      |   1 +
+ utterplan/__init__.py                              |  14 +++
+ utterplan/cli.py                                   | 136 +++++++++++++++++----
+ utterplan/compiler.py                              | 109 +++++++++++++++++
+ utterplan/planner.py                               | 109 ++++++++++++++++-
+ utterplan/preparation.py                           |  28 +++++
+ 17 files changed, 875 insertions(+), 74 deletions(-)
+
+diff --git a/README.md b/README.md
+index 4eac278..19b5a69 100644
+--- a/README.md
++++ b/README.md
+@@ -5,25 +5,29 @@
+
+ # UtterPlan
+
+-UtterPlan is an engine-independent TTS planning compiler and interchange
+-format. It converts text and SSMD into deterministic semantic speech plans
+-containing prepared spoken text, language runs, segments, pauses, directives,
+-markers, and render units. It stops before G2P and produces no audio.
++UtterPlan is the canonical, engine-independent semantic compiler from one SSMD
++document (or explicitly selected plain-text document) to an executable speech
++plan. It produces deterministic language runs, prepared text, segments, resolved
++pauses, portable metadata, directives, markers, and render units shared by
++independent consumers such as ttsready and Readio. It does not manage books or
++consumer workspaces, and stops before G2P, synthesis, and audio.
+
+ ## CLI
+
+ Compile literal text directly:
+
+ ```bash
+-utterplan compile "Doctor Smith bought 5 kg." --lang en-us --json
++utterplan compile "Doctor Smith bought 5 kg." --input-format plain --language en-us --json
+ ```
+
+ Compile a file to a plan file:
+
+ ```bash
+-utterplan compile examples/chapter.ssmd --lang en-us -o chapter.utterplan.json
++utterplan compile examples/chapter.ssmd -o chapter.utterplan.json
+ ```
+
++SSMD header `language` is authoritative, so `--language` is optional when it is present. Otherwise pass `--language` as the fallback; plain input always requires a language. `--language` never forces a language over SSMD semantics.
++
+ Use stdin and shell pipelines:
+
+ ```bash
+@@ -70,17 +74,32 @@ Python `PlannerConfig` defaults to `document_format="plain"`; set it to `"ssmd"`
+ ## Python API
+
+ ```python
+-from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
+-
+-planner = UtterancePlanner(PlannerConfig(language="en-us"))
+-plan = planner.plan("Doctor Smith bought 5 kg of apples.")
++from utterplan import PlannerConfig, UtterancePlan, compile_document
++
++ssmd_source = """---
++ssmd_version: "0.9"
++language: en-GB
++---
++Hello [world]{emphasis="strong"}.
++"""
++result = compile_document(
++    ssmd_source,
++    input_format="ssmd",
++    config=PlannerConfig(language="en-us"),  # fallback; header language wins
++    trace=True,
++)
++plan = result.plan
++assert result.trace is not None
+ plan.save("example.utterplan.json")
+ assert UtterancePlan.load("example.utterplan.json") == plan
+ ```
+
+-The stable in-process boundary is `PlannerConfig`, `UtterancePlanner`, and the
+-immutable `UtterancePlan` object. JSON is the portable persistence and interchange
+-format; an in-process renderer can consume the Python object directly.
++`compile_document` is the stable public one-document API shared by consumers. The
++immutable `CompileResult` contains the semantic plan, diagnostics, and optional
++explanatory trace. Trace is not serialized in the plan and does not affect its
++identity. Plain text must be explicitly selected in Python and always requires a
++language fallback. Existing `UtterancePlanner.plan` remains supported and returns
++only the plan; JSON is the portable persistence and interchange format.
+
+ ## Renderer-consumer boundary
+
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 35f0e22..14ac6b5 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -1,30 +1,93 @@
+ # Architecture
+
++UtterPlan is the canonical renderer-independent compiler from one SSMD document
++(or explicitly selected plain-text document) to an executable semantic speech
++plan. Consumers compile each chapter/document separately; UtterPlan does not load
++books or manage `.ssmdbook` or Readio workspaces.
++
+ ```text
+-text / SSMD -> document parser -> language plan -> linguistic pass A
+-    -> written-to-spoken preparation -> linguistic pass B
+-    -> segmentation -> directive resolution -> pause planning
+-    -> units and hashes -> UtterancePlan -> external renderer
+-                                      -> engine-specific G2P and speech
++one SSMD document / explicit plain text
++                 |
++                 v
++        parse -> language semantics -> spokenform preparation
++                 -> segmentation -> directive/default resolution
++                 -> pause resolution -> units and semantic identity
++                 |
++                 v
++            UtterancePlan
++              /       \
++     ttsready report   Readio lowering
++                         |
++                         v
++                G2P / renderer / audio
+ ```
+
+-UtterPlan is the complete source-to-semantic-plan compiler boundary. G2P begins after the UtterPlan boundary. The public `UtterancePlan` Python object is a supported immutable in-process renderer input; the `.utterplan.json` schema is the portable persistence and semantic interchange contract.
++The dependency direction is `ssmd`, `spokenform`, and `phrasplit` into UtterPlan,
++then from UtterPlan to consumer packages. UtterPlan must not depend on ttsready,
++Readio, ssmdconvert, engine registries, G2P packages, model runtimes, or audio
++packages. Book iteration belongs to consumers and conversion tools.
++
++The public `compile_document` entry point returns a `CompileResult` containing a
++portable `UtterancePlan`, renderer-independent diagnostics, and an optional
++`PreparationTrace`. The trace explains preparation for reports/debugging only; it
++is not renderer input, is not stored in the plan, and does not affect plan identity.
++Legacy `UtterancePlanner.plan` remains a compatibility API returning only the
++plan.
++
++The public `UtterancePlan` Python object is immutable in-process renderer input;
++the `.utterplan.json` schema is the portable persistence and semantic interchange
++contract. UtterPlan ends before G2P. Engine/model selection, synthesis, and audio
++composition happen downstream.
+
+ ## SSMD source contract
+
+-The document parser calls SSMD with `dialect="0.9"` for every SSMD source path, including unversioned fragments selected with `document_format="ssmd"`. UtterPlan does not parse SSMD 0.8 or migrate source. Older documents must first be converted with `ssmd migrate FILE --to 0.9`. The `utterplan migrate` command is reserved for serialized UtterPlan schema migrations.
++The document parser calls SSMD with `dialect="0.9"` for every SSMD source path,
++including unversioned fragments selected with `document_format="ssmd"`. UtterPlan
++does not parse SSMD 0.8 or migrate source. Older documents must first be converted
++with `ssmd migrate FILE --to 0.9`. The `utterplan migrate` command is reserved for
++serialized UtterPlan schema migrations.
++
++SSMD header language is authoritative over a fallback language. The CLI can omit
++`--language` when the header declares a language; plain input always needs an
++explicit fallback. A fallback never forces or rewrites document semantics.
+
+-Declared annotations remain distinct from effective segment directives. `plan.annotations` preserves authored spans, `document_metadata` preserves portable header semantics, and `segment.directives` contains resolved renderer-neutral values after scope and voice-default resolution. Audio references and extension names are preserved as data only. UtterPlan does not retrieve media or execute handlers.
++Declared annotations remain distinct from effective segment directives.
++`plan.annotations` preserves authored spans, `document_metadata` preserves
++portable header semantics, and `segment.directives` contains resolved
++renderer-neutral values after scope and voice-default resolution. Audio references
++and extension names are preserved as data only. UtterPlan does not retrieve media
++or execute handlers.
+
+-Preparation preserves structural and spoken coordinate spaces. `spoken_start`, `spoken_end`, and `spoken_position` refer to prepared text. Renderers must use these ranges when consuming `PlanSegment.text`, `AnnotationSpan`, and `TokenAnnotation`; structural/source offsets are not valid slices into prepared text.
++Preparation preserves structural and spoken coordinate spaces. `spoken_start`,
++`spoken_end`, and `spoken_position` refer to prepared text. Renderers must use
++these ranges when consuming `PlanSegment.text`, `AnnotationSpan`, and
++`TokenAnnotation`; structural/source offsets are not valid slices into prepared
++text. Preparation-trace source offsets address SSMD-clean structural text, while
++its transformation output offsets address prepared spoken text.
+
+-Linguistic analysis and provider documents are request-local. Returned plans contain JSON-compatible semantic results only: no live parser objects, spaCy documents, models, sessions, provider caches, phonemes, engine token IDs, or audio. A reusable planner may share sequential resource caches, but concurrent use is not promised.
++Linguistic analysis and provider documents are request-local. Returned plans
++contain JSON-compatible semantic results only: no live parser objects, spaCy
++documents, models, sessions, provider caches, phonemes, engine token IDs, or audio.
++A reusable planner may share sequential resource caches, but concurrent use is not
++promised.
+
+-The persisted `linguistic_runs` collection describes final pass-B token ranges. Pass-A documents and tokens remain request-local because written-to-spoken preparation can invalidate their offsets.
++The persisted `linguistic_runs` collection describes final pass-B token ranges.
++Pass-A documents and tokens remain request-local because written-to-spoken
++preparation can invalidate their offsets.
+
+-Pause events retain provenance and resolved event IDs. Pause defaults are normalized to finite seconds with explicit precedence, and segments expose resolved base pauses directly. Logical voices are intent references; document `voice_bindings` metadata remains separate and no concrete engine voice is selected.
++Pause events retain provenance and resolved event IDs. Pause defaults are
++normalized to finite seconds with explicit precedence, and segments expose
++resolved pauses directly. Logical voices are intent references; document
++`voice_bindings` metadata remains separate and no concrete engine voice is
++selected.
+
+-Plan identity is deterministic and renderer-independent. Unit hashes include ordered segment semantics, resolved pauses, marker content, and the semantic token facts referenced by each segment. Diagnostics and producer metadata do not define unit identity. Package version is derived by setuptools-scm and is independent of the explicit UtterPlan `schema_version`.
++Plan identity is deterministic and renderer-independent. It covers semantic
++source/configuration/metadata; it does not include renderer-only model, sample
++rate, or output-file settings. Unit hashes include ordered segment semantics,
++resolved pauses, marker content, and semantic token facts referenced by each
++segment. Diagnostics and producer metadata do not define unit identity. Package
++version is derived by setuptools-scm and is independent of the explicit UtterPlan
++`schema_version`.
+
+ ## Persistence compatibility boundary
+
+diff --git a/docs/cli.md b/docs/cli.md
+index 755df33..4c8c45c 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -3,18 +3,20 @@
+ UtterPlan's command-line compiler accepts literal text, stdin, and files:
+
+ ```text
+-usage: utterplan compile [-h] [--file FILE] --language LANGUAGE
+-                       [--input-format {auto,text,ssmd}]
+-                       [--unit {paragraph,sentence}]
+-                       [--text-preparation {spokenform,identity}]
+-                       [--pause-mode {tts,manual,auto}]
+-                       [--spacy {auto,off,sm,md,lg,trf}] [-o OUTPUT]
+-                       [--force] [--json]
+-                       [text ...]
++usage: utterplan compile [-h] [--file FILE] [--language LANGUAGE]
++                         [--input-format {auto,text,plain,ssmd}]
++                         [--unit {paragraph,sentence}]
++                         [--text-preparation {spokenform,identity}]
++                         [--pause-mode {tts,manual,auto}]
++                         [--spacy {auto,off,sm,md,lg,trf}] [-o OUTPUT]
++                         [--force] [--json]
++                         [text ...]
+ ```
+
+-`--lang` is an alias for `--language`. The older `--format` spelling is
+-accepted as an alias for `--input-format`.
++`--lang` is an alias for `--language`; the older `--format` spelling is accepted
++as an alias for `--input-format`. `--language` is a fallback language: it is
++required for plain input, optional for SSMD with a header `language`, and never
++forces a language over SSMD document semantics.
+
+ ## Input resolution
+
+@@ -24,17 +26,27 @@ The rules are deterministic:
+    positional text.
+ 2. With no positional text or `--file`, stdin is read. An empty terminal or
+    empty stdin is an error.
+-3. `--input-format text` always joins positional tokens as literal text.
++3. `--input-format text` and `--input-format plain` interpret positional tokens as literal text.
+ 4. Otherwise, one positional token naming an existing regular file is read.
+ 5. All remaining positional tokens are joined with single spaces as literal
+    text.
+
+ With `auto`, `.ssmd` and `.ssmd.md` files are interpreted as SSMD. Markdown files
+ with an SSMD version header are also detected as SSMD; ordinary Markdown remains
+-plain text. Literal text and stdin default to plain text. Use `--input-format ssmd`
++plain text; literal text and stdin default to plain. Use `--input-format ssmd`
+ explicitly for SSMD from stdin or unversioned canonical fragments. All SSMD inputs
+ are parsed as strict dialect 0.9.
+
++The SSMD header's `language` wins over `--language`. When the header declares a
++language, no CLI language is needed. If it does not, provide `--language` as the
++fallback; plain input always requires that option:
++
++```bash
++utterplan compile chapter.ssmd.md
++utterplan compile legacy.ssmd.md --language de-DE
++utterplan compile plain.txt --input-format plain --language de-DE
++```
++
+ ## SSMD source compatibility
+
+ UtterPlan accepts SSMD 0.9 syntax only. It does not auto-migrate older source or provide a legacy parser. Convert an old SSMD file before compilation:
+@@ -56,9 +68,9 @@ also emit the same plan JSON to stdout.
+ Human status messages are written to stderr, never mixed into JSON stdout:
+
+ ```bash
+-utterplan compile chapter.ssmd.md --lang en-us -o chapter.utterplan.json
++utterplan compile chapter.ssmd.md -o chapter.utterplan.json
+ # status is written to stderr
+-utterplan compile chapter.ssmd.md --lang en-us -o chapter.utterplan.json --json | jq .
++utterplan compile chapter.ssmd.md -o chapter.utterplan.json --json | jq .
+ ```
+
+ Argparse usage errors use exit code 2. Input, planning, file, and plan
+@@ -94,6 +106,8 @@ Use `--spacy auto` only as an opt-in enrichment policy. If a compatible local mo
+ ```bash
+ utterplan --version
+ utterplan validate chapter.utterplan.json
++utterplan validate chapter.ssmd.md
++utterplan validate plain.txt --input-format plain --language en-us
+ utterplan inspect chapter.utterplan.json --segment 0
+ utterplan inspect chapter.utterplan.json --unit 0 --boundaries --tokens
+ utterplan inspect chapter.utterplan.json --preparation
+@@ -115,4 +129,4 @@ Without `-o`, migrated JSON is written to stdout. Status is written to stderr. E
+
+ Schema migration is a separate operation from SSMD source migration. UtterPlan preserves released schema v1 and v2 and migrates v1 plans sequentially through v2 to current schema v3. It never reparses source or replans. Use `ssmd migrate FILE --to 0.9` for older SSMD source documents.
+
+-`validate` performs the same in-memory compatibility check and reports both source and current schema versions. It never modifies the input file.
++For a saved JSON plan, `validate` performs the in-memory schema compatibility check and reports source/current schema versions without modifying the file. For an SSMD or plain-text source document, it runs the canonical one-document semantic compiler without writing a plan; plain input requires `--language`, while SSMD can use its header language or an explicit fallback.
+diff --git a/docs/python-api.md b/docs/python-api.md
+index f3f5848..07a3924 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -1,14 +1,46 @@
+ # Python API
+
+-The supported in-process boundary is the immutable `UtterancePlan` object returned
+-by `UtterancePlanner`. JSON is the portable persistence and interchange format, but
+-an in-process consumer does not need to serialize and reload a plan.
++The canonical public entry point is `compile_document`, which compiles one SSMD
++document or explicitly configured plain-text document and returns a `CompileResult`.
++Its `plan` is the immutable, round-trippable renderer-independent `UtterancePlan`;
++its `diagnostics` explain compilation, and an optional `PreparationTrace` is
++separate diagnostic output. `UtterancePlanner.plan` remains supported for
++compatibility and returns only the plan.
+
+ The Python defaults are deliberately spaCy-free: `PlannerConfig` uses `spokenform` text preparation, and `PauseConfig().mode` is `"tts"`. The CLI additionally defaults to the `spacy off` linguistic-resource policy, which uses deterministic fallback tokenization and analysis without requiring an installed spaCy model.
+
+ For an explicit contextual-G2P configuration, use `LinguisticsConfig(use_spacy=True, spacy_model="en_core_web_sm", require_spacy=True)`. The resulting plan records final pass-B token provenance in `linguistic_runs`; no provider document is retained.
+ spaCy enrichment is opt-in through the CLI's `--spacy auto` policy or an explicit `LinguisticsConfig` with a compatible local model. It may provide richer tokenization, POS tags, lemmas, and tags, but UtterPlan never downloads a model implicitly.
+
++## Canonical single-document compiler
++
++`compile_document` is the shared semantic interpretation boundary for independent
++consumers. It does not load books, traverse chapters, or manage consumer workspaces.
++SSMD header language takes precedence over a fallback; the explicit
++`fallback_language` keyword is a per-call fallback override, never a forced language.
++`PlannerConfig.language` remains required for compatibility and supplies the fallback
++when `fallback_language` is omitted. Plain input must have a language fallback.
++
++```python
++from utterplan import PlannerConfig, compile_document
++
++result = compile_document(
++    ssmd_source,
++    input_format="ssmd",
++    config=PlannerConfig(language="en-us"),
++    trace=True,
++)
++plan = result.plan
++assert result.diagnostics == plan.diagnostics
++assert result.trace is not None
++```
++
++Use `input_format="plain"` only for explicitly configured plain text. A trace
++contains explanatory per-unit preparation information but is not serialized into
++the plan, is not renderer input, and does not change `plan.plan_id`. Its source
++ranges index SSMD-clean structural text; transformation output ranges index prepared
++spoken text, using Python string character offsets.
++
+ ## SSMD input and semantic plan
+
+ The SSMD parser accepts dialect 0.9 only. Select SSMD explicitly for unversioned canonical fragments with `PlannerConfig(document_format="ssmd")`. Older SSMD source must be migrated with `ssmd migrate FILE --to 0.9`; `migrate_plan_data` and `utterplan migrate` apply to serialized UtterPlan JSON, not source documents.
+@@ -85,6 +117,22 @@ consumers do not need to inspect raw SSMD annotations to find media.
+
+ ## Planning and plan records
+
++```{autofunction} utterplan.compile_document
++
++```
++
++```{autoclass} utterplan.CompileResult
++:members:
++```
++
++```{autoclass} utterplan.PreparationTrace
++:members:
++```
++
++```{autoclass} utterplan.PreparationTraceUnit
++:members:
++```
++
+ ```{autoclass} utterplan.UtterancePlanner
+ :members:
+ :show-inheritance:
+diff --git a/tests/fixtures/canonical_consumer_contract.expected.json b/tests/fixtures/canonical_consumer_contract.expected.json
+new file mode 100644
+index 0000000..d4177a2
+--- /dev/null
++++ b/tests/fixtures/canonical_consumer_contract.expected.json
+@@ -0,0 +1,10 @@
++{
++  "segments": [
++    ["Hello.", "en-GB"],
++    ["Next.", "en-GB"]
++  ],
++  "voice_reference": "narrator",
++  "prosody_rate": "slow",
++  "pause_after_seconds": 0.25,
++  "voice_binding": "renderer-owned-choice"
++}
+diff --git a/tests/fixtures/canonical_consumer_contract.ssmd b/tests/fixtures/canonical_consumer_contract.ssmd
+new file mode 100644
+index 0000000..23b143d
+--- /dev/null
++++ b/tests/fixtures/canonical_consumer_contract.ssmd
+@@ -0,0 +1,21 @@
++---
++ssmd_version: "0.9"
++language: en-GB
++voice_bindings:
++  narrator: renderer-owned-choice
++voice_defaults:
++  narrator:
++    rate: slow
++pause_defaults:
++  sentence: 250ms
++prosody_transitions:
++  enabled: true
++  same_voice_only: true
++language_detection:
++  mode: auto
++  languages: [en-GB, fr-FR]
++requires:
++  extensions:
++    - acme.effects.whisper
++---
++[Hello.]{voice="narrator"} Next.
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 6486689..c53c281 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -321,3 +321,52 @@ def test_validate_reports_migration_status(
+     assert "source schema version: 3" in captured.out
+     assert "current schema version: 3" in captured.out
+     assert "migration required: no" in captured.out
++
++
++def test_compile_ssmd_header_language_without_cli_language(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    source = tmp_path / "chapter.ssmd.md"
++    source.write_text('---\nssmd_version: "0.9"\nlanguage: de-DE\n---\nHallo.', encoding="utf-8")
++
++    assert main(["compile", str(source)]) == 0
++    payload = _payload(capsys)
++    assert payload["segments"][0]["language"] == "de-DE"
++
++
++def test_compile_ssmd_cli_language_is_fallback(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    source = tmp_path / "chapter.ssmd"
++    source.write_text("Hallo.", encoding="utf-8")
++
++    assert main(["compile", str(source), "--language", "de-DE"]) == 0
++    payload = _payload(capsys)
++    assert payload["segments"][0]["language"] == "de-DE"
++
++
++def test_compile_requires_language_for_plain_input(capsys: pytest.CaptureFixture[str]) -> None:
++    assert main(["compile", "Hello."]) == 1
++    captured = capsys.readouterr()
++    assert "plain input requires --language" in captured.err
++
++
++def test_compile_plain_input_with_required_language(capsys: pytest.CaptureFixture[str]) -> None:
++    assert main(["compile", "Hallo.", "--input-format", "plain", "--language", "de-DE"]) == 0
++    assert _payload(capsys)["segments"][0]["language"] == "de-de"
++
++
++def test_validate_source_documents_and_preserve_saved_plan_validation(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    ssmd = tmp_path / "chapter.ssmd.md"
++    ssmd.write_text('---\nssmd_version: "0.9"\nlanguage: de-DE\n---\nHallo.', encoding="utf-8")
++    assert main(["validate", str(ssmd)]) == 0
++    assert "input format: ssmd" in capsys.readouterr().out
++
++    plain = tmp_path / "plain.txt"
++    plain.write_text("Hello.", encoding="utf-8")
++    assert main(["validate", str(plain)]) == 1
++    assert "plain input requires --language" in capsys.readouterr().err
++    assert main(["validate", str(plain), "--input-format", "plain", "--language", "en-us"]) == 0
++    assert "valid" in capsys.readouterr().out
+diff --git a/tests/test_compiler.py b/tests/test_compiler.py
+new file mode 100644
+index 0000000..2f67d98
+--- /dev/null
++++ b/tests/test_compiler.py
+@@ -0,0 +1,130 @@
++from __future__ import annotations
++
++from dataclasses import replace
++
++import pytest
++
++from utterplan import (
++    CompileResult,
++    PlannerConfig,
++    PreparationTrace,
++    PreparationTraceUnit,
++    UtterancePlanner,
++    compile_document,
++)
++from utterplan.exceptions import ConfigurationError
++
++
++def test_public_compile_api_uses_document_language_and_returns_diagnostics() -> None:
++    config = PlannerConfig(language="en-us", text_preparation="identity")
++    source = '---\nssmd_version: "0.9"\nlanguage: de-DE\n---\nHallo.'
++
++    result = compile_document(
++        source,
++        input_format="ssmd",
++        config=config,
++        fallback_language="fr-FR",
++    )
++
++    assert isinstance(result, CompileResult)
++    assert result.trace is None
++    assert result.diagnostics == result.plan.diagnostics
++    assert {segment.language for segment in result.plan.segments} == {"de-DE"}
++    assert result.plan.config["language"] == "fr-FR"
++
++
++def test_public_compile_api_handles_plain_text_and_legacy_api_matches() -> None:
++    config = PlannerConfig(language="en-us", text_preparation="identity")
++    result = compile_document("Hello.", input_format="plain", config=config)
++    legacy = UtterancePlanner(config).plan("Hello.")
++
++    assert result.plan == legacy
++    assert result.plan.source.format == "plain"
++    assert result.diagnostics == legacy.diagnostics
++
++
++def test_public_compile_api_validates_input_format_and_fallback() -> None:
++    config = PlannerConfig(language="en-us")
++    with pytest.raises(ConfigurationError, match="input_format"):
++        compile_document("Hello.", input_format="book", config=config)  # type: ignore[arg-type]
++    with pytest.raises(ConfigurationError, match="fallback_language"):
++        compile_document("Hello.", config=config, fallback_language=" ")
++
++
++def test_trace_models_are_public_immutable_contract_types() -> None:
++    assert PreparationTrace.__dataclass_params__.frozen
++    assert PreparationTraceUnit.__dataclass_params__.frozen
++
++
++def test_optional_trace_explains_preparation_without_changing_plan_identity() -> None:
++    config = PlannerConfig(language="en-us", text_preparation="spokenform")
++    text = '---\nssmd_version: "0.9"\nsequence_fallback_mode: preserve\n---\nDr. Smith has 5 kg.'
++
++    ordinary = compile_document(text, input_format="ssmd", config=config)
++    explained = compile_document(text, input_format="ssmd", config=config, trace=True)
++
++    assert ordinary.trace is None
++    assert explained.trace is not None
++    assert explained.plan.plan_id == ordinary.plan.plan_id
++    assert explained.trace.document_language == "en-us"
++    assert explained.trace.sequence_fallback_mode == "preserve"
++    assert explained.trace.diagnostics == explained.plan.diagnostics
++    assert len(explained.trace.units) == 1
++    unit = explained.trace.units[0]
++    assert unit.source_start == 0
++    assert unit.source_end == len("Dr. Smith has 5 kg.")
++    assert unit.source_text == "Dr. Smith has 5 kg."
++    assert unit.prepared_text == explained.plan.texts.spoken
++    assert unit.effective_language == "en-us"
++    assert unit.effective_languages == ("en-us",)
++    assert unit.split_reason == "paragraph segmentation"
++    assert unit.transformations
++    assert any(change.source == "Dr." for change in unit.transformations)
++
++
++def test_trace_source_ranges_follow_sentence_units_after_text_expansion() -> None:
++    text = "Dr. Smith has 5 kg. Second sentence."
++    config = PlannerConfig(language="en-us", unit="sentence")
++    result = compile_document(text, input_format="plain", config=config, trace=True)
++
++    assert result.trace is not None
++    assert [unit.source_text for unit in result.trace.units] == [
++        "Dr. Smith has 5 kg.",
++        "Second sentence.",
++    ]
++    assert result.trace.units[0].prepared_text == "Doctor Smith has five kilograms."
++    assert result.trace.units[0].source_start == 0
++    assert result.trace.units[0].source_end == len("Dr. Smith has 5 kg.")
++    assert result.trace.units[1].source_start == len("Dr. Smith has 5 kg. ")
++    assert result.trace.units[1].source_end == len(text)
++    assert result.trace.units[1].transformations == ()
++
++
++def test_plan_identity_is_repeatable_and_tracks_semantic_metadata() -> None:
++    config = PlannerConfig(language="en-us", text_preparation="identity")
++    source = '---\nssmd_version: "0.9"\nlanguage: en-US\n---\nHello.'
++    first = compile_document(source, input_format="ssmd", config=config).plan
++    second = compile_document(source, input_format="ssmd", config=config).plan
++
++    assert first.plan_id == second.plan_id
++    changed = replace(
++        first,
++        document_metadata={
++            **first.document_metadata,
++            "requires": {"extensions": ["acme.effects.whisper"]},
++        },
++    ).with_identity()
++    assert changed.plan_id != first.plan_id
++
++
++def test_renderer_only_settings_are_absent_from_the_semantic_plan() -> None:
++    plan = compile_document(
++        "Hello.",
++        input_format="plain",
++        config=PlannerConfig(language="en-us", text_preparation="identity"),
++    ).plan
++    forbidden = {"engine", "model", "kokoro_model", "piper_model", "sample_rate", "output_filename"}
++
++    assert forbidden.isdisjoint(plan.config)
++    assert forbidden.isdisjoint(plan.semantic_dict()["config"])
++    assert forbidden.isdisjoint(plan.semantic_dict()["document_metadata"])
+diff --git a/tests/test_consumer_contract.py b/tests/test_consumer_contract.py
+index dbccf6e..02521e9 100644
+--- a/tests/test_consumer_contract.py
++++ b/tests/test_consumer_contract.py
+@@ -1,10 +1,18 @@
+ from __future__ import annotations
+
++import json
+ import math
++from pathlib import Path
+
+ import pytest
+
+-from utterplan import PauseConfig, PlannerConfig, UtterancePlan, UtterancePlanner
++from utterplan import (
++    PauseConfig,
++    PlannerConfig,
++    UtterancePlan,
++    UtterancePlanner,
++    compile_document,
++)
+
+
+ def _fake_renderer(plan: UtterancePlan) -> None:
+@@ -184,3 +192,32 @@ def test_zero_width_media_uses_only_public_consumer_fields() -> None:
+     assert [item[0] for item in rendered] == ["speech", "audio", "speech"]
+     media = next(item for item in rendered if item[0] == "audio")
+     assert media == ("audio", uri, "")
++
++
++def test_shared_consumer_fixture_has_one_canonical_semantic_interpretation() -> None:
++    fixtures = Path(__file__).parent / "fixtures"
++    source = (fixtures / "canonical_consumer_contract.ssmd").read_text(encoding="utf-8")
++    expected = json.loads(
++        (fixtures / "canonical_consumer_contract.expected.json").read_text(encoding="utf-8")
++    )
++    result = compile_document(
++        source,
++        input_format="ssmd",
++        config=PlannerConfig(
++            language="fr-FR", document_format="plain", text_preparation="identity"
++        ),
++    )
++    plan = result.plan
++    assert len(plan.segments) == len(expected["segments"]) == 2
++    segment = plan.segments[0]
++
++    ttsready_report = tuple((item.text.strip(), item.language) for item in plan.segments)
++    readio_lowering = tuple((item.text.strip(), item.language) for item in plan.segments)
++    expected_segments = tuple(tuple(item) for item in expected["segments"])
++    assert ttsready_report == readio_lowering == expected_segments
++    assert segment.directives.voice.reference == expected["voice_reference"]
++    assert segment.directives.prosody.rate == expected["prosody_rate"]
++    assert segment.pause_after.seconds == pytest.approx(expected["pause_after_seconds"])
++    assert plan.document_metadata["voice_bindings"]["narrator"] == expected["voice_binding"]
++    assert plan.document_metadata["requires"]["extensions"] == ["acme.effects.whisper"]
++    assert_public_consumer_contract(plan)
+diff --git a/tests/test_consumer_readiness.py b/tests/test_consumer_readiness.py
+index 6583778..997495a 100644
+--- a/tests/test_consumer_readiness.py
++++ b/tests/test_consumer_readiness.py
+@@ -263,3 +263,64 @@ Hallo."""
+     with pytest.raises(PlanFormatError) as error:
+         UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(document)
+     assert error.value.code == code
++
++
++def test_portable_header_defaults_resolve_once_and_round_trip() -> None:
++    text = """---
++ssmd_version: "0.9"
++language: de-DE
++voice_bindings:
++  narrator: opaque-logical-target
++voice_defaults:
++  narrator:
++    rate: slow
++    pitch: high
++    volume: soft
++pause_defaults:
++  sentence: 250ms
++  paragraph: 400ms
++prosody_transitions:
++  enabled: true
++  same_voice_only: true
++  rate: 100ms
++language_detection:
++  mode: auto
++  languages: [de-DE, en-GB]
++requires:
++  extensions: [acme.effects.whisper]
++x-acme-contract:
++  revision: 2
++---
++:::{voice="narrator"}
++Hallo. Welt.
++:::
++
++Next paragraph."""
++    plan = UtterancePlanner(
++        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
++    ).plan(text)
++
++    assert {segment.language for segment in plan.segments} == {"de-DE"}
++    assert plan.segments[0].directives.voice.reference == "narrator"
++    assert plan.segments[0].directives.prosody.rate == "slow"
++    assert plan.segments[0].directives.prosody.pitch == "high"
++    assert plan.segments[0].directives.prosody.volume == "soft"
++    assert plan.segments[0].pause_after.seconds == pytest.approx(0.25)
++    assert plan.document_metadata["prosody_transitions"]["same_voice_only"] is True
++    assert plan.document_metadata["language_detection"]["languages"] == ["de-DE", "en-GB"]
++    assert plan.document_metadata["requires"]["extensions"] == ["acme.effects.whisper"]
++    assert plan.document_metadata["header"]["x-acme-contract"] == {"revision": 2}
++    restored = type(plan).from_json(plan.to_json())
++    assert restored.document_metadata == plan.document_metadata
++    assert restored.segments == plan.segments
++
++
++def test_requires_shape_is_validated_as_portable_metadata() -> None:
++    document = """---
++ssmd_version: "0.9"
++requires: [acme.effects.whisper]
++---
++Hello."""
++    with pytest.raises(PlanFormatError) as error:
++        UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(document)
++    assert error.value.code == "header.requires_invalid"
+diff --git a/tests/test_import_boundaries.py b/tests/test_import_boundaries.py
+index f0cd26d..77905f3 100644
+--- a/tests/test_import_boundaries.py
++++ b/tests/test_import_boundaries.py
+@@ -2,8 +2,14 @@ import subprocess
+ import sys
+
+
+-def test_import_does_not_load_rendering_engines():
+-    code = "import sys, utterplan; print(sorted(x for x in sys.modules if x in {'pykokoro','kokorog2p','piperg2p','onnxruntime','numpy','soundfile'}))"
++def test_import_does_not_load_consumers_engines_models_or_audio() -> None:
++    code = (
++        "import sys, utterplan; "
++        "forbidden={'ttsready','readio','ssmdconvert','pykokoro','pipersynth',"
++        "'kokorog2p','piperg2p','onnxruntime','numpy','soundfile'}; "
++        "loaded=sorted({name.split('.')[0].lower() for name in sys.modules} & forbidden); "
++        "print(loaded)"
++    )
+     result = subprocess.run(
+         [sys.executable, "-c", code], check=True, capture_output=True, text=True
+     )
+diff --git a/tests/test_public_identity.py b/tests/test_public_identity.py
+index f242b2f..bec648f 100644
+--- a/tests/test_public_identity.py
++++ b/tests/test_public_identity.py
+@@ -27,6 +27,7 @@ def test_public_package_resources() -> None:
+     package = importlib.resources.files("utterplan")
+
+     assert (package / "py.typed").is_file()
++    assert (package / "compiler.py").is_file()
+     assert (package / "utterplan.schema.json").is_file()
+     schemas = package / "schemas"
+     assert all((schemas / f"v{version}.schema.json").is_file() for version in (1, 2, 3))
+diff --git a/utterplan/__init__.py b/utterplan/__init__.py
+index c77ab49..650d9c6 100644
+--- a/utterplan/__init__.py
++++ b/utterplan/__init__.py
+@@ -1,4 +1,12 @@
+ from ._version import __version__
++from .compiler import (
++    CompileResult,
++    InputFormat,
++    PreparationChange,
++    PreparationTrace,
++    PreparationTraceUnit,
++    compile_document,
++)
+ from .config import (
+     LinguisticsConfig,
+     PauseConfig,
+@@ -55,6 +63,12 @@ from .versioning import (
+
+ __all__ = [
+     "__version__",
++    "CompileResult",
++    "PreparationChange",
++    "InputFormat",
++    "PreparationTrace",
++    "PreparationTraceUnit",
++    "compile_document",
+     "PlannerConfig",
+     "PauseConfig",
+     "LinguisticsConfig",
+diff --git a/utterplan/cli.py b/utterplan/cli.py
+index b6aacde..fa86b49 100644
+--- a/utterplan/cli.py
++++ b/utterplan/cli.py
+@@ -6,19 +6,20 @@ import sys
+ from pathlib import Path
+ from typing import Literal, cast
+
+-from . import PlannerConfig, UtterancePlan, UtterancePlanner, __version__
++from . import PlannerConfig, UtterancePlan, __version__
++from .compiler import InputFormat, compile_document
+ from .config import LinguisticsConfig, PauseConfig
+ from .exceptions import PlanFormatError, UtterPlanError
+ from .explain import format_explanation
+ from .migration import MigrationResult, migrate_plan_data
+
+-InputFormat = Literal["plain", "ssmd"]
+-
+-
+ _EXAMPLES = """examples:
+-  utterplan compile "Hello world." --lang en-us
+-  echo "Hello world." | utterplan compile --lang en-us | jq .
+-  utterplan compile chapter.ssmd --lang en-us -o chapter.utterplan.json
++  utterplan compile chapter.ssmd.md
++  utterplan compile chapter.ssmd.md --language de-DE
++  utterplan compile plain.txt --input-format plain --language de-DE
++  utterplan compile chapter.ssmd.md --json
++  utterplan validate chapter.ssmd.md
++  utterplan validate plain.txt --input-format plain --language de-DE
+   utterplan validate chapter.utterplan.json
+   utterplan inspect chapter.utterplan.json --segment 0
+   utterplan explain chapter.utterplan.json
+@@ -53,12 +54,17 @@ def build_parser() -> argparse.ArgumentParser:
+         type=Path,
+         help="read UTF-8 text from this file (cannot be combined with positional text)",
+     )
+-    compile_parser.add_argument("--language", "--lang", required=True, dest="language")
++    compile_parser.add_argument(
++        "--language",
++        "--lang",
++        dest="language",
++        help="fallback language when SSMD does not declare one (required for plain input)",
++    )
+     compile_parser.add_argument(
+         "--input-format",
+         "--format",
+         dest="input_format",
+-        choices=("auto", "text", "ssmd"),
++        choices=("auto", "text", "plain", "ssmd"),
+         default="auto",
+         help="input interpretation; auto detects .ssmd, .ssmd.md, and Markdown with SSMD version front matter",
+     )
+@@ -85,9 +91,19 @@ def build_parser() -> argparse.ArgumentParser:
+         help="also print the complete plan JSON when --output is used",
+     )
+
+-    validate_parser = commands.add_parser("validate", help="validate a saved TTS plan")
++    validate_parser = commands.add_parser(
++        "validate", help="validate a source document or saved semantic plan"
++    )
+     validate_parser.add_argument("input", type=Path)
+
++    validate_parser.add_argument("--language", "--lang", dest="language")
++    validate_parser.add_argument(
++        "--input-format",
++        choices=("auto", "text", "plain", "ssmd"),
++        default="auto",
++        help="source input interpretation; auto detects SSMD by suffix or version metadata",
++    )
++
+     migrate_parser = commands.add_parser(
+         "migrate", help="migrate a saved plan to the current schema"
+     )
+@@ -132,6 +148,32 @@ def _declares_ssmd_version(source: str) -> bool:
+     return front_matter.present and "ssmd_version" in front_matter.data
+
+
++def _ssmd_header_language(source: str) -> str | None:
++    try:
++        from ssmd.frontmatter import FrontMatterError, parse_front_matter
++    except ImportError:
++        return None
++    try:
++        front_matter = parse_front_matter(source)
++    except FrontMatterError as exc:
++        raise PlanFormatError(str(exc), code=exc.code, path="$.source") from exc
++    language = front_matter.data.get("language") if front_matter.present else None
++    return language.strip() if isinstance(language, str) and language.strip() else None
++
++
++def _language_fallback(source: str, input_format: InputFormat, requested: str | None) -> str:
++    if requested is not None:
++        if not requested.strip():
++            raise ValueError("--language must be a non-empty fallback language")
++        return requested.strip()
++    if input_format == "ssmd":
++        language = _ssmd_header_language(source)
++        if language is not None:
++            return language
++        raise ValueError("SSMD input without a header language requires --language")
++    raise ValueError("plain input requires --language")
++
++
+ def _format_for_path(path: Path, source: str) -> InputFormat:
+     lower_name = path.name.lower()
+     if lower_name.endswith((".ssmd.md", ".ssmd")):
+@@ -161,7 +203,7 @@ def _read_compile_input(args: argparse.Namespace) -> tuple[str, InputFormat]:
+             raise ValueError("stdin is empty; provide meaningful input text")
+         return source, _map_input_format(args.input_format, default="plain")
+
+-    if args.input_format == "text":
++    if args.input_format in {"text", "plain"}:
+         return " ".join(args.text), "plain"
+
+     if len(args.text) == 1:
+@@ -179,7 +221,7 @@ def _read_compile_input(args: argparse.Namespace) -> tuple[str, InputFormat]:
+
+
+ def _map_input_format(value: str, *, default: InputFormat = "plain") -> InputFormat:
+-    if value == "text":
++    if value in {"text", "plain"}:
+         return "plain"
+     if value == "ssmd":
+         return "ssmd"
+@@ -203,15 +245,21 @@ def _compile(args: argparse.Namespace) -> int:
+     if args.output is not None and args.output.exists() and not args.force:
+         raise ValueError(f"output exists: {args.output}; use --force to replace it")
+
++    fallback_language = _language_fallback(source, input_format, args.language)
+     config = PlannerConfig(
+-        language=args.language,
++        language=fallback_language,
+         document_format=input_format,
+         text_preparation=args.text_preparation,
+         unit=args.unit,
+         pauses=PauseConfig(mode=args.pause_mode),
+         linguistics=_linguistics_config(args.spacy),
+     )
+-    plan = UtterancePlanner(config).plan(source)
++    plan = compile_document(
++        source,
++        input_format=input_format,
++        config=config,
++        fallback_language=args.language,
++    ).plan
+     payload = plan.to_json()
+     if args.output is None:
+         print(payload, end="")
+@@ -269,17 +317,55 @@ def _migrate(args: argparse.Namespace) -> int:
+     return 0
+
+
+-def _validate(path: Path) -> int:
+-    result = _migration_result(path)
+-    plan = UtterancePlan.from_dict(result.data)
++def _is_saved_plan(path: Path, source: str) -> bool:
++    if path.suffix.lower() in {".json", ".utterplan"}:
++        return True
++    try:
++        value = json.loads(source)
++    except json.JSONDecodeError:
++        return False
++    return isinstance(value, dict) and value.get("format") == "utterplan"
++
++
++def _validate(args: argparse.Namespace) -> int:
++    path: Path = args.input
++    source = path.read_text(encoding="utf-8")
++    if args.input_format == "auto" and _is_saved_plan(path, source):
++        result = _migration_result(path)
++        plan = UtterancePlan.from_dict(result.data)
++        print("valid")
++        print(f"source schema version: {result.source_version}")
++        print(f"current schema version: {plan.schema_version}")
++        print(f"migration required: {'yes' if result.changed else 'no'}")
++        print(f"plan ID: {plan.plan_id}")
++        print(f"segments: {len(plan.segments)}")
++        print(f"units: {len(plan.units)}")
++        print(f"warnings: {len(plan.warnings)}")
++        return 0
++
++    input_format = (
++        _format_for_path(path, source)
++        if args.input_format == "auto"
++        else _map_input_format(args.input_format)
++    )
++    fallback_language = _language_fallback(source, input_format, args.language)
++    config = PlannerConfig(
++        language=fallback_language,
++        document_format=input_format,
++        text_preparation="identity",
++        linguistics=LinguisticsConfig(use_spacy=False),
++    )
++    result = compile_document(
++        source,
++        input_format=input_format,
++        config=config,
++        fallback_language=args.language,
++    )
+     print("valid")
+-    print(f"source schema version: {result.source_version}")
+-    print(f"current schema version: {plan.schema_version}")
+-    print(f"migration required: {'yes' if result.changed else 'no'}")
+-    print(f"plan ID: {plan.plan_id}")
+-    print(f"segments: {len(plan.segments)}")
+-    print(f"units: {len(plan.units)}")
+-    print(f"warnings: {len(plan.warnings)}")
++    print(f"input format: {input_format}")
++    print(f"segments: {len(result.plan.segments)}")
++    print(f"units: {len(result.plan.units)}")
++    print(f"warnings: {len(result.plan.warnings)}")
+     return 0
+
+
+@@ -291,7 +377,7 @@ def main(argv: list[str] | None = None) -> int:
+         if args.command == "migrate":
+             return _migrate(args)
+         if args.command == "validate":
+-            return _validate(args.input)
++            return _validate(args)
+         plan = UtterancePlan.load(args.input)
+         if args.command == "explain":
+             print(format_explanation(plan, details=args.details), end="")
+diff --git a/utterplan/compiler.py b/utterplan/compiler.py
+new file mode 100644
+index 0000000..0f93051
+--- /dev/null
++++ b/utterplan/compiler.py
+@@ -0,0 +1,109 @@
++from __future__ import annotations
++
++from dataclasses import dataclass, replace
++from typing import Literal
++
++from .config import PlannerConfig
++from .exceptions import ConfigurationError
++from .model import Diagnostic, UtterancePlan
++
++InputFormat = Literal["ssmd", "plain"]
++
++
++@dataclass(frozen=True, slots=True)
++class PreparationChange:
++    """A spokenform change with structural-source and prepared-text offsets."""
++
++    source_start: int | None
++    source_end: int | None
++    output_start: int | None
++    output_end: int | None
++    source: str | None = None
++    replacement: str | None = None
++    kind: str | None = None
++    rule: str | None = None
++    language: str | None = None
++
++
++@dataclass(frozen=True, slots=True)
++class PreparationTraceUnit:
++    """Preparation explanation for a plan unit.
++
++    Source offsets address parsed SSMD-clean structural text, while output offsets
++    on transformations address prepared spoken text. Both use Python character
++    indexes.
++    """
++
++    source_start: int | None
++    source_end: int | None
++    source_text: str
++    prepared_text: str
++    effective_language: str | None
++    effective_languages: tuple[str, ...] = ()
++    transformations: tuple[PreparationChange, ...] = ()
++    diagnostics: tuple[Diagnostic, ...] = ()
++    split_reason: str | None = None
++    warnings: tuple[str, ...] = ()
++
++
++@dataclass(frozen=True, slots=True)
++class PreparationTrace:
++    """Optional diagnostic explanation of semantic preparation, not renderer input."""
++
++    document_language: str
++    sequence_fallback_mode: Literal["spell", "preserve"]
++    diagnostics: tuple[Diagnostic, ...] = ()
++    units: tuple[PreparationTraceUnit, ...] = ()
++
++
++@dataclass(frozen=True, slots=True)
++class CompileResult:
++    """Canonical result of compiling one document into its semantic plan."""
++
++    plan: UtterancePlan
++    diagnostics: tuple[Diagnostic, ...]
++    trace: PreparationTrace | None = None
++
++
++def compile_document(
++    text: str,
++    *,
++    input_format: InputFormat = "ssmd",
++    config: PlannerConfig,
++    fallback_language: str | None = None,
++    trace: bool = False,
++) -> CompileResult:
++    """Compile one SSMD document or explicitly selected plain-text document.
++
++    The document's declared SSMD language is authoritative. ``fallback_language``
++    replaces the configured fallback for this request; it never forces a language
++    over document semantics. ``PlannerConfig.language`` remains the compatibility
++    fallback when ``fallback_language`` is omitted.
++    """
++    if input_format not in {"ssmd", "plain"}:
++        raise ConfigurationError("input_format must be 'ssmd' or 'plain'")
++    if not isinstance(trace, bool):
++        raise TypeError("trace must be a boolean")
++    if fallback_language is not None:
++        if not isinstance(fallback_language, str) or not fallback_language.strip():
++            raise ConfigurationError("fallback_language must be a non-empty string")
++        config = replace(config, language=fallback_language)
++    effective_config = replace(config, document_format=input_format)
++
++    from .planner import UtterancePlanner
++
++    planner = UtterancePlanner(effective_config)
++    try:
++        return planner.compile(text, config=effective_config, trace=trace)
++    finally:
++        planner.close()
++
++
++__all__ = [
++    "CompileResult",
++    "PreparationChange",
++    "InputFormat",
++    "PreparationTrace",
++    "PreparationTraceUnit",
++    "compile_document",
++]
+diff --git a/utterplan/planner.py b/utterplan/planner.py
+index accd25d..15c6e30 100644
+--- a/utterplan/planner.py
++++ b/utterplan/planner.py
+@@ -2,7 +2,10 @@ from __future__ import annotations
+
+ import re
+ from dataclasses import asdict, replace
+-from typing import Any
++from typing import TYPE_CHECKING, Any, Literal
++
++if TYPE_CHECKING:
++    from .compiler import CompileResult, PreparationTrace
+
+ from .config import PauseConfig, PlannerConfig, parse_duration
+ from .directives import resolve_directives
+@@ -42,9 +45,36 @@ class UtterancePlanner:
+         self.config = config
+         self._resources = LinguisticResourcePool()
+
++    def compile(
++        self,
++        text: str,
++        *,
++        config: PlannerConfig | None = None,
++        unit: str | None = None,
++        trace: bool = False,
++    ) -> CompileResult:
++        """Compile one document and return its plan with compiler diagnostics."""
++        if not isinstance(trace, bool):
++            raise TypeError("trace must be a boolean")
++        from .compiler import CompileResult
++
++        plan, preparation_trace = self._plan(text, config=config, unit=unit, trace=trace)
++        return CompileResult(plan=plan, diagnostics=plan.diagnostics, trace=preparation_trace)
++
+     def plan(
+         self, text: str, *, config: PlannerConfig | None = None, unit: str | None = None
+     ) -> UtterancePlan:
++        """Compatibility API returning only the compiled semantic plan."""
++        return self.compile(text, config=config, unit=unit).plan
++
++    def _plan(
++        self,
++        text: str,
++        *,
++        config: PlannerConfig | None = None,
++        unit: str | None = None,
++        trace: bool = False,
++    ) -> tuple[UtterancePlan, PreparationTrace | None]:
+         if not isinstance(text, str):
+             raise TypeError("text must be a string")
+         effective_config = config if config is not None else self.config
+@@ -146,7 +176,12 @@ class UtterancePlanner:
+             diagnostics=tuple(diagnostics),
+         ).with_identity()
+         plan.validate()
+-        return plan
++        preparation_trace = (
++            _make_preparation_trace(parsed, prepared, plan, document_language, fallback_mode)
++            if trace
++            else None
++        )
++        return plan, preparation_trace
+
+     def _parse(self, text: str, config: PlannerConfig) -> Any:
+         if config.document_format == "plain":
+@@ -159,6 +194,76 @@ class UtterancePlanner:
+         self._resources.clear()
+
+
++def _make_preparation_trace(
++    parsed: Any,
++    prepared: Any,
++    plan: UtterancePlan,
++    document_language: str,
++    fallback_mode: Literal["spell", "preserve"],
++) -> PreparationTrace:
++    from .compiler import PreparationChange, PreparationTrace, PreparationTraceUnit
++
++    changes = tuple(
++        PreparationChange(
++            source_start=item.get("source_start"),
++            source_end=item.get("source_end"),
++            output_start=item.get("output_start"),
++            output_end=item.get("output_end"),
++            source=item.get("source"),
++            replacement=item.get("replacement"),
++            kind=item.get("kind"),
++            rule=item.get("rule"),
++            language=item.get("language"),
++        )
++        for item in prepared.info.replacements
++    )
++    segments_by_id = {segment.id: segment for segment in plan.segments}
++    trace_units: list[PreparationTraceUnit] = []
++    for unit in plan.units:
++        source_start, source_end = prepared.source_map.map_output_span(
++            unit.spoken_start, unit.spoken_end
++        )
++        source_start = max(0, min(len(parsed.structural_text), source_start))
++        source_end = max(source_start, min(len(parsed.structural_text), source_end))
++        unit_changes = tuple(
++            change
++            for change in changes
++            if change.source_start is not None
++            and change.source_end is not None
++            and (
++                change.source_start < source_end
++                and change.source_end > source_start
++                or source_start == source_end == change.source_start
++            )
++        )
++        languages = tuple(
++            dict.fromkeys(
++                segments_by_id[segment_id].language
++                for segment_id in unit.segment_ids
++                if segment_id in segments_by_id
++            )
++        )
++        trace_units.append(
++            PreparationTraceUnit(
++                source_start=source_start,
++                source_end=source_end,
++                source_text=parsed.structural_text[source_start:source_end],
++                prepared_text=plan.texts.spoken[unit.spoken_start : unit.spoken_end],
++                effective_language=languages[0] if len(languages) == 1 else None,
++                effective_languages=languages,
++                transformations=unit_changes,
++                split_reason=f"{unit.kind} segmentation",
++                warnings=tuple(parsed.warnings) + prepared.info.warnings,
++            )
++        )
++    return PreparationTrace(
++        document_language=document_language,
++        sequence_fallback_mode=fallback_mode,
++        diagnostics=plan.diagnostics,
++        units=tuple(trace_units),
++    )
++
++
+ def _effective_pause_config(config: PlannerConfig, header: dict[str, Any]) -> PauseConfig:
+     values: dict[str, Any] = {"mode": config.pauses.mode}
+     values.update(
+diff --git a/utterplan/preparation.py b/utterplan/preparation.py
+index 1415389..e991367 100644
+--- a/utterplan/preparation.py
++++ b/utterplan/preparation.py
+@@ -15,6 +15,8 @@ class SourceToSpokenMap(Protocol):
+
+     def map_source_span(self, start: int, end: int) -> tuple[int, int]: ...
+
++    def map_output_span(self, start: int, end: int) -> tuple[int, int]: ...
++
+
+ @dataclass(frozen=True, slots=True)
+ class PreparedText:
+@@ -142,6 +144,11 @@ class _IdentitySourceMap:
+     def map_source_span(self, start: int, end: int) -> tuple[int, int]:
+         return start, end
+
++    def map_output_span(self, start: int, end: int) -> tuple[int, int]:
++        start = max(0, min(self.output_length, start))
++        end = max(start, min(self.output_length, end))
++        return start, end
++
+
+ class _CompositeSourceMap:
+     def __init__(
+@@ -161,6 +168,27 @@ class _CompositeSourceMap:
+         end = max(start, min(self.source_length, end))
+         return self.source_left[start], self.source_right[end]
+
++    def map_output_span(self, start: int, end: int) -> tuple[int, int]:
++        start = max(0, min(self.output_length, start))
++        end = max(start, min(self.output_length, end))
++        start_candidates = [
++            index
++            for index, (left, right) in enumerate(
++                zip(self.source_left, self.source_right, strict=True)
++            )
++            if left <= start <= right
++        ]
++        end_candidates = [
++            index
++            for index, (left, right) in enumerate(
++                zip(self.source_left, self.source_right, strict=True)
++            )
++            if left <= end <= right
++        ]
++        source_start = min(start_candidates) if start_candidates else self.source_length
++        source_end = max(end_candidates) if end_candidates else source_start
++        return source_start, max(source_start, source_end)
++
+
+ def _compose_offsets(text: str, prepared_runs: list[Any]) -> SourceToSpokenMap:
+     if not prepared_runs:

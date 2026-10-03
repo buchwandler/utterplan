@@ -1,0 +1,51 @@
+{
+  "candidate_count": 2,
+  "candidates": [
+    {
+      "additions": 875,
+      "deletions": 74,
+      "patch_file": "66e2d83.patch",
+      "patch_sha256": "8f99f5532d7f1bb02f30653646288fd5df6a1ab81c3bd2a768afa4ee2bf0e4a5",
+      "paths": [
+        "README.md",
+        "docs/architecture.md",
+        "docs/cli.md",
+        "docs/python-api.md",
+        "tests/fixtures/canonical_consumer_contract.expected.json",
+        "tests/fixtures/canonical_consumer_contract.ssmd",
+        "tests/test_cli.py",
+        "tests/test_compiler.py",
+        "tests/test_consumer_contract.py",
+        "tests/test_consumer_readiness.py",
+        "tests/test_import_boundaries.py",
+        "tests/test_public_identity.py",
+        "utterplan/__init__.py",
+        "utterplan/cli.py",
+        "utterplan/compiler.py",
+        "utterplan/planner.py",
+        "utterplan/preparation.py"
+      ],
+      "sha": "66e2d83fc06ee2d46bff0aca0a5920c5caf8c8e0",
+      "short_sha": "66e2d83",
+      "source_ref": "git:66e2d83fc06ee2d46bff0aca0a5920c5caf8c8e0"
+    },
+    {
+      "additions": 4,
+      "deletions": 4,
+      "patch_file": "ac797e4.patch",
+      "patch_sha256": "0deb3410189be808c89db84eb35519d9f47b2b4e7a889cb6d07ff8f3fa70bfe9",
+      "paths": ["utterplan/cli.py"],
+      "sha": "ac797e4a55e4eef9a8e9c76112f5ebee5ad9e2b8",
+      "short_sha": "ac797e4",
+      "source_ref": "git:ac797e4a55e4eef9a8e9c76112f5ebee5ad9e2b8"
+    }
+  ],
+  "git_base_ref": "c2566055d7d5a93794bd9a30b06db862b0fa7bde",
+  "git_base_sha": "c2566055d7d5a93794bd9a30b06db862b0fa7bde",
+  "git_head_ref": "ac797e4a55e4eef9a8e9c76112f5ebee5ad9e2b8",
+  "git_head_sha": "ac797e4a55e4eef9a8e9c76112f5ebee5ad9e2b8",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.3.3",
+  "schema_version": 1
+}

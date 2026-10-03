@@ -1,0 +1,54 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.3.3
+git_base_ref: c2566055d7d5a93794bd9a30b06db862b0fa7bde
+git_base_sha: c2566055d7d5a93794bd9a30b06db862b0fa7bde
+git_head_ref: ac797e4a55e4eef9a8e9c76112f5ebee5ad9e2b8
+git_head_sha: ac797e4a55e4eef9a8e9c76112f5ebee5ad9e2b8
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: "Added canonical single-document compilation with plain-text support and preparation traces"
+    status: accepted
+    source_refs:
+      - git:66e2d83fc06ee2d46bff0aca0a5920c5caf8c8e0
+    paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/python-api.md
+      - tests/fixtures/canonical_consumer_contract.expected.json
+      - tests/fixtures/canonical_consumer_contract.ssmd
+      - tests/test_cli.py
+      - tests/test_compiler.py
+      - tests/test_consumer_contract.py
+      - tests/test_consumer_readiness.py
+      - tests/test_import_boundaries.py
+      - tests/test_public_identity.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/compiler.py
+      - utterplan/planner.py
+      - utterplan/preparation.py
+    sources:
+      - git:66e2d83fc06ee2d46bff0aca0a5920c5caf8c8e0
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: internal
+    summary: "Changed CLI validation variable naming for mypy clarity"
+    status: accepted
+    internal: true
+    source_refs:
+      - git:ac797e4a55e4eef9a8e9c76112f5ebee5ad9e2b8
+    paths:
+      - utterplan/cli.py
+    sources:
+      - git:ac797e4a55e4eef9a8e9c76112f5ebee5ad9e2b8
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

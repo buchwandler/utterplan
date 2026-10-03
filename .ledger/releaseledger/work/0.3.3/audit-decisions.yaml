@@ -1,0 +1,39 @@
+rows:
+  - sha: 66e2d83fc06ee2d46bff0aca0a5920c5caf8c8e0
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/python-api.md
+      - tests/fixtures/canonical_consumer_contract.expected.json
+      - tests/fixtures/canonical_consumer_contract.ssmd
+      - tests/test_cli.py
+      - tests/test_compiler.py
+      - tests/test_consumer_contract.py
+      - tests/test_consumer_readiness.py
+      - tests/test_import_boundaries.py
+      - tests/test_public_identity.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/compiler.py
+      - utterplan/planner.py
+      - utterplan/preparation.py
+    observed_behavior: "Added the public compile_document API for one SSMD or explicitly selected plain-text document, including immutable compile results, optional preparation traces, authoritative header-language handling, and canonical consumer-contract coverage."
+    public_impact: public
+    decision: accepted
+    target_entry_key: canonical-single-document-compiler
+    target_entry_id: null
+    notes: "Reviewed implementation, documentation, fixtures, and tests."
+    stale: false
+  - sha: ac797e4a55e4eef9a8e9c76112f5ebee5ad9e2b8
+    inspected: true
+    inspected_paths:
+      - utterplan/cli.py
+    observed_behavior: "Renamed the local validation result variable to compile_result without changing behavior."
+    public_impact: internal
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Mypy-oriented naming-only cleanup; excluded from public notes."
+    stale: false

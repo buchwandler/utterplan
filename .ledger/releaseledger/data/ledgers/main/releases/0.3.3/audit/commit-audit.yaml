@@ -1,0 +1,90 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.3.3
+git_base_ref: v0.3.2
+git_base_sha: c2566055d7d5a93794bd9a30b06db862b0fa7bde
+git_head_ref: HEAD
+git_head_sha: ac797e4a55e4eef9a8e9c76112f5ebee5ad9e2b8
+git_range: c2566055d7d5a93794bd9a30b06db862b0fa7bde..ac797e4a55e4eef9a8e9c76112f5ebee5ad9e2b8
+commit_count: 2
+rows:
+  - sha: 66e2d83fc06ee2d46bff0aca0a5920c5caf8c8e0
+    source_ref: git:66e2d83fc06ee2d46bff0aca0a5920c5caf8c8e0
+    short_sha: 66e2d83
+    changed_paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/python-api.md
+      - tests/fixtures/canonical_consumer_contract.expected.json
+      - tests/fixtures/canonical_consumer_contract.ssmd
+      - tests/test_cli.py
+      - tests/test_compiler.py
+      - tests/test_consumer_contract.py
+      - tests/test_consumer_readiness.py
+      - tests/test_import_boundaries.py
+      - tests/test_public_identity.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/compiler.py
+      - utterplan/planner.py
+      - utterplan/preparation.py
+    stats:
+      files_changed: 17
+      insertions: 875
+      deletions: 74
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/python-api.md
+      - tests/fixtures/canonical_consumer_contract.expected.json
+      - tests/fixtures/canonical_consumer_contract.ssmd
+      - tests/test_cli.py
+      - tests/test_compiler.py
+      - tests/test_consumer_contract.py
+      - tests/test_consumer_readiness.py
+      - tests/test_import_boundaries.py
+      - tests/test_public_identity.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/compiler.py
+      - utterplan/planner.py
+      - utterplan/preparation.py
+    observed_behavior:
+      Added the public compile_document API for one SSMD or explicitly
+      selected plain-text document, including immutable compile results, optional preparation
+      traces, authoritative header-language handling, and canonical consumer-contract
+      coverage.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: lanf support in header"
+    target_entry_key: canonical-single-document-compiler
+    target_entry_id: entry-0001
+    notes: Reviewed implementation, documentation, fixtures, and tests.
+  - sha: ac797e4a55e4eef9a8e9c76112f5ebee5ad9e2b8
+    source_ref: git:ac797e4a55e4eef9a8e9c76112f5ebee5ad9e2b8
+    short_sha: ac797e4
+    changed_paths:
+      - utterplan/cli.py
+    stats:
+      files_changed: 1
+      insertions: 4
+      deletions: 4
+    inspected: true
+    inspected_paths:
+      - utterplan/cli.py
+    observed_behavior:
+      Renamed the local validation result variable to compile_result
+      without changing behavior.
+    public_impact: internal
+    decision: internal
+    stale: false
+    evidence_subject: "chore: fix mypy"
+    target_entry_id: entry-0002
+    notes: Mypy-oriented naming-only cleanup; excluded from public notes.
