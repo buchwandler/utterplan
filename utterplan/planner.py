@@ -30,6 +30,7 @@ from .parsers import (
 )
 from .pauses import boundary_is_active, resolve_pauses
 from .preparation import IdentityTextPreparer, SourceToSpokenMap, SpokenformTextPreparer
+from .progress import PlannerProgressEvent, ProgressCallback, _notify_progress
 from .units import make_units
 
 
@@ -52,20 +53,36 @@ class UtterancePlanner:
         config: PlannerConfig | None = None,
         unit: str | None = None,
         trace: bool = False,
+        on_progress: ProgressCallback | None = None,
     ) -> CompileResult:
-        """Compile one document and return its plan with compiler diagnostics."""
+        """Compile one document, optionally reporting synchronous progress.
+
+        Progress callbacks are operational only, should be lightweight, and may raise
+        exceptions that propagate to the caller.
+        """
         if not isinstance(trace, bool):
             raise TypeError("trace must be a boolean")
         from .compiler import CompileResult
 
-        plan, preparation_trace = self._plan(text, config=config, unit=unit, trace=trace)
+        plan, preparation_trace = self._plan(
+            text, config=config, unit=unit, trace=trace, on_progress=on_progress
+        )
         return CompileResult(plan=plan, diagnostics=plan.diagnostics, trace=preparation_trace)
 
     def plan(
-        self, text: str, *, config: PlannerConfig | None = None, unit: str | None = None
+        self,
+        text: str,
+        *,
+        config: PlannerConfig | None = None,
+        unit: str | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> UtterancePlan:
-        """Compatibility API returning only the compiled semantic plan."""
-        return self.compile(text, config=config, unit=unit).plan
+        """Return the semantic plan, optionally reporting synchronous progress.
+
+        The callback is operational only and cannot affect the plan. Keep handlers
+        lightweight; callback exceptions propagate to the caller.
+        """
+        return self.compile(text, config=config, unit=unit, on_progress=on_progress).plan
 
     def _plan(
         self,
@@ -74,6 +91,7 @@ class UtterancePlanner:
         config: PlannerConfig | None = None,
         unit: str | None = None,
         trace: bool = False,
+        on_progress: ProgressCallback | None = None,
     ) -> tuple[UtterancePlan, PreparationTrace | None]:
         if not isinstance(text, str):
             raise TypeError("text must be a string")
@@ -85,11 +103,29 @@ class UtterancePlanner:
         else:
             selected_unit = effective_config.unit
         config = effective_config
+        _notify_progress(on_progress, PlannerProgressEvent(kind="phase.started", phase="parse"))
         parsed = self._parse(text, config)
+        _notify_progress(on_progress, PlannerProgressEvent(kind="phase.completed", phase="parse"))
         pause_config = _effective_pause_config(config, parsed.header)
         fallback_mode = effective_sequence_fallback_mode(parsed.header)
         document_language = parsed.document_language or config.language
         preserve_language_tags = config.document_format == "ssmd"
+        identity_mode = config.text_preparation == "identity"
+        skipped_details = (
+            {"skipped": True, "reason": "identity preparation does not consume source analyses"}
+            if identity_mode
+            else {}
+        )
+        _notify_progress(
+            on_progress,
+            PlannerProgressEvent(
+                kind="phase.started",
+                phase="source_analysis",
+                pass_index=1,
+                pass_total=2,
+                details=skipped_details,
+            ),
+        )
         source_runs = build_language_runs(
             parsed.structural_text,
             spans_from_annotations(parsed.annotations),
@@ -97,8 +133,32 @@ class UtterancePlanner:
             dict(config.language_aliases),
             preserve_tags=preserve_language_tags,
         )
-        pass_a = analyze_run_analyses(
-            parsed.structural_text, source_runs, config.linguistics, self._resources
+        if identity_mode:
+            pass_a: tuple[RunAnalysis, ...] = ()
+        else:
+            pass_a = analyze_run_analyses(
+                parsed.structural_text,
+                source_runs,
+                config.linguistics,
+                self._resources,
+                phase="source_analysis",
+                pass_index=1,
+                pass_total=2,
+                on_progress=on_progress,
+            )
+        _notify_progress(
+            on_progress,
+            PlannerProgressEvent(
+                kind="phase.completed",
+                phase="source_analysis",
+                pass_index=1,
+                pass_total=2,
+                details=skipped_details,
+            ),
+        )
+        _notify_progress(
+            on_progress,
+            PlannerProgressEvent(kind="phase.started", phase="preparation"),
         )
         preparer = (
             IdentityTextPreparer()
@@ -113,6 +173,10 @@ class UtterancePlanner:
             parsed.boundaries,
             analyses=pass_a,
         )
+        _notify_progress(
+            on_progress,
+            PlannerProgressEvent(kind="phase.completed", phase="preparation"),
+        )
         spoken = prepared.spoken_text
         runs = build_language_runs(
             spoken,
@@ -121,7 +185,93 @@ class UtterancePlanner:
             dict(config.language_aliases),
             preserve_tags=preserve_language_tags,
         )
-        pass_b = analyze_run_analyses(spoken, runs, config.linguistics, self._resources)
+        if identity_mode:
+            _notify_progress(
+                on_progress,
+                PlannerProgressEvent(
+                    kind="phase.started",
+                    phase="spoken_analysis",
+                    pass_index=2,
+                    pass_total=2,
+                ),
+            )
+            pass_b = analyze_run_analyses(
+                spoken,
+                runs,
+                config.linguistics,
+                self._resources,
+                phase="spoken_analysis",
+                pass_index=2,
+                pass_total=2,
+                on_progress=on_progress,
+            )
+            pass_a = pass_b
+            _notify_progress(
+                on_progress,
+                PlannerProgressEvent(
+                    kind="phase.completed",
+                    phase="spoken_analysis",
+                    pass_index=2,
+                    pass_total=2,
+                ),
+            )
+        elif _same_linguistic_input(parsed.structural_text, source_runs, spoken, runs):
+            reused_details: dict[str, object] = {"reused": True}
+            _notify_progress(
+                on_progress,
+                PlannerProgressEvent(
+                    kind="phase.started",
+                    phase="spoken_analysis",
+                    message="Reusing source linguistic analysis",
+                    pass_index=2,
+                    pass_total=2,
+                    details=reused_details,
+                ),
+            )
+            pass_b = pass_a
+            _notify_progress(
+                on_progress,
+                PlannerProgressEvent(
+                    kind="phase.completed",
+                    phase="spoken_analysis",
+                    pass_index=2,
+                    pass_total=2,
+                    details=reused_details,
+                ),
+            )
+        else:
+            _notify_progress(
+                on_progress,
+                PlannerProgressEvent(
+                    kind="phase.started",
+                    phase="spoken_analysis",
+                    pass_index=2,
+                    pass_total=2,
+                ),
+            )
+            pass_b = analyze_run_analyses(
+                spoken,
+                runs,
+                config.linguistics,
+                self._resources,
+                phase="spoken_analysis",
+                pass_index=2,
+                pass_total=2,
+                on_progress=on_progress,
+            )
+            _notify_progress(
+                on_progress,
+                PlannerProgressEvent(
+                    kind="phase.completed",
+                    phase="spoken_analysis",
+                    pass_index=2,
+                    pass_total=2,
+                ),
+            )
+        _notify_progress(
+            on_progress,
+            PlannerProgressEvent(kind="phase.started", phase="segmentation"),
+        )
         tokens = tuple(token for analysis in pass_b for token in analysis.tokens)
         linguistic_runs = _linguistic_runs(runs, pass_b)
         boundaries = list(prepared.boundaries)
@@ -143,6 +293,14 @@ class UtterancePlanner:
         markers = tuple(_map_marker(marker, prepared.source_map) for marker in parsed.markers)
         segment_tuple = tuple(segments)
         units = make_units(segment_tuple, markers, tokens, selected_unit)
+        _notify_progress(
+            on_progress,
+            PlannerProgressEvent(kind="phase.completed", phase="segmentation"),
+        )
+        _notify_progress(
+            on_progress,
+            PlannerProgressEvent(kind="phase.started", phase="finalization"),
+        )
         metadata = dict(parsed.metadata)
         metadata["planning"] = {
             "linguistic_passes": 2,
@@ -181,6 +339,10 @@ class UtterancePlanner:
             if trace
             else None
         )
+        _notify_progress(
+            on_progress,
+            PlannerProgressEvent(kind="phase.completed", phase="finalization"),
+        )
         return plan, preparation_trace
 
     def _parse(self, text: str, config: PlannerConfig) -> Any:
@@ -192,6 +354,20 @@ class UtterancePlanner:
 
     def close(self) -> None:
         self._resources.clear()
+
+
+def _same_linguistic_input(
+    source_text: str,
+    source_runs: tuple[LanguageRun, ...],
+    spoken_text: str,
+    spoken_runs: tuple[LanguageRun, ...],
+) -> bool:
+    """Return whether source and spoken text have identical linguistic inputs."""
+    if source_text != spoken_text:
+        return False
+    source_shape = tuple((run.language, run.spoken_start, run.spoken_end) for run in source_runs)
+    spoken_shape = tuple((run.language, run.spoken_start, run.spoken_end) for run in spoken_runs)
+    return source_shape == spoken_shape
 
 
 def _make_preparation_trace(

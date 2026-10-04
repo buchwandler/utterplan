@@ -6,6 +6,7 @@ from typing import Literal
 from .config import PlannerConfig
 from .exceptions import ConfigurationError
 from .model import Diagnostic, UtterancePlan
+from .progress import ProgressCallback
 
 InputFormat = Literal["ssmd", "plain"]
 
@@ -72,13 +73,14 @@ def compile_document(
     config: PlannerConfig,
     fallback_language: str | None = None,
     trace: bool = False,
+    on_progress: ProgressCallback | None = None,
 ) -> CompileResult:
     """Compile one SSMD document or explicitly selected plain-text document.
 
     The document's declared SSMD language is authoritative. ``fallback_language``
     replaces the configured fallback for this request; it never forces a language
     over document semantics. ``PlannerConfig.language`` remains the compatibility
-    fallback when ``fallback_language`` is omitted.
+    fallback when ``fallback_language`` is omitted. The optional progress callback is synchronous and operational only; exceptions raised by it propagate to the caller.
     """
     if input_format not in {"ssmd", "plain"}:
         raise ConfigurationError("input_format must be 'ssmd' or 'plain'")
@@ -94,7 +96,7 @@ def compile_document(
 
     planner = UtterancePlanner(effective_config)
     try:
-        return planner.compile(text, config=effective_config, trace=trace)
+        return planner.compile(text, config=effective_config, trace=trace, on_progress=on_progress)
     finally:
         planner.close()
 

@@ -101,6 +101,22 @@ identity. Plain text must be explicitly selected in Python and always requires a
 language fallback. Existing `UtterancePlanner.plan` remains supported and returns
 only the plan; JSON is the portable persistence and interchange format.
 
+For operational progress from a long-running Python plan, pass `on_progress` to
+`UtterancePlanner.plan`, `UtterancePlanner.compile`, or `compile_document`. The
+callback receives typed `PlannerProgressEvent` objects and does not change the plan:
+
+```python
+from utterplan import PlannerConfig, UtterancePlanner
+
+events = []
+plan = UtterancePlanner(PlannerConfig(language="en-us")).plan(
+    text,
+    on_progress=events.append,
+)
+```
+
+Callbacks run synchronously and exceptions propagate. See the [Python API guide](docs/python-api.md#planner-progress-callbacks) for event fields, model-load events, and reuse behavior.
+
 ## Renderer-consumer boundary
 
 Renderers consume `PlanSegment.text`, which is prepared/spoken text, and use

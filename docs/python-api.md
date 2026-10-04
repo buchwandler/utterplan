@@ -41,6 +41,33 @@ the plan, is not renderer input, and does not change `plan.plan_id`. Its source
 ranges index SSMD-clean structural text; transformation output ranges index prepared
 spoken text, using Python string character offsets.
 
+## Planner progress callbacks
+
+`UtterancePlanner.plan`, `UtterancePlanner.compile`, and `compile_document` accept an optional keyword-only `on_progress` callback. It receives typed `PlannerProgressEvent` objects synchronously in the planner thread. Progress is operational only: it is not added to `PlannerConfig` or the plan, and enabling a callback does not change plan identity or serialization.
+
+```python
+from utterplan import PlannerConfig, PlannerProgressEvent, UtterancePlanner
+
+
+def report(event: PlannerProgressEvent) -> None:
+    if event.kind == "run.started":
+        print(
+            event.phase,
+            event.pass_index,
+            event.language,
+            event.provider,
+            event.model,
+        )
+
+
+planner = UtterancePlanner(PlannerConfig(language="en-us"))
+plan = planner.plan(text, on_progress=report)
+```
+
+The phase events cover parsing, source analysis, preparation, spoken analysis, segmentation, and finalization. Each provider run reports `run.started` and `run.completed`; `completed` counts fully completed runs and `total` is the number of runs in that phase. When a local spaCy model is actually loaded, `model.started` and `model.completed` identify its language, provider, and resolved model. Cached models produce no load events. Events contain primitive metadata only, never spaCy pipelines or documents.
+
+Callbacks should be lightweight. An exception raised by a callback propagates to the caller and can be used to stop planning. A provider invocation such as `pipeline(text)` is one opaque work unit: events report its start and completion but do not claim smooth percentages or internal progress. If spoken-text preparation leaves the linguistic input unchanged, the planner can reuse source analysis; the `spoken_analysis` phase events expose `details["reused"] = True` and no provider-run events are emitted for that reuse. Identity preparation also reports `source_analysis` as skipped (`details["skipped"] = True`) because it does not use source analyses; the single actual provider pass runs as logical pass 2.
+
 ## SSMD input and semantic plan
 
 The SSMD parser accepts dialect 0.9 only. Select SSMD explicitly for unversioned canonical fragments with `PlannerConfig(document_format="ssmd")`. Older SSMD source must be migrated with `ssmd migrate FILE --to 0.9`; `migrate_plan_data` and `utterplan migrate` apply to serialized UtterPlan JSON, not source documents.

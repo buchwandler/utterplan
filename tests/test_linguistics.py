@@ -197,7 +197,7 @@ def test_clausal_boundaries_reuse_provider_document(monkeypatch):
 
     plan = UtterancePlanner(config).plan(source)
 
-    assert len(docs) == 2
+    assert len(docs) == 1
     assert detected == [(source, docs[-1])]
     boundary = next(item for item in plan.boundaries if item.kind == "clausal_comma")
     assert boundary.position == source.index(",")
@@ -311,3 +311,71 @@ def test_token_semantics_change_unit_hash_but_provenance_does_not(monkeypatch):
 
     metadata_only = replace(left, linguistic_runs=(changed_provenance,))
     assert metadata_only.units[0].content_hash == left.units[0].content_hash
+
+
+def _count_analysis_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    calls: list[str] = []
+    original = LinguisticResourcePool.analyze
+
+    def counted(self, text, run, config, *, phase="source_analysis", on_progress=None):
+        calls.append(text)
+        return original(self, text, run, config, phase=phase, on_progress=on_progress)
+
+    monkeypatch.setattr(LinguisticResourcePool, "analyze", counted)
+    return calls
+
+
+def test_identity_preparation_analyzes_once_and_preserves_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _count_analysis_calls(monkeypatch)
+    config = PlannerConfig(language="en-us", document_format="plain", text_preparation="identity")
+    baseline = UtterancePlanner(config).plan("Hello world.")
+    assert len(calls) == 1
+    calls.clear()
+
+    events = []
+    observed = UtterancePlanner(config).plan("Hello world.", on_progress=events.append)
+
+    assert len(calls) == 1
+    assert observed.plan_id == baseline.plan_id
+    assert observed.to_json() == baseline.to_json()
+    assert observed.document_metadata["planning"]["linguistic_passes"] == 2
+    skipped = next(
+        event
+        for event in events
+        if event.kind == "phase.started" and event.phase == "source_analysis"
+    )
+    assert skipped.details["skipped"] is True
+    assert [event.pass_index for event in events if event.kind == "run.started"] == [2]
+
+
+def test_unchanged_spokenform_reuses_source_analysis(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _count_analysis_calls(monkeypatch)
+    events = []
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="plain", text_preparation="spokenform")
+    ).plan("Hello world.", on_progress=events.append)
+
+    assert plan.texts.spoken == "Hello world."
+    assert calls == ["Hello world."]
+    reused = [
+        event
+        for event in events
+        if event.phase == "spoken_analysis" and event.details.get("reused") is True
+    ]
+    assert [event.kind for event in reused] == ["phase.started", "phase.completed"]
+    assert not any(
+        event.kind == "run.started" and event.phase == "spoken_analysis" for event in events
+    )
+
+
+def test_changed_spokenform_still_analyzes_prepared_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _count_analysis_calls(monkeypatch)
+    source = "Dr. Smith lives here."
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="plain", text_preparation="spokenform")
+    ).plan(source)
+
+    assert plan.texts.spoken == "Doctor Smith lives here."
+    assert calls == [source, plan.texts.spoken]

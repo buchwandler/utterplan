@@ -54,6 +54,7 @@ from .model import (
     VoiceDirective,
 )
 from .planner import UtterancePlanner
+from .progress import PlannerProgressEvent, ProgressCallback, ProgressKind, ProgressPhase
 from .versioning import (
     CURRENT_SCHEMA_VERSION,
     FORMAT,
@@ -75,6 +76,10 @@ __all__ = [
     "SSMDConfig",
     "parse_duration",
     "UtterancePlanner",
+    "PlannerProgressEvent",
+    "ProgressCallback",
+    "ProgressKind",
+    "ProgressPhase",
     "UtterancePlan",
     "PlanSource",
     "PlanTexts",

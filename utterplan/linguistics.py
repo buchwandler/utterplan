@@ -7,6 +7,7 @@ from typing import Any, Literal
 from .config import LinguisticsConfig
 from .language import LanguageRun
 from .model import TokenAnnotation
+from .progress import PlannerProgressEvent, ProgressCallback, ProgressPhase, _notify_progress
 from .spacy_models import resolve_spacy_model
 
 
@@ -43,20 +44,52 @@ class LinguisticResourcePool:
     def __init__(self) -> None:
         self._pipelines: dict[str, Any] = {}
 
-    def pipeline(self, model: str | None, *, require: bool = False) -> Any | None:
+    def pipeline(
+        self,
+        model: str | None,
+        *,
+        require: bool = False,
+        phase: ProgressPhase = "source_analysis",
+        language: str | None = None,
+        on_progress: ProgressCallback | None = None,
+    ) -> Any | None:
         if not model:
             return None
         if model in self._pipelines:
             return self._pipelines[model]
         try:
             import spacy
-
+        except ImportError as exc:
+            if require:
+                raise RuntimeError(f"Requested spaCy model {model!r} is unavailable") from exc
+            return None
+        _notify_progress(
+            on_progress,
+            PlannerProgressEvent(
+                kind="model.started",
+                phase=phase,
+                language=language,
+                provider="spacy",
+                model=model,
+            ),
+        )
+        try:
             pipeline = spacy.load(model)
-        except (ImportError, OSError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             if require:
                 raise RuntimeError(f"Requested spaCy model {model!r} is unavailable") from exc
             return None
         self._pipelines[model] = pipeline
+        _notify_progress(
+            on_progress,
+            PlannerProgressEvent(
+                kind="model.completed",
+                phase=phase,
+                language=language,
+                provider="spacy",
+                model=model,
+            ),
+        )
         return pipeline
 
     def clear(self) -> None:
@@ -86,11 +119,38 @@ class LinguisticResourcePool:
                     return candidate
         return None
 
-    def analyze(self, text: str, run: LanguageRun, config: LinguisticsConfig) -> LinguisticAnalysis:
+    def provider_model(self, language: str, config: LinguisticsConfig) -> tuple[str, str | None]:
+        """Return the expected provider and resolved model for one run."""
+        model = self._select_model(language, config)
+        use_spacy = config.use_spacy if config.use_spacy is not None else model is not None
+        return (
+            ("spacy", model)
+            if use_spacy and (model is not None or config.require_spacy)
+            else ("fallback", None)
+        )
+
+    def analyze(
+        self,
+        text: str,
+        run: LanguageRun,
+        config: LinguisticsConfig,
+        *,
+        phase: ProgressPhase = "source_analysis",
+        on_progress: ProgressCallback | None = None,
+    ) -> LinguisticAnalysis:
         model = self._select_model(run.language, config)
         use_spacy = config.use_spacy if config.use_spacy is not None else model is not None
         if use_spacy:
-            pipeline = self.pipeline(model, require=config.require_spacy)
+            if on_progress is None:
+                pipeline = self.pipeline(model, require=config.require_spacy)
+            else:
+                pipeline = self.pipeline(
+                    model,
+                    require=config.require_spacy,
+                    phase=phase,
+                    language=run.language,
+                    on_progress=on_progress,
+                )
             if pipeline is not None:
                 doc = pipeline(text)
                 provider_version = _spacy_version()
@@ -165,11 +225,34 @@ def analyze_run_analyses(
     runs: tuple[LanguageRun, ...],
     config: LinguisticsConfig,
     pool: LinguisticResourcePool,
+    *,
+    phase: ProgressPhase = "source_analysis",
+    pass_index: int = 1,
+    pass_total: int = 2,
+    on_progress: ProgressCallback | None = None,
 ) -> tuple[RunAnalysis, ...]:
     analyses: list[RunAnalysis] = []
-    for run in runs:
+    for index, run in enumerate(runs):
         local = text[run.spoken_start : run.spoken_end]
-        analysis = pool.analyze(local, run, config)
+        provider, model = (None, None)
+        if on_progress is not None:
+            provider, model = pool.provider_model(run.language, config)
+        _notify_progress(
+            on_progress,
+            PlannerProgressEvent(
+                kind="run.started",
+                phase=phase,
+                completed=index,
+                total=len(runs),
+                pass_index=pass_index,
+                pass_total=pass_total,
+                language=run.language,
+                provider=provider,
+                model=model,
+                char_count=len(local),
+            ),
+        )
+        analysis = pool.analyze(local, run, config, phase=phase, on_progress=on_progress)
         offset = run.spoken_start
         tokens = tuple(
             TokenAnnotation(
@@ -197,6 +280,21 @@ def analyze_run_analyses(
                 provider_version=analysis.provider_version,
                 model_version=analysis.model_version,
             )
+        )
+        _notify_progress(
+            on_progress,
+            PlannerProgressEvent(
+                kind="run.completed",
+                phase=phase,
+                completed=index + 1,
+                total=len(runs),
+                pass_index=pass_index,
+                pass_total=pass_total,
+                language=run.language,
+                provider=analysis.provider,
+                model=analysis.model_name,
+                char_count=len(local),
+            ),
         )
     return tuple(analyses)
 
