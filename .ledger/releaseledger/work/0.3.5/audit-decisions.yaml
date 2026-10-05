@@ -1,0 +1,22 @@
+rows:
+  - sha: a19ceb434bd7277c6c78a91ad8e96ca840367600
+    inspected: true
+    inspected_paths:
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/0.3.4/entries/entry-0002.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.3.4/release.md
+      - docs/changelog.md
+      - docs/consumer-guide.md
+      - tests/golden/ssmd_09_comprehensive.utterplan.json
+      - tests/migration/goldens/multilingual_preparation.json
+      - tests/migration/goldens/ssmd_pronunciation.json
+      - tests/test_segment_topology.py
+      - utterplan/directives.py
+      - utterplan/planner.py
+    observed_behavior: "Planner segmentation now coalesces neutral punctuation with adjacent speech, preserves exact annotation spans, and rejects punctuation-only speech segments."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false

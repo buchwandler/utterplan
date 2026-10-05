@@ -1,0 +1,35 @@
+{
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "additions": 529,
+      "deletions": 228,
+      "patch_file": "a19ceb4.patch",
+      "patch_sha256": "f2e0e7eaf90e051727563d7bfe0dd171e2c6e46f4127241b693aa97cf2792353",
+      "paths": [
+        ".ledger/releaseledger/data/ledgers/main/events/events.jsonl",
+        ".ledger/releaseledger/data/ledgers/main/releases/0.3.4/entries/entry-0002.md",
+        ".ledger/releaseledger/data/ledgers/main/releases/0.3.4/release.md",
+        "docs/changelog.md",
+        "docs/consumer-guide.md",
+        "tests/golden/ssmd_09_comprehensive.utterplan.json",
+        "tests/migration/goldens/multilingual_preparation.json",
+        "tests/migration/goldens/ssmd_pronunciation.json",
+        "tests/test_segment_topology.py",
+        "utterplan/directives.py",
+        "utterplan/planner.py"
+      ],
+      "sha": "a19ceb434bd7277c6c78a91ad8e96ca840367600",
+      "short_sha": "a19ceb4",
+      "source_ref": "git:a19ceb434bd7277c6c78a91ad8e96ca840367600"
+    }
+  ],
+  "git_base_ref": "938cb2c4ab8f6e9a1c4e87b9c4ebc043f78100b0",
+  "git_base_sha": "938cb2c4ab8f6e9a1c4e87b9c4ebc043f78100b0",
+  "git_head_ref": "a19ceb434bd7277c6c78a91ad8e96ca840367600",
+  "git_head_sha": "a19ceb434bd7277c6c78a91ad8e96ca840367600",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.3.5",
+  "schema_version": 1
+}
