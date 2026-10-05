@@ -80,7 +80,7 @@ jobs:
                   Requirement(value) for value in metadata.get_all("Requires-Dist", [])
               ]
               assert has_range(requirements, "phrasplit", "0.3.9", "0.4")
-              assert has_range(requirements, "ssmd", "0.9.0", "0.10")
+              assert has_range(requirements, "ssmd", "0.9.3", "0.10")
               assert has_range(requirements, "spokenform", "0.4.3", "0.5")
               names = set(archive.namelist())
               expected = {
