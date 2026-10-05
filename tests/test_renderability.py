@@ -38,21 +38,18 @@ def test_unicode_letters_and_numbers_are_speech_content() -> None:
         assert classify_segment(_segment(value), 0) is None
 
 
-
 def test_planner_returns_plans_for_unicode_lexical_text() -> None:
     for value in ("Überraschung", "你好", "مرحبا", "2026"):
-        plan = UtterancePlanner(
-            PlannerConfig(language="en-US", text_preparation="identity")
-        ).plan(value)
+        plan = UtterancePlanner(PlannerConfig(language="en-US", text_preparation="identity")).plan(
+            value
+        )
         assert plan.segments
         assert plan.document_metadata["planning"]["renderability"]["guaranteed"] is True
 
 
 def test_strict_preflight_reports_every_failure_in_source_order() -> None:
     source = "First.\n\n.\n\n?\n\nLast."
-    planner = UtterancePlanner(
-        PlannerConfig(language="en-US", text_preparation="identity")
-    )
+    planner = UtterancePlanner(PlannerConfig(language="en-US", text_preparation="identity"))
 
     with pytest.raises(PlanRenderabilityError) as error:
         planner.plan(source)
@@ -73,9 +70,9 @@ def test_renderability_mode_is_validated_and_participates_in_plan_identity() -> 
         PlannerConfig(language="en-US", renderability_mode="disabled")  # type: ignore[arg-type]
 
     strict = UtterancePlanner(PlannerConfig(language="en-US")).plan("Hello.")
-    repair = UtterancePlanner(
-        PlannerConfig(language="en-US", renderability_mode="repair")
-    ).plan("Hello.")
+    repair = UtterancePlanner(PlannerConfig(language="en-US", renderability_mode="repair")).plan(
+        "Hello."
+    )
     assert strict.plan_id != repair.plan_id
     assert strict.config["renderability_mode"] == "strict"
     assert repair.config["renderability_mode"] == "repair"
@@ -118,6 +115,7 @@ def test_spokenform_offsets_map_later_renderability_issue_back_to_source() -> No
     assert issue.line == 3 and issue.column == 1
     assert source[issue.source_start : issue.source_end] == "."
     assert issue.spoken_start > issue.source_start
+
 
 def test_punctuation_whitespace_empty_and_symbols_have_stable_issue_codes() -> None:
     cases = (
@@ -176,9 +174,9 @@ def test_renderability_error_preserves_issues_mode_and_summary() -> None:
 
 
 def test_schema_v3_loading_rejects_punctuation_only_renderer_segment() -> None:
-    plan = UtterancePlanner(
-        PlannerConfig(language="en-US", text_preparation="identity")
-    ).plan("Hello.")
+    plan = UtterancePlanner(PlannerConfig(language="en-US", text_preparation="identity")).plan(
+        "Hello."
+    )
     original = plan.segments[0]
     invalid_segment = replace(
         original,

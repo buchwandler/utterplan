@@ -1,0 +1,42 @@
+rows:
+  - sha: 7576dd2dba4d312679ce0a844dd33686ebb7efe8
+    inspected: true
+    inspected_paths:
+      - pyproject.toml
+      - tests/golden/multilingual.utterplan.json
+      - tests/golden/ssmd_09_comprehensive.utterplan.json
+      - tests/migration/cases.py
+      - tests/migration/goldens/multilingual_preparation.json
+      - tests/migration/goldens/spokenform_numbers.json
+      - tests/migration/goldens/ssmd_break.json
+      - tests/migration/goldens/ssmd_language_detection.json
+      - tests/migration/goldens/ssmd_marker.json
+      - tests/migration/goldens/ssmd_pronunciation.json
+      - tests/test_boundaries.py
+      - tests/test_cli.py
+      - tests/test_consumer_contract.py
+      - tests/test_explain.py
+      - tests/test_format.py
+      - tests/test_planner.py
+      - tests/test_preparation.py
+      - tests/test_progress.py
+      - tests/test_renderability.py
+      - tests/test_renderability_repair.py
+      - tests/test_schema_history.py
+      - tests/test_segment_topology.py
+      - tests/test_ssmd_09_parser.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/config.py
+      - utterplan/exceptions.py
+      - utterplan/model.py
+      - utterplan/parsers.py
+      - utterplan/planner.py
+      - utterplan/renderability.py
+    observed_behavior: "Added strict and repair renderability planning: plans now reject renderer segments without semantic speech content, while repair mode safely merges or drops isolated neutral punctuation and records source locations and repair diagnostics."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false

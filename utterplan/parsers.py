@@ -34,8 +34,6 @@ class ParsedDocument:
     text_spans: tuple[SourceTextSpan, ...] = ()
 
 
-
-
 def effective_sequence_fallback_mode(
     header: Mapping[str, Any],
 ) -> Literal["spell", "preserve"]:
@@ -324,9 +322,7 @@ def map_structural_span_to_source(
                 ),
             )
             relative = start - span.structural_start
-            source_position = span.source_start + min(
-                relative, span.source_end - span.source_start
-            )
+            source_position = span.source_start + min(relative, span.source_end - span.source_start)
             return source_position, source_position
         preceding = [span for span in spans if span.structural_end < start]
         following = [span for span in spans if span.structural_start > start]
@@ -337,16 +333,17 @@ def map_structural_span_to_source(
         if previous is None:
             assert next_span is not None
             position = next_span.source_start
-        elif next_span is None or start - previous.structural_end <= next_span.structural_start - start:
+        elif (
+            next_span is None
+            or start - previous.structural_end <= next_span.structural_start - start
+        ):
             position = previous.source_end
         else:
             position = next_span.source_start
         return position, position
 
     overlapping = [
-        span
-        for span in spans
-        if span.structural_start < end and span.structural_end > start
+        span for span in spans if span.structural_start < end and span.structural_end > start
     ]
     if not overlapping:
         return None, None
@@ -360,9 +357,7 @@ def _normalize_legacy_scene_breaks(
     text: str,
 ) -> tuple[str, tuple[tuple[int, int, int], ...], tuple[SourceTextSpan, ...]]:
     """Normalize standalone legacy horizontal rules when SSMD leaves them as text."""
-    matches = tuple(
-        re.finditer(r"(?m)^[ \t]*---[ \t]*(?:\r?\n(?:[ \t]*\r?\n)?)?", text)
-    )
+    matches = tuple(re.finditer(r"(?m)^[ \t]*---[ \t]*(?:\r?\n(?:[ \t]*\r?\n)?)?", text))
     if not matches:
         return text, (), ()
 

@@ -5,9 +5,7 @@
   },
   "preparation": {
     "backend": "identity",
-    "languages": [
-      "en-us"
-    ],
+    "languages": ["en-us"],
     "replacements": []
   },
   "languages": [
@@ -39,9 +37,7 @@
         "events": []
       },
       "directives": {},
-      "token_indices": [
-        0
-      ],
+      "token_indices": [0],
       "annotation_ids": []
     }
   ],
@@ -50,9 +46,7 @@
       "kind": "paragraph",
       "spoken_start": 0,
       "spoken_end": 6,
-      "segment_ids": [
-        "seg-000000"
-      ],
+      "segment_ids": ["seg-000000"],
       "marker_ids": []
     }
   ],
@@ -62,20 +56,14 @@
       "ssmd_version": "0.9",
       "language_detection": {
         "mode": "auto",
-        "languages": [
-          "de",
-          "en"
-        ]
+        "languages": ["de", "en"]
       }
     },
     "sequence_fallback_mode": "spell",
     "ssmd_version": "0.9",
     "language_detection": {
       "mode": "auto",
-      "languages": [
-        "de",
-        "en"
-      ]
+      "languages": ["de", "en"]
     },
     "planning": {
       "linguistic_passes": 2,
@@ -91,9 +79,6 @@
   },
   "language_detection": {
     "mode": "auto",
-    "languages": [
-      "de",
-      "en"
-    ]
+    "languages": ["de", "en"]
   }
 }

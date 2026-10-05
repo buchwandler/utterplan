@@ -24,6 +24,7 @@ def test_compile_cli_defaults() -> None:
 
     assert args.renderability == "strict"
 
+
 def test_compile_literal_text_to_stdout_json(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["compile", "Hello world.", "--lang", "en-us"]) == 0
     payload = _payload(capsys)
@@ -220,9 +221,12 @@ def test_compile_repair_cli_reports_guaranteed_renderability(
 
     captured = capsys.readouterr()
     assert result == 0
-    assert json.loads(output.read_text(encoding="utf-8"))["document_metadata"]["planning"][
-        "renderability"
-    ]["guaranteed"] is True
+    assert (
+        json.loads(output.read_text(encoding="utf-8"))["document_metadata"]["planning"][
+            "renderability"
+        ]["guaranteed"]
+        is True
+    )
     assert "renderability: guaranteed; 1 punctuation segment repaired" in captured.err
 
 

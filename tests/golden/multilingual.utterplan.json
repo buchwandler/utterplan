@@ -110,10 +110,7 @@
   "plan_id": "sha256:e83795803d47feacc33abe844e89327c90edde6fe150aa07e99a9f3c14b3d00b",
   "preparation": {
     "backend": "spokenform",
-    "languages": [
-      "en-us",
-      "fr"
-    ],
+    "languages": ["en-us", "fr"],
     "replacements": [],
     "version": "0.4.5",
     "warnings": []
@@ -145,14 +142,10 @@
       "structural_end": 5,
       "structural_start": 0,
       "text": "Hello",
-      "token_indices": [
-        0
-      ]
+      "token_indices": [0]
     },
     {
-      "annotation_ids": [
-        "annotation-000000"
-      ],
+      "annotation_ids": ["annotation-000000"],
       "clause": 0,
       "directives": {},
       "id": "seg-000001",
@@ -172,9 +165,7 @@
       "structural_end": 14,
       "structural_start": 6,
       "text": "Bonjour.",
-      "token_indices": [
-        1
-      ]
+      "token_indices": [1]
     }
   ],
   "source": {
@@ -213,10 +204,7 @@
       "index": 0,
       "kind": "paragraph",
       "marker_ids": [],
-      "segment_ids": [
-        "seg-000000",
-        "seg-000001"
-      ],
+      "segment_ids": ["seg-000000", "seg-000001"],
       "spoken_end": 14,
       "spoken_start": 0
     }

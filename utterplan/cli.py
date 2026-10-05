@@ -293,8 +293,8 @@ def _compile(args: argparse.Namespace) -> int:
 
 def _format_renderability_error(error: PlanRenderabilityError, args: argparse.Namespace) -> str:
     source_label = str(args.file) if getattr(args, "file", None) is not None else "input"
-    positional = getattr(args, "text", ())
-    if source_label == "input" and len(positional) == 1:
+    positional = getattr(args, "text", None)
+    if source_label == "input" and isinstance(positional, list) and len(positional) == 1:
         candidate = Path(positional[0])
         if candidate.is_file():
             source_label = str(candidate)

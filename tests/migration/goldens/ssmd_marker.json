@@ -5,9 +5,7 @@
   },
   "preparation": {
     "backend": "identity",
-    "languages": [
-      "en-us"
-    ],
+    "languages": ["en-us"],
     "replacements": []
   },
   "languages": [
@@ -47,14 +45,10 @@
       },
       "pause_after": {
         "seconds": 0.6,
-        "events": [
-          "boundary-000000"
-        ]
+        "events": ["boundary-000000"]
       },
       "directives": {},
-      "token_indices": [
-        0
-      ],
+      "token_indices": [0],
       "annotation_ids": []
     },
     {
@@ -74,9 +68,7 @@
         "events": []
       },
       "directives": {},
-      "token_indices": [
-        1
-      ],
+      "token_indices": [1],
       "annotation_ids": []
     }
   ],
@@ -85,13 +77,8 @@
       "kind": "paragraph",
       "spoken_start": 0,
       "spoken_end": 9,
-      "segment_ids": [
-        "seg-000000",
-        "seg-000001"
-      ],
-      "marker_ids": [
-        "marker-000000"
-      ]
+      "segment_ids": ["seg-000000", "seg-000001"],
+      "marker_ids": ["marker-000000"]
     }
   ],
   "markers": [

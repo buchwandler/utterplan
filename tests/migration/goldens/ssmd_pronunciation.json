@@ -5,9 +5,7 @@
   },
   "preparation": {
     "backend": "identity",
-    "languages": [
-      "en-us"
-    ],
+    "languages": ["en-us"],
     "replacements": []
   },
   "languages": [
@@ -59,12 +57,8 @@
           "alphabet": "ipa"
         }
       },
-      "token_indices": [
-        0
-      ],
-      "annotation_ids": [
-        "annotation-000000"
-      ]
+      "token_indices": [0],
+      "annotation_ids": ["annotation-000000"]
     }
   ],
   "units": [
@@ -72,9 +66,7 @@
       "kind": "paragraph",
       "spoken_start": 0,
       "spoken_end": 4,
-      "segment_ids": [
-        "seg-000000"
-      ],
+      "segment_ids": ["seg-000000"],
       "marker_ids": []
     }
   ],

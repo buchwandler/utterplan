@@ -83,6 +83,7 @@ def test_renderability_classifier_reports_punctuation_tokens_but_accepts_audio()
     )
     assert classify_segment(audio_segment, 1, tokens) is None
 
+
 def test_emphasis_period_is_one_segment_with_exact_annotation_range() -> None:
     plan = _plan('[Important]{emphasis="strong"}.')
 

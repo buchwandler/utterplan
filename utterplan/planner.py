@@ -299,7 +299,10 @@ class UtterancePlanner:
         if initial_renderability.issues:
             if config.renderability_mode == "strict":
                 raise PlanRenderabilityError(initial_renderability.issues, mode="strict")
-            if any(issue.code != "renderability.punctuation_only" for issue in initial_renderability.issues):
+            if any(
+                issue.code != "renderability.punctuation_only"
+                for issue in initial_renderability.issues
+            ):
                 raise PlanRenderabilityError(initial_renderability.issues, mode="repair")
             segments, renderability_repairs = _repair_renderer_segments(
                 segments,
@@ -310,8 +313,7 @@ class UtterancePlanner:
                 prepared.annotations,
             )
             segments = [
-                replace(segment, id=f"seg-{index:06d}")
-                for index, segment in enumerate(segments)
+                replace(segment, id=f"seg-{index:06d}") for index, segment in enumerate(segments)
             ]
             segments = _attach_structural_ranges(
                 segments, prepared.source_map, len(parsed.structural_text)
@@ -355,7 +357,9 @@ class UtterancePlanner:
             },
         }
         diagnostics = list(parsed.diagnostics)
-        diagnostics.extend(_renderability_repair_diagnostic(issue) for issue in renderability_repairs)
+        diagnostics.extend(
+            _renderability_repair_diagnostic(issue) for issue in renderability_repairs
+        )
         if config.diagnostics:
             diagnostics.append(
                 Diagnostic(
@@ -1454,8 +1458,7 @@ def _can_merge_punctuation(
     if gap_start > gap_end or text[gap_start:gap_end].strip():
         return False
     if any(
-        gap_start <= boundary.position <= gap_end
-        and boundary_is_active(boundary, pause_config)
+        gap_start <= boundary.position <= gap_end and boundary_is_active(boundary, pause_config)
         for boundary in boundaries
     ):
         return False
@@ -1490,13 +1493,16 @@ def _audio_crosses_join(
     return False
 
 
-def _can_drop_punctuation(
-    segment: PlanSegment, annotations: tuple[AnnotationSpan, ...]
-) -> bool:
+def _can_drop_punctuation(segment: PlanSegment, annotations: tuple[AnnotationSpan, ...]) -> bool:
     directives = segment.directives
     if any(
         value is not None
-        for value in (directives.audio, directives.pronunciation, directives.substitution, directives.say_as)
+        for value in (
+            directives.audio,
+            directives.pronunciation,
+            directives.substitution,
+            directives.say_as,
+        )
     ):
         return False
     protected_tags = {"audio", "phoneme", "pronunciation", "sub", "say-as"}
@@ -1531,6 +1537,7 @@ def _renderability_repair_diagnostic(issue: RenderabilityIssue) -> Diagnostic:
         column=issue.column,
         hint="Review the source if this punctuation was intended to be spoken.",
     )
+
 
 def _language_annotation(annotation: AnnotationSpan) -> bool:
     return set(annotation.attrs).issubset({"lang", "language", "tag"}) and (

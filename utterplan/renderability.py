@@ -66,9 +66,7 @@ def classify_segment(
 ) -> RenderabilityIssue | None:
     """Classify one renderer segment; Unicode content is the stable base rule."""
     selected_token_pairs = tuple(
-        (index, tokens[index])
-        for index in segment.token_indices
-        if 0 <= index < len(tokens)
+        (index, tokens[index]) for index in segment.token_indices if 0 <= index < len(tokens)
     )
     selected_tokens = tuple(token for _index, token in selected_token_pairs)
     if _has_explicit_speech_semantics(segment):
@@ -79,13 +77,17 @@ def classify_segment(
     significant = tuple(char for char in segment.text if not char.isspace())
     if not significant:
         code, reason, hint = (
-            "renderability.empty",
-            "empty",
-            "Add spoken text or an explicit whole-segment speech/media directive.",
-        ) if not segment.text else (
-            "renderability.whitespace_only",
-            "whitespace_only",
-            "Replace whitespace-only content with speech or remove the renderer segment.",
+            (
+                "renderability.empty",
+                "empty",
+                "Add spoken text or an explicit whole-segment speech/media directive.",
+            )
+            if not segment.text
+            else (
+                "renderability.whitespace_only",
+                "whitespace_only",
+                "Replace whitespace-only content with speech or remove the renderer segment.",
+            )
         )
     elif all(unicodedata.category(char).startswith("P") for char in significant):
         code = "renderability.punctuation_only"
@@ -106,7 +108,6 @@ def classify_segment(
     source_end: int | None = None
     source_text = getattr(parsed, "source_text", None) if parsed is not None else None
     if parsed is not None and structural_start is not None and structural_end is not None:
-
         source_start, source_end = map_structural_span_to_source(
             parsed, structural_start, structural_end
         )

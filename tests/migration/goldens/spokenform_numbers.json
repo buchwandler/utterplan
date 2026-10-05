@@ -5,9 +5,7 @@
   },
   "preparation": {
     "backend": "spokenform",
-    "languages": [
-      "en-us"
-    ],
+    "languages": ["en-us"],
     "replacements": [
       {
         "source_start": 0,
@@ -62,13 +60,7 @@
         "events": []
       },
       "directives": {},
-      "token_indices": [
-        0,
-        1,
-        2,
-        3,
-        4
-      ],
+      "token_indices": [0, 1, 2, 3, 4],
       "annotation_ids": []
     }
   ],
@@ -77,9 +69,7 @@
       "kind": "paragraph",
       "spoken_start": 0,
       "spoken_end": 35,
-      "segment_ids": [
-        "seg-000000"
-      ],
+      "segment_ids": ["seg-000000"],
       "marker_ids": []
     }
   ],
