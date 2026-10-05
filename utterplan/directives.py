@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
@@ -25,14 +26,15 @@ def resolve_directives(
     *,
     voice_defaults: Mapping[str, Any] | None = None,
 ) -> PlanSegment:
+    core_start, core_end = _semantic_core_bounds(segment)
     selected = sorted(
         (
             annotation
             for annotation in annotations
             if annotation.spoken_start is not None
             and annotation.spoken_end is not None
-            and annotation.spoken_start <= segment.spoken_start
-            and segment.spoken_end <= annotation.spoken_end
+            and annotation.spoken_start <= core_start
+            and core_end <= annotation.spoken_end
         ),
         key=lambda annotation: (
             annotation.spoken_start or 0,
@@ -117,6 +119,25 @@ def resolve_directives(
             extensions=tuple(extensions),
         ),
     )
+
+
+def _semantic_core_bounds(segment: PlanSegment) -> tuple[int, int]:
+    """Return spoken bounds after trimming only a punctuation/whitespace envelope."""
+    start = 0
+    end = len(segment.text)
+    while start < end and (
+        segment.text[start].isspace() or unicodedata.category(segment.text[start]).startswith("P")
+    ):
+        start += 1
+    while end > start and (
+        segment.text[end - 1].isspace()
+        or unicodedata.category(segment.text[end - 1]).startswith("P")
+    ):
+        end -= 1
+    if start == end:
+        # Preserve exact semantics for intentionally punctuation-only annotations.
+        return segment.spoken_start, segment.spoken_end
+    return segment.spoken_start + start, segment.spoken_start + end
 
 
 def _semantic_tag(annotation: AnnotationSpan) -> str:

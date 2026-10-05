@@ -18,12 +18,12 @@
   "boundaries": [],
   "document_metadata": {
     "header": {},
-    "sequence_fallback_mode": "spell",
     "planning": {
       "engine_independent": true,
       "linguistic_passes": 2,
       "pass_a_tokens": 1
-    }
+    },
+    "sequence_fallback_mode": "spell"
   },
   "language_detection": null,
   "languages": [
@@ -62,29 +62,9 @@
         "seconds": 0.0
       },
       "sentence": 0,
-      "spoken_end": 3,
-      "spoken_start": 0,
-      "text": "GIF",
-      "token_indices": [0]
-    },
-    {
-      "annotation_ids": [],
-      "clause": 1,
-      "directives": {},
-      "language": "en-us",
-      "paragraph": 0,
-      "pause_after": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "pause_before": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "sentence": 0,
       "spoken_end": 4,
-      "spoken_start": 3,
-      "text": ".",
+      "spoken_start": 0,
+      "text": "GIF.",
       "token_indices": [0]
     }
   ],
@@ -96,7 +76,7 @@
     {
       "kind": "paragraph",
       "marker_ids": [],
-      "segment_ids": ["seg-000000", "seg-000001"],
+      "segment_ids": ["seg-000000"],
       "spoken_end": 4,
       "spoken_start": 0
     }

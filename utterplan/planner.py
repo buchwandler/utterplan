@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import asdict, replace
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -288,6 +289,7 @@ class UtterancePlanner:
             )
             for segment in segments
         ]
+        _validate_renderer_topology(segments, tokens)
         boundaries.extend(_derived_boundaries(segments, boundaries, pause_config))
         segments = resolve_pauses(segments, boundaries, pause_config)
         markers = tuple(_map_marker(marker, prepared.source_map) for marker in parsed.markers)
@@ -539,19 +541,29 @@ def _segment_text(
             paragraph = int(getattr(item, "paragraph_idx", 0) or 0)
             sentence = int(getattr(item, "sentence_idx", 0) or 0)
             clause = int(getattr(item, "clause_idx", 0) or 0)
-            cuts = {start, end}
-            cuts.update(
+            hard_cuts = {start, end}
+            hard_cuts.update(
                 boundary.position
                 for boundary in boundaries
                 if start < boundary.position < end and boundary_is_active(boundary, pause_config)
             )
-            cuts.update(
+            hard_cuts.update(
+                point
+                for annotation in _audio_annotations(annotations)
+                for point in (annotation.spoken_start, annotation.spoken_end)
+                if point is not None and start < point < end
+            )
+            semantic_cuts = {
                 point
                 for annotation in annotations
                 for point in (annotation.spoken_start, annotation.spoken_end)
                 if point is not None and start < point < end and _semantic_annotation(annotation)
+            }
+            ordered = _normalize_semantic_cuts(
+                text,
+                hard_cuts=hard_cuts,
+                semantic_cuts=semantic_cuts,
             )
-            ordered = sorted(cuts)
             clause_breaks = {
                 boundary.position
                 for boundary in boundaries
@@ -587,6 +599,166 @@ def _segment_text(
                 )
                 if part_end in clause_breaks:
                     current_clause += 1
+    return _coalesce_neutral_punctuation_segments(
+        text,
+        result,
+        boundaries=boundaries,
+        pause_config=pause_config,
+        annotations=annotations,
+    )
+
+
+def _is_neutral_punctuation_text(value: str) -> bool:
+    significant = [character for character in value if not character.isspace()]
+    return bool(significant) and all(
+        unicodedata.category(character).startswith("P") for character in significant
+    )
+
+
+def _normalize_semantic_cuts(
+    text: str,
+    *,
+    hard_cuts: set[int],
+    semantic_cuts: set[int],
+) -> list[int]:
+    cuts = hard_cuts | semantic_cuts
+    while True:
+        ordered = sorted(cuts)
+        changed = False
+        for left, right in zip(ordered, ordered[1:], strict=False):
+            if not _is_neutral_punctuation_text(text[left:right]):
+                continue
+            if left in semantic_cuts and left not in hard_cuts:
+                cuts.remove(left)
+                changed = True
+                break
+            if right in semantic_cuts and right not in hard_cuts:
+                cuts.remove(right)
+                changed = True
+                break
+        if not changed:
+            return sorted(cuts)
+
+
+def _coalesce_neutral_punctuation_segments(
+    text: str,
+    segments: list[PlanSegment],
+    *,
+    boundaries: list[BoundaryEvent],
+    pause_config: PauseConfig,
+    annotations: tuple[AnnotationSpan, ...],
+) -> list[PlanSegment]:
+    active_pause_positions = {
+        boundary.position for boundary in boundaries if boundary_is_active(boundary, pause_config)
+    }
+    audio_spans = tuple(
+        (annotation.spoken_start, annotation.spoken_end)
+        for annotation in _audio_annotations(annotations)
+        if annotation.spoken_start is not None
+        and annotation.spoken_end is not None
+        and annotation.spoken_start < annotation.spoken_end
+    )
+    audio_points = {
+        annotation.spoken_start
+        for annotation in _audio_annotations(annotations)
+        if annotation.spoken_start is not None and annotation.spoken_end == annotation.spoken_start
+    }
+
+    def expansion_allowed(start: int, end: int) -> bool:
+        if any(start < position < end for position in active_pause_positions | audio_points):
+            return False
+        return not any(
+            audio_start < end and audio_end > start for audio_start, audio_end in audio_spans
+        )
+
+    result = list(segments)
+    index = 0
+    while index < len(result):
+        punctuation = result[index]
+        if not _is_neutral_punctuation_text(punctuation.text):
+            index += 1
+            continue
+
+        previous = result[index - 1] if index else None
+        following = result[index + 1] if index + 1 < len(result) else None
+        if previous is not None:
+            gap = text[previous.spoken_end : punctuation.spoken_start]
+            expanded_start, expanded_end = previous.spoken_start, punctuation.spoken_end
+            if following is not None and following.spoken_start == punctuation.spoken_end:
+                whitespace_end = following.spoken_start
+                while whitespace_end < following.spoken_end and text[whitespace_end].isspace():
+                    whitespace_end += 1
+                if whitespace_end > following.spoken_start and expansion_allowed(
+                    expanded_start, whitespace_end
+                ):
+                    expanded_end = whitespace_end
+            if (
+                not _is_neutral_punctuation_text(previous.text)
+                and not gap.strip()
+                and previous.paragraph == punctuation.paragraph
+                and expansion_allowed(expanded_start, expanded_end)
+            ):
+                result[index - 1] = replace(
+                    previous,
+                    text=text[expanded_start:expanded_end],
+                    spoken_end=expanded_end,
+                )
+                if following is not None and expanded_end > punctuation.spoken_end:
+                    result[index + 1] = replace(
+                        following,
+                        text=text[expanded_end : following.spoken_end],
+                        spoken_start=expanded_end,
+                    )
+                del result[index]
+                index = max(0, index - 1)
+                continue
+
+        if following is not None:
+            gap = text[punctuation.spoken_end : following.spoken_start]
+            expanded_start, expanded_end = punctuation.spoken_start, following.spoken_end
+            if (
+                not _is_neutral_punctuation_text(following.text)
+                and not gap.strip()
+                and following.paragraph == punctuation.paragraph
+                and expansion_allowed(expanded_start, expanded_end)
+            ):
+                result[index + 1] = replace(
+                    following,
+                    text=text[expanded_start:expanded_end],
+                    spoken_start=expanded_start,
+                )
+                del result[index]
+                continue
+        index += 1
+    for index in range(len(result) - 1):
+        previous, following = result[index], result[index + 1]
+        if (
+            previous.spoken_end != following.spoken_start
+            or previous.directives.audio is not None
+            or previous.paragraph != following.paragraph
+            or not following.text
+        ):
+            continue
+        previous_text = previous.text.rstrip()
+        if not previous_text or not unicodedata.category(previous_text[-1]).startswith("P"):
+            continue
+        whitespace_end = following.spoken_start
+        while whitespace_end < following.spoken_end and text[whitespace_end].isspace():
+            whitespace_end += 1
+        if whitespace_end == following.spoken_start or not expansion_allowed(
+            previous.spoken_start, whitespace_end
+        ):
+            continue
+        result[index] = replace(
+            previous,
+            text=text[previous.spoken_start : whitespace_end],
+            spoken_end=whitespace_end,
+        )
+        result[index + 1] = replace(
+            following,
+            text=text[whitespace_end : following.spoken_end],
+            spoken_start=whitespace_end,
+        )
     return result
 
 
@@ -1111,6 +1283,23 @@ def _attach_membership(
             replace(segment, token_indices=token_indices, annotation_ids=tuple(annotation_ids))
         )
     return output
+
+
+def _validate_renderer_topology(segments: list[PlanSegment], tokens: tuple[Any, ...]) -> None:
+    for segment in segments:
+        if segment.directives.audio is not None or not segment.token_indices:
+            continue
+        referenced = [tokens[index] for index in segment.token_indices]
+        if referenced and all(token.pos == "PUNCT" for token in referenced):
+            token_details = [
+                {"id": token.id or f"token-{index}", "pos": token.pos}
+                for index, token in zip(segment.token_indices, referenced, strict=True)
+            ]
+            raise PlanningError(
+                "Punctuation-only renderer segment "
+                f"{segment.id} at spoken range {segment.spoken_start}:{segment.spoken_end}; "
+                f"text={segment.text!r}; tokens={token_details!r}"
+            )
 
 
 def _language_annotation(annotation: AnnotationSpan) -> bool:

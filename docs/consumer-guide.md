@@ -62,6 +62,10 @@ Use these public fields:
 - `plan.units` groups segments for paragraph or sentence rendering.
 - `plan.document_metadata` preserves portable SSMD header metadata, including voice bindings and defaults.
 
+> Semantic annotation boundaries do not create standalone punctuation-only speech segments. Neutral punctuation adjacent to a semantic span stays with neighboring speech while annotation provenance remains exact.
+>
+> Segment text may include neutral punctuation just outside a semantic annotation range. Interpret directives as applying to the speech-bearing semantic core; do not require the annotation to contain the entire literal segment. Annotation `spoken_start` and `spoken_end` remain exact.
+
 Audio/media segments are exposed through the same renderer-neutral segment contract:
 one SSMD audio annotation produces exactly one segment with
 `segment.directives.audio` set. Consumers should choose media from that directive,

@@ -64,3 +64,5 @@
 {"data":{"fields":["git_base_ref","git_base_sha","git_commit_count","git_head_ref","git_head_sha","git_range"]},"event":"release.updated","event_id":"event-0064","record_revisions":{"release:0.3.4":2},"release_version":"0.3.4","schema_version":2}
 {"data":{"row_count":0},"event":"audit.created","event_id":"event-0065","record_revisions":{"commit_audit_sheet":1},"release_version":"0.3.4","schema_version":2}
 {"data":{"kind":"added","status":"accepted"},"entry_id":"entry-0001","event":"entry.added","event_id":"event-0066","record_revisions":{"entry:0.3.4/entry-0001":1,"release:0.3.4":3},"release_version":"0.3.4","schema_version":2}
+{"data":{"kind":"fixed","status":"accepted"},"entry_id":"entry-0002","event":"entry.added","event_id":"event-0067","record_revisions":{"entry:0.3.4/entry-0002":1,"release:0.3.4":4},"release_version":"0.3.4","schema_version":2}
+{"data":{"added_source_refs":[],"fields":["summary"],"removed_source_refs":[],"source_refs_mode":"unchanged"},"entry_id":"entry-0002","event":"entry.updated","event_id":"event-0068","record_revisions":{"entry:0.3.4/entry-0002":2},"release_version":"0.3.4","schema_version":2}

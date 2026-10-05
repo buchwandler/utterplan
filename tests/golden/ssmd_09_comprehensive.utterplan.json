@@ -399,7 +399,6 @@
         }
       }
     },
-    "sequence_fallback_mode": "spell",
     "language": "sr-Latn",
     "language_detection": {
       "languages": ["sr-Latn", "en-GB"],
@@ -421,6 +420,7 @@
     "requires": {
       "extensions": ["acme.effects.whisper"]
     },
+    "sequence_fallback_mode": "spell",
     "ssmd_version": "0.9",
     "title": "Renderer-neutral SSMD 0.9 contract",
     "voice_bindings": {
@@ -464,7 +464,7 @@
       "spoken_position": 249
     }
   ],
-  "plan_id": "sha256:c06853d7554c71e4085b38270e146589456462b252f6642103a08be9c4b48bba",
+  "plan_id": "sha256:d52ab4ffe97c8515b09f2887bed8a9d732c852c5fd9e5d9ee22437140ac2e0ad",
   "preparation": {
     "backend": "identity",
     "languages": ["sr-Latn"],
@@ -474,7 +474,7 @@
   },
   "producer": {
     "name": "utterplan",
-    "version": "0.2.0"
+    "version": "0.3.4"
   },
   "schema_version": 3,
   "segments": [
@@ -556,41 +556,6 @@
       "language": "sr-Latn",
       "paragraph": 1,
       "pause_after": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "pause_before": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "sentence": 0,
-      "spoken_end": 28,
-      "spoken_start": 21,
-      "text": " reader",
-      "token_indices": [3]
-    },
-    {
-      "annotation_ids": ["annotation-000000"],
-      "clause": 0,
-      "directives": {
-        "prosody": {
-          "pitch": "low",
-          "rate": "medium",
-          "volume": "soft"
-        },
-        "voice": {
-          "age": 30,
-          "gender": "female",
-          "languages": "sr-Latn",
-          "name": "Mira",
-          "reference": "narrator",
-          "variant": 2
-        }
-      },
-      "id": "seg-000003",
-      "language": "sr-Latn",
-      "paragraph": 1,
-      "pause_after": {
         "events": ["boundary-000009"],
         "seconds": 0.6
       },
@@ -600,8 +565,8 @@
       },
       "sentence": 0,
       "spoken_end": 29,
-      "spoken_start": 28,
-      "text": ".",
+      "spoken_start": 21,
+      "text": " reader.",
       "token_indices": [3]
     },
     {
@@ -620,7 +585,7 @@
           "reference": "narrator"
         }
       },
-      "id": "seg-000004",
+      "id": "seg-000003",
       "language": "sr-Latn",
       "paragraph": 1,
       "pause_after": {
@@ -638,7 +603,11 @@
       "token_indices": [4]
     },
     {
-      "annotation_ids": ["annotation-000002", "annotation-000004"],
+      "annotation_ids": [
+        "annotation-000002",
+        "annotation-000004",
+        "annotation-000005"
+      ],
       "clause": 1,
       "directives": {
         "prosody": {
@@ -650,6 +619,39 @@
           "detail": "1",
           "format": "dd.mm.yyyy",
           "interpret_as": "date"
+        },
+        "voice": {
+          "reference": "narrator"
+        }
+      },
+      "id": "seg-000004",
+      "language": "sr-Latn",
+      "paragraph": 1,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 1,
+      "spoken_end": 52,
+      "spoken_start": 39,
+      "text": " 31.12.2024, ",
+      "token_indices": [5]
+    },
+    {
+      "annotation_ids": ["annotation-000002", "annotation-000005"],
+      "clause": 1,
+      "directives": {
+        "prosody": {
+          "pitch": null,
+          "rate": "slow",
+          "volume": "soft"
+        },
+        "substitution": {
+          "alias": "water"
         },
         "voice": {
           "reference": "narrator"
@@ -667,10 +669,10 @@
         "seconds": 0.0
       },
       "sentence": 1,
-      "spoken_end": 50,
-      "spoken_start": 39,
-      "text": " 31.12.2024",
-      "token_indices": [5]
+      "spoken_end": 55,
+      "spoken_start": 52,
+      "text": "H2O",
+      "token_indices": [6]
     },
     {
       "annotation_ids": ["annotation-000002"],
@@ -697,69 +699,6 @@
         "seconds": 0.0
       },
       "sentence": 1,
-      "spoken_end": 51,
-      "spoken_start": 50,
-      "text": ",",
-      "token_indices": [5]
-    },
-    {
-      "annotation_ids": ["annotation-000002", "annotation-000005"],
-      "clause": 2,
-      "directives": {
-        "prosody": {
-          "pitch": null,
-          "rate": "slow",
-          "volume": "soft"
-        },
-        "substitution": {
-          "alias": "water"
-        },
-        "voice": {
-          "reference": "narrator"
-        }
-      },
-      "id": "seg-000007",
-      "language": "sr-Latn",
-      "paragraph": 1,
-      "pause_after": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "pause_before": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "sentence": 1,
-      "spoken_end": 55,
-      "spoken_start": 51,
-      "text": " H2O",
-      "token_indices": [6]
-    },
-    {
-      "annotation_ids": ["annotation-000002"],
-      "clause": 3,
-      "directives": {
-        "prosody": {
-          "pitch": null,
-          "rate": "slow",
-          "volume": "soft"
-        },
-        "voice": {
-          "reference": "narrator"
-        }
-      },
-      "id": "seg-000008",
-      "language": "sr-Latn",
-      "paragraph": 1,
-      "pause_after": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "pause_before": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "sentence": 1,
       "spoken_end": 60,
       "spoken_start": 55,
       "text": ", and",
@@ -767,7 +706,7 @@
     },
     {
       "annotation_ids": ["annotation-000002", "annotation-000006"],
-      "clause": 3,
+      "clause": 2,
       "directives": {
         "pronunciation": {
           "alphabet": "ipa",
@@ -782,37 +721,7 @@
           "reference": "narrator"
         }
       },
-      "id": "seg-000009",
-      "language": "sr-Latn",
-      "paragraph": 1,
-      "pause_after": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "pause_before": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "sentence": 1,
-      "spoken_end": 69,
-      "spoken_start": 60,
-      "text": " computer",
-      "token_indices": [8]
-    },
-    {
-      "annotation_ids": ["annotation-000002"],
-      "clause": 4,
-      "directives": {
-        "prosody": {
-          "pitch": null,
-          "rate": "slow",
-          "volume": "soft"
-        },
-        "voice": {
-          "reference": "narrator"
-        }
-      },
-      "id": "seg-000010",
+      "id": "seg-000007",
       "language": "sr-Latn",
       "paragraph": 1,
       "pause_after": {
@@ -825,8 +734,8 @@
       },
       "sentence": 1,
       "spoken_end": 70,
-      "spoken_start": 69,
-      "text": ".",
+      "spoken_start": 60,
+      "text": " computer.",
       "token_indices": [8]
     },
     {
@@ -842,7 +751,7 @@
           "reference": "narrator"
         }
       },
-      "id": "seg-000011",
+      "id": "seg-000008",
       "language": "sr-Latn",
       "paragraph": 1,
       "pause_after": {
@@ -883,7 +792,7 @@
           "reference": "narrator"
         }
       },
-      "id": "seg-000012",
+      "id": "seg-000009",
       "language": "sr-Latn",
       "paragraph": 1,
       "pause_after": {
@@ -913,7 +822,7 @@
           "reference": "narrator"
         }
       },
-      "id": "seg-000013",
+      "id": "seg-000010",
       "language": "sr-Latn",
       "paragraph": 1,
       "pause_after": {
@@ -951,37 +860,7 @@
           "reference": "narrator"
         }
       },
-      "id": "seg-000014",
-      "language": "sr-Latn",
-      "paragraph": 1,
-      "pause_after": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "pause_before": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "sentence": 2,
-      "spoken_end": 105,
-      "spoken_start": 97,
-      "text": " whisper",
-      "token_indices": [14]
-    },
-    {
-      "annotation_ids": ["annotation-000002"],
-      "clause": 2,
-      "directives": {
-        "prosody": {
-          "pitch": null,
-          "rate": "slow",
-          "volume": "soft"
-        },
-        "voice": {
-          "reference": "narrator"
-        }
-      },
-      "id": "seg-000015",
+      "id": "seg-000011",
       "language": "sr-Latn",
       "paragraph": 1,
       "pause_after": {
@@ -994,8 +873,8 @@
       },
       "sentence": 2,
       "spoken_end": 106,
-      "spoken_start": 105,
-      "text": ".",
+      "spoken_start": 97,
+      "text": " whisper.",
       "token_indices": [14]
     },
     {
@@ -1011,7 +890,7 @@
           "reference": "narrator"
         }
       },
-      "id": "seg-000016",
+      "id": "seg-000012",
       "language": "sr-Latn",
       "paragraph": 1,
       "pause_after": {
@@ -1041,7 +920,7 @@
           "reference": "narrator"
         }
       },
-      "id": "seg-000017",
+      "id": "seg-000013",
       "language": "sr-Latn",
       "paragraph": 2,
       "pause_after": {
@@ -1071,7 +950,7 @@
           "reference": "narrator"
         }
       },
-      "id": "seg-000018",
+      "id": "seg-000014",
       "language": "sr-Latn",
       "paragraph": 3,
       "pause_after": {
@@ -1092,7 +971,7 @@
       "annotation_ids": [],
       "clause": 0,
       "directives": {},
-      "id": "seg-000019",
+      "id": "seg-000015",
       "language": "sr-Latn",
       "paragraph": 4,
       "pause_after": {
@@ -1113,7 +992,7 @@
       "annotation_ids": [],
       "clause": 1,
       "directives": {},
-      "id": "seg-000020",
+      "id": "seg-000016",
       "language": "sr-Latn",
       "paragraph": 4,
       "pause_after": {
@@ -1134,7 +1013,7 @@
       "annotation_ids": [],
       "clause": 0,
       "directives": {},
-      "id": "seg-000021",
+      "id": "seg-000017",
       "language": "sr-Latn",
       "paragraph": 5,
       "pause_after": {
@@ -1155,7 +1034,7 @@
       "annotation_ids": [],
       "clause": 0,
       "directives": {},
-      "id": "seg-000022",
+      "id": "seg-000018",
       "language": "sr-Latn",
       "paragraph": 6,
       "pause_after": {
@@ -1583,7 +1462,7 @@
       "spoken_start": 0
     },
     {
-      "content_hash": "sha256:07ceab4821a0e0307f00cddead811607e549790b1ad52078dae4bee407541aff",
+      "content_hash": "sha256:bde96ce498361c59abf17ae88786d75422898bfd9fc82ae80b37a4b71c98a8eb",
       "content_hash_schema": "utterplan-unit-v2",
       "id": "unit-0001",
       "index": 1,
@@ -1601,11 +1480,7 @@
         "seg-000009",
         "seg-000010",
         "seg-000011",
-        "seg-000012",
-        "seg-000013",
-        "seg-000014",
-        "seg-000015",
-        "seg-000016"
+        "seg-000012"
       ],
       "spoken_end": 145,
       "spoken_start": 14
@@ -1617,7 +1492,7 @@
       "index": 2,
       "kind": "paragraph",
       "marker_ids": [],
-      "segment_ids": ["seg-000017"],
+      "segment_ids": ["seg-000013"],
       "spoken_end": 193,
       "spoken_start": 147
     },
@@ -1628,7 +1503,7 @@
       "index": 3,
       "kind": "paragraph",
       "marker_ids": [],
-      "segment_ids": ["seg-000018"],
+      "segment_ids": ["seg-000014"],
       "spoken_end": 225,
       "spoken_start": 195
     },
@@ -1639,7 +1514,7 @@
       "index": 4,
       "kind": "paragraph",
       "marker_ids": [],
-      "segment_ids": ["seg-000019", "seg-000020"],
+      "segment_ids": ["seg-000015", "seg-000016"],
       "spoken_end": 249,
       "spoken_start": 227
     },
@@ -1650,7 +1525,7 @@
       "index": 5,
       "kind": "paragraph",
       "marker_ids": ["marker-000000"],
-      "segment_ids": ["seg-000021"],
+      "segment_ids": ["seg-000017"],
       "spoken_end": 268,
       "spoken_start": 251
     },
@@ -1661,7 +1536,7 @@
       "index": 6,
       "kind": "paragraph",
       "marker_ids": [],
-      "segment_ids": ["seg-000022"],
+      "segment_ids": ["seg-000018"],
       "spoken_end": 288,
       "spoken_start": 270
     }

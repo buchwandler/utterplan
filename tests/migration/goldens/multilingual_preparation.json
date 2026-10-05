@@ -18,12 +18,12 @@
   "boundaries": [],
   "document_metadata": {
     "header": {},
-    "sequence_fallback_mode": "spell",
     "planning": {
       "engine_independent": true,
       "linguistic_passes": 2,
       "pass_a_tokens": 3
-    }
+    },
+    "sequence_fallback_mode": "spell"
   },
   "language_detection": null,
   "languages": [
@@ -91,30 +91,10 @@
         "seconds": 0.0
       },
       "sentence": 0,
-      "spoken_end": 13,
-      "spoken_start": 6,
-      "text": "Bonjour",
-      "token_indices": [1]
-    },
-    {
-      "annotation_ids": [],
-      "clause": 0,
-      "directives": {},
-      "language": "en-us",
-      "paragraph": 0,
-      "pause_after": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "pause_before": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "sentence": 0,
       "spoken_end": 14,
-      "spoken_start": 13,
-      "text": ".",
-      "token_indices": [2]
+      "spoken_start": 6,
+      "text": "Bonjour.",
+      "token_indices": [1, 2]
     }
   ],
   "texts": {
@@ -125,7 +105,7 @@
     {
       "kind": "paragraph",
       "marker_ids": [],
-      "segment_ids": ["seg-000000", "seg-000001", "seg-000002"],
+      "segment_ids": ["seg-000000", "seg-000001"],
       "spoken_end": 14,
       "spoken_start": 0
     }
