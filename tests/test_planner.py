@@ -258,7 +258,7 @@ def test_point_audio_at_document_start_uses_following_language_context() -> None
             text_preparation="identity",
         )
     )
-    plan = planner.plan('[]{src="clip.wav"}[Bonjour]{lang="fr"}.')
+    plan = planner.plan('[]{src="clip.wav"}[Bonjour.]{lang="fr"}')
     media = next(segment for segment in plan.segments if segment.directives.audio is not None)
 
     assert media.language == "fr"

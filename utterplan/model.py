@@ -995,6 +995,9 @@ def validate_plan(plan: UtterancePlan) -> None:
                     raise PlanValidationError(
                         f"unknown boundary {event_id}", code="pause.unknown_boundary"
                     )
+    from .renderability import assert_renderable
+
+    assert_renderable(plan)
     for boundary in plan.boundaries:
         if not (0 <= boundary.position <= len(text)):
             raise PlanValidationError(

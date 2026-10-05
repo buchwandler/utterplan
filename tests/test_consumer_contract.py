@@ -101,7 +101,7 @@ def test_plain_spokenform_consumer_contract() -> None:
 def test_multilingual_ssmd_consumer_contract() -> None:
     plan = UtterancePlanner(
         PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
-    ).plan('Hello [Bonjour]{lang="fr"}.')
+    ).plan('Hello [Bonjour.]{lang="fr"}')
     assert {run.language for run in plan.languages} == {"en-us", "fr"}
     assert_public_consumer_contract(plan)
 

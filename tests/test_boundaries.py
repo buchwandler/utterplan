@@ -31,7 +31,7 @@ def test_parenthetical_boundary_keeps_phrasplit_origin():
 
 def test_language_cut_does_not_invent_clausal_comma():
     plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
-        'Hello [Bonjour]{lang="fr"}.'
+        'Hello [Bonjour.]{lang="fr"}'
     )
     assert not any(event.kind == "clausal_comma" for event in plan.boundaries)
 

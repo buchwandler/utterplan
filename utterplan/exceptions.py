@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .renderability import RenderabilityIssue
+
 
 class UtterPlanError(Exception):
     """Base exception for UtterPlan."""
@@ -49,6 +54,37 @@ class PlanValidationError(PlanFormatError):
 
 class PlanningError(UtterPlanError):
     """Planning could not produce a plan."""
+
+
+class PlanRenderabilityError(PlanningError):
+    """Planning found one or more renderer-facing segments without speech intent."""
+
+    code = "plan.not_renderable"
+
+    def __init__(
+        self,
+        issues: tuple[RenderabilityIssue, ...],
+        *,
+        mode: str,
+    ) -> None:
+        self.issues = tuple(issues)
+        self.mode = mode
+        count = len(self.issues)
+        first = self.issues[0] if self.issues else None
+        summary = (
+            f"Plan is not renderable: {count} renderer segments contain no semantic speech content."
+        )
+        if first is not None:
+            location = (
+                f"line {first.line}, column {first.column}, "
+                if first.line is not None and first.column is not None
+                else ""
+            )
+            summary += (
+                f"\nFirst issue: {location}{first.segment_id}, "
+                f"text={first.text!r} ({first.reason})."
+            )
+        super().__init__(summary)
 
 
 class LanguagePlanError(PlanningError):

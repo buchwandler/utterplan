@@ -3,11 +3,9 @@ from __future__ import annotations
 import unicodedata
 from pathlib import Path
 
-import pytest
-
-from utterplan import PlannerConfig, PlanningError, UtterancePlanner
+from utterplan import PlannerConfig, UtterancePlanner, classify_segment
 from utterplan.model import AudioDirective, PlanSegment, SegmentDirectives, TokenAnnotation
-from utterplan.planner import _is_neutral_punctuation_text, _validate_renderer_topology
+from utterplan.planner import _is_neutral_punctuation_text
 
 
 def _planner() -> UtterancePlanner:
@@ -50,7 +48,7 @@ def test_neutral_punctuation_excludes_symbols_and_emoji() -> None:
     assert not _is_neutral_punctuation_text("🙂")
 
 
-def test_topology_invariant_reports_punctuation_only_pos_tokens() -> None:
+def test_renderability_classifier_reports_punctuation_tokens_but_accepts_audio() -> None:
     segment = PlanSegment(
         id="seg-punctuation",
         text=".)",
@@ -64,14 +62,15 @@ def test_topology_invariant_reports_punctuation_only_pos_tokens() -> None:
         TokenAnnotation(5, 6, ")", pos="PUNCT", id="token-close-paren"),
     )
 
-    with pytest.raises(PlanningError) as error:
-        _validate_renderer_topology([segment], tokens)
-    message = str(error.value)
-    assert "seg-punctuation" in message
-    assert "4:6" in message
-    assert "'.)'" in message
-    assert "token-period" in message
-    assert "PUNCT" in message
+    issue = classify_segment(segment, 0, tokens)
+
+    assert issue is not None
+    assert issue.code == "renderability.punctuation_only"
+    assert issue.segment_id == "seg-punctuation"
+    assert issue.spoken_start == 4 and issue.spoken_end == 6
+    assert issue.text == ".)"
+    assert issue.token_ids == ("token-period", "token-close-paren")
+    assert issue.token_pos == ("PUNCT", "PUNCT")
 
     audio_segment = PlanSegment(
         id="seg-audio",
@@ -82,8 +81,7 @@ def test_topology_invariant_reports_punctuation_only_pos_tokens() -> None:
         directives=SegmentDirectives(audio=AudioDirective(src="clip.wav")),
         token_indices=(0, 1),
     )
-    _validate_renderer_topology([audio_segment], tokens)
-
+    assert classify_segment(audio_segment, 1, tokens) is None
 
 def test_emphasis_period_is_one_segment_with_exact_annotation_range() -> None:
     plan = _plan('[Important]{emphasis="strong"}.')
@@ -137,7 +135,7 @@ def test_voice_transitions_attach_comma_and_period_to_speech() -> None:
 
 
 def test_language_span_does_not_merge_lexical_content_across_languages() -> None:
-    plan = _plan('He said [bonjour]{lang="fr"}.')
+    plan = _plan('He said [bonjour.]{lang="fr"}')
 
     _assert_no_punctuation_only_speech(plan)
     assert any(

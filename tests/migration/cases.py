@@ -29,10 +29,10 @@ CASES = (
     MigrationCase("spokenform_numbers", "Dr. Smith bought 5 kg.", SSMD),
     MigrationCase("spokenform_date_time", "The meeting is on 2024-05-12 at 10:30.", SSMD),
     MigrationCase("spokenform_abbreviation", "Prof. Jones called at 8 p.m.", SSMD),
-    MigrationCase("multilingual_preparation", 'Hello [Bonjour]{lang="fr"}.', SSMD),
+    MigrationCase("multilingual_preparation", 'Hello [Bonjour.]{lang="fr"}', SSMD),
     MigrationCase("clausal_comma", "When ready, begin the test.", AUTO),
     MigrationCase("parenthetical", "The battery (still warm) worked.", AUTO),
-    MigrationCase("ssmd_language", 'Hello [Bonjour]{lang="fr"}.', SSMD_IDENTITY),
+    MigrationCase("ssmd_language", 'Hello [Bonjour.]{lang="fr"}', SSMD_IDENTITY),
     MigrationCase("ssmd_pronunciation", '[GIF]{ph="dʒɪf"}.', SSMD_IDENTITY),
     MigrationCase("ssmd_voice", '[Hello]{voice="narrator"}.', SSMD_IDENTITY),
     MigrationCase(
@@ -47,7 +47,7 @@ voice_bindings:
     ),
     MigrationCase("ssmd_prosody", '[fast]{rate="120%" pitch="high" volume="80%"}.', SSMD_IDENTITY),
     MigrationCase("ssmd_emphasis", '[important]{emphasis="strong"}.', SSMD_IDENTITY),
-    MigrationCase("ssmd_audio", '[sound]{src="clip.wav" desc="sound"}.', SSMD_IDENTITY),
+    MigrationCase("ssmd_audio", '[sound]{src="clip.wav" desc="sound"}', SSMD_IDENTITY),
     MigrationCase("ssmd_break", "Hello ...c world", SSMD_IDENTITY),
     MigrationCase("ssmd_marker", "One. @mark Two.", SSMD_IDENTITY),
     MigrationCase(

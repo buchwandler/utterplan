@@ -204,7 +204,7 @@ def test_callback_output_matches_baseline_and_events_are_public_primitives() -> 
 def test_multilingual_run_progress_is_monotonic_and_matches_plan_runs() -> None:
     source = (
         '---\nssmd_version: "0.9"\nlanguage: en-us\n---\n'
-        'Hello [bonjour]{lang="fr"} [hola]{lang="es"}.'
+        'Hello [bonjour]{lang="fr"} [hola.]{lang="es"}'
     )
     events: list[PlannerProgressEvent] = []
     plan = UtterancePlanner(

@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 from .config import PauseConfig, PlannerConfig, parse_duration
 from .directives import resolve_directives
-from .exceptions import ConfigurationError, PlanningError
+from .exceptions import ConfigurationError, PlanningError, PlanRenderabilityError
 from .language import LanguageRun, build_language_runs, language_lookup_key, spans_from_annotations
 from .linguistics import LinguisticResourcePool, RunAnalysis, analyze_run_analyses
 from .model import (
@@ -32,6 +32,7 @@ from .parsers import (
 from .pauses import boundary_is_active, resolve_pauses
 from .preparation import IdentityTextPreparer, SourceToSpokenMap, SpokenformTextPreparer
 from .progress import PlannerProgressEvent, ProgressCallback, _notify_progress
+from .renderability import RenderabilityIssue, contains_speech_content, preflight_segments
 from .units import make_units
 
 
@@ -280,6 +281,9 @@ class UtterancePlanner:
         segments = _segment(
             spoken, runs, prepared.annotations, boundaries, pause_config, document_language
         )
+        segments = _attach_structural_ranges(
+            segments, prepared.source_map, len(parsed.structural_text)
+        )
         segments = _attach_membership(segments, tokens, prepared.annotations)
         segments = [
             resolve_directives(
@@ -289,7 +293,42 @@ class UtterancePlanner:
             )
             for segment in segments
         ]
-        _validate_renderer_topology(segments, tokens)
+        initial_renderability = preflight_segments(segments, tokens, parsed=parsed)
+        renderability_repairs: tuple[RenderabilityIssue, ...] = ()
+        checked_segment_count = initial_renderability.checked_segments
+        if initial_renderability.issues:
+            if config.renderability_mode == "strict":
+                raise PlanRenderabilityError(initial_renderability.issues, mode="strict")
+            if any(issue.code != "renderability.punctuation_only" for issue in initial_renderability.issues):
+                raise PlanRenderabilityError(initial_renderability.issues, mode="repair")
+            segments, renderability_repairs = _repair_renderer_segments(
+                segments,
+                initial_renderability.issues,
+                spoken,
+                boundaries,
+                pause_config,
+                prepared.annotations,
+            )
+            segments = [
+                replace(segment, id=f"seg-{index:06d}")
+                for index, segment in enumerate(segments)
+            ]
+            segments = _attach_structural_ranges(
+                segments, prepared.source_map, len(parsed.structural_text)
+            )
+            segments = _attach_membership(segments, tokens, prepared.annotations)
+            segments = [
+                resolve_directives(
+                    segment,
+                    prepared.annotations,
+                    voice_defaults=parsed.metadata.get("voice_defaults"),
+                )
+                for segment in segments
+            ]
+            post_repair = preflight_segments(segments, tokens, parsed=parsed)
+            if post_repair.issues:
+                raise PlanRenderabilityError(post_repair.issues, mode="repair")
+        renderability_checked_segments = checked_segment_count
         boundaries.extend(_derived_boundaries(segments, boundaries, pause_config))
         segments = resolve_pauses(segments, boundaries, pause_config)
         markers = tuple(_map_marker(marker, prepared.source_map) for marker in parsed.markers)
@@ -308,8 +347,15 @@ class UtterancePlanner:
             "linguistic_passes": 2,
             "engine_independent": True,
             "pass_a_tokens": sum(len(run.tokens) for run in pass_a),
+            "renderability": {
+                "mode": config.renderability_mode,
+                "checked_segments": renderability_checked_segments,
+                "repair_count": len(renderability_repairs),
+                "guaranteed": True,
+            },
         }
         diagnostics = list(parsed.diagnostics)
+        diagnostics.extend(_renderability_repair_diagnostic(issue) for issue in renderability_repairs)
         if config.diagnostics:
             diagnostics.append(
                 Diagnostic(
@@ -663,12 +709,26 @@ def _coalesce_neutral_punctuation_segments(
         for annotation in _audio_annotations(annotations)
         if annotation.spoken_start is not None and annotation.spoken_end == annotation.spoken_start
     }
+    semantic_positions = {
+        position
+        for annotation in annotations
+        if _semantic_annotation(annotation)
+        and not _language_annotation(annotation)
+        and not _audio_annotation(annotation)
+        for position in (annotation.spoken_start, annotation.spoken_end)
+        if position is not None
+    }
 
     def expansion_allowed(start: int, end: int) -> bool:
         if any(start < position < end for position in active_pause_positions | audio_points):
             return False
         return not any(
             audio_start < end and audio_end > start for audio_start, audio_end in audio_spans
+        )
+
+    def semantic_expansion_allowed(start: int, end: int) -> bool:
+        return expansion_allowed(start, end) and not any(
+            start < position < end for position in semantic_positions
         )
 
     result = list(segments)
@@ -688,15 +748,16 @@ def _coalesce_neutral_punctuation_segments(
                 whitespace_end = following.spoken_start
                 while whitespace_end < following.spoken_end and text[whitespace_end].isspace():
                     whitespace_end += 1
-                if whitespace_end > following.spoken_start and expansion_allowed(
+                if whitespace_end > following.spoken_start and semantic_expansion_allowed(
                     expanded_start, whitespace_end
                 ):
                     expanded_end = whitespace_end
             if (
                 not _is_neutral_punctuation_text(previous.text)
+                and previous.language == punctuation.language
                 and not gap.strip()
                 and previous.paragraph == punctuation.paragraph
-                and expansion_allowed(expanded_start, expanded_end)
+                and semantic_expansion_allowed(expanded_start, expanded_end)
             ):
                 result[index - 1] = replace(
                     previous,
@@ -718,9 +779,10 @@ def _coalesce_neutral_punctuation_segments(
             expanded_start, expanded_end = punctuation.spoken_start, following.spoken_end
             if (
                 not _is_neutral_punctuation_text(following.text)
+                and following.language == punctuation.language
                 and not gap.strip()
                 and following.paragraph == punctuation.paragraph
-                and expansion_allowed(expanded_start, expanded_end)
+                and semantic_expansion_allowed(expanded_start, expanded_end)
             ):
                 result[index + 1] = replace(
                     following,
@@ -735,6 +797,7 @@ def _coalesce_neutral_punctuation_segments(
         if (
             previous.spoken_end != following.spoken_start
             or previous.directives.audio is not None
+            or previous.language != following.language
             or previous.paragraph != following.paragraph
             or not following.text
         ):
@@ -1257,6 +1320,18 @@ def _voice_changed(previous: PlanSegment, current: PlanSegment) -> bool:
     return left != right
 
 
+def _attach_structural_ranges(
+    segments: list[PlanSegment], source_map: Any, structural_length: int
+) -> list[PlanSegment]:
+    output: list[PlanSegment] = []
+    for segment in segments:
+        start, end = source_map.map_output_span(segment.spoken_start, segment.spoken_end)
+        start = max(0, min(structural_length, start))
+        end = max(start, min(structural_length, end))
+        output.append(replace(segment, structural_start=start, structural_end=end))
+    return output
+
+
 def _attach_membership(
     segments: list[PlanSegment], tokens: tuple[Any, ...], annotations: tuple[AnnotationSpan, ...]
 ) -> list[PlanSegment]:
@@ -1267,7 +1342,9 @@ def _attach_membership(
             for index, token in enumerate(tokens)
             if token.spoken_start < segment.spoken_end and token.spoken_end > segment.spoken_start
         )
-        annotation_ids = list(segment.annotation_ids)
+        annotation_ids = (
+            list(segment.annotation_ids) if segment.spoken_start == segment.spoken_end else []
+        )
         for annotation in annotations:
             start = annotation.spoken_start
             end = annotation.spoken_end
@@ -1285,22 +1362,175 @@ def _attach_membership(
     return output
 
 
-def _validate_renderer_topology(segments: list[PlanSegment], tokens: tuple[Any, ...]) -> None:
-    for segment in segments:
-        if segment.directives.audio is not None or not segment.token_indices:
+def _repair_renderer_segments(
+    segments: list[PlanSegment],
+    issues: tuple[RenderabilityIssue, ...],
+    text: str,
+    boundaries: list[BoundaryEvent],
+    pause_config: PauseConfig,
+    annotations: tuple[AnnotationSpan, ...],
+) -> tuple[list[PlanSegment], tuple[RenderabilityIssue, ...]]:
+    current = list(segments)
+    repairs: list[RenderabilityIssue] = []
+    for issue in issues:
+        index = next(
+            (i for i, segment in enumerate(current) if segment.id == issue.segment_id), None
+        )
+        if index is None:
             continue
-        referenced = [tokens[index] for index in segment.token_indices]
-        if referenced and all(token.pos == "PUNCT" for token in referenced):
-            token_details = [
-                {"id": token.id or f"token-{index}", "pos": token.pos}
-                for index, token in zip(segment.token_indices, referenced, strict=True)
-            ]
-            raise PlanningError(
-                "Punctuation-only renderer segment "
-                f"{segment.id} at spoken range {segment.spoken_start}:{segment.spoken_end}; "
-                f"text={segment.text!r}; tokens={token_details!r}"
+        punctuation = current[index]
+        significant = [char for char in punctuation.text if not char.isspace()]
+        terminal = bool(significant and significant[-1] in ".!?…。！？")
+        directions = (-1, 1) if terminal else (1, -1)
+        merged = False
+        for direction in directions:
+            neighbor_index = index + direction
+            if not 0 <= neighbor_index < len(current):
+                continue
+            neighbor = current[neighbor_index]
+            if not _can_merge_punctuation(
+                punctuation,
+                neighbor,
+                direction,
+                text,
+                boundaries,
+                pause_config,
+                annotations,
+            ):
+                continue
+            start = min(punctuation.spoken_start, neighbor.spoken_start)
+            end = max(punctuation.spoken_end, neighbor.spoken_end)
+            replacement_segment = replace(
+                neighbor,
+                text=text[start:end],
+                spoken_start=start,
+                spoken_end=end,
+                structural_start=None,
+                structural_end=None,
+                token_indices=(),
+                annotation_ids=(),
             )
+            current[neighbor_index] = replacement_segment
+            del current[index]
+            repairs.append(replace(issue, repair="merge_neutral_punctuation"))
+            merged = True
+            break
+        if merged:
+            continue
+        if not _can_drop_punctuation(punctuation, annotations):
+            failed = replace(
+                issue,
+                code="renderability.repair_failed",
+                reason="repair_failed",
+                hint="The punctuation segment has semantic or media constraints that prevent safe merging or omission.",
+            )
+            raise PlanRenderabilityError((failed,), mode="repair")
+        del current[index]
+        repairs.append(replace(issue, repair="drop_non_speech_punctuation"))
+    return current, tuple(repairs)
 
+
+def _can_merge_punctuation(
+    punctuation: PlanSegment,
+    neighbor: PlanSegment,
+    direction: int,
+    text: str,
+    boundaries: list[BoundaryEvent],
+    pause_config: PauseConfig,
+    annotations: tuple[AnnotationSpan, ...],
+) -> bool:
+    if (
+        not _is_neutral_punctuation_text(punctuation.text)
+        or not contains_speech_content(neighbor.text)
+        or punctuation.language != neighbor.language
+        or punctuation.paragraph != neighbor.paragraph
+        or punctuation.directives != neighbor.directives
+    ):
+        return False
+    if direction < 0:
+        gap_start, gap_end = neighbor.spoken_end, punctuation.spoken_start
+    else:
+        gap_start, gap_end = punctuation.spoken_end, neighbor.spoken_start
+    if gap_start > gap_end or text[gap_start:gap_end].strip():
+        return False
+    if any(
+        gap_start <= boundary.position <= gap_end
+        and boundary_is_active(boundary, pause_config)
+        for boundary in boundaries
+    ):
+        return False
+    if _audio_crosses_join(gap_start, gap_end, annotations):
+        return False
+    return not any(
+        not _language_annotation(annotation)
+        and _semantic_annotation(annotation)
+        and any(
+            position is not None and gap_start <= position <= gap_end
+            for position in (annotation.spoken_start, annotation.spoken_end)
+        )
+        for annotation in annotations
+    )
+
+
+def _audio_crosses_join(
+    gap_start: int, gap_end: int, annotations: tuple[AnnotationSpan, ...]
+) -> bool:
+    for annotation in _audio_annotations(annotations):
+        start, end = annotation.spoken_start, annotation.spoken_end
+        if start is None or end is None:
+            continue
+        if start == end:
+            if gap_start <= start <= gap_end:
+                return True
+        elif gap_start == gap_end:
+            if start < gap_start < end:
+                return True
+        elif start < gap_end and end > gap_start:
+            return True
+    return False
+
+
+def _can_drop_punctuation(
+    segment: PlanSegment, annotations: tuple[AnnotationSpan, ...]
+) -> bool:
+    directives = segment.directives
+    if any(
+        value is not None
+        for value in (directives.audio, directives.pronunciation, directives.substitution, directives.say_as)
+    ):
+        return False
+    protected_tags = {"audio", "phoneme", "pronunciation", "sub", "say-as"}
+    for annotation in annotations:
+        tag = str(annotation.attrs.get("tag") or annotation.kind).lower().replace("_", "-")
+        if tag not in protected_tags:
+            continue
+        if annotation.id in segment.annotation_ids:
+            return False
+        start, end = annotation.spoken_start, annotation.spoken_end
+        if start is None or end is None:
+            continue
+        if (start == end and segment.spoken_start <= start <= segment.spoken_end) or (
+            start < segment.spoken_end and end > segment.spoken_start
+        ):
+            return False
+    return True
+
+
+def _renderability_repair_diagnostic(issue: RenderabilityIssue) -> Diagnostic:
+    if issue.repair == "drop_non_speech_punctuation":
+        message = f"Removed isolated punctuation-only renderer segment {issue.text!r}"
+    else:
+        message = f"Merged neutral punctuation into an adjacent spoken segment {issue.text!r}"
+    return Diagnostic(
+        code="planning.renderability.repaired",
+        message=message,
+        severity="warning",
+        source_start=issue.source_start,
+        source_end=issue.source_end,
+        line=issue.line,
+        column=issue.column,
+        hint="Review the source if this punctuation was intended to be spoken.",
+    )
 
 def _language_annotation(annotation: AnnotationSpan) -> bool:
     return set(annotation.attrs).issubset({"lang", "language", "tag"}) and (

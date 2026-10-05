@@ -108,10 +108,10 @@ Hello."""
 def test_multilingual_segments_are_in_render_order() -> None:
     output = format_explanation(_load("multilingual.utterplan.json"))
 
-    labels = [output.index(label) for label in ("[en-us]", "[fr]", "[en-us]")]
+    labels = [output.index(label) for label in ("[en-us]", "[fr]")]
     assert labels[0] < labels[1]
-    assert '[fr] "Bonjour"' in output
-    assert '[en-us] "."' in output
+    assert output.count("[en-us]") == 1
+    assert '[fr] "Bonjour."' in output
 
 
 def test_markers_are_shown_in_their_owning_unit() -> None:

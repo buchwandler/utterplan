@@ -5,8 +5,9 @@ import json
 from pathlib import Path
 
 import jsonschema
+import pytest
 
-from utterplan import UtterancePlan, migrate_plan_data
+from utterplan import PlanValidationError, UtterancePlan, migrate_plan_data
 from utterplan.format import schema
 
 ROOT = Path(__file__).resolve().parent
@@ -41,9 +42,16 @@ def test_v1_fixtures_validate_before_migration_and_remain_immutable() -> None:
         assert all(
             unit["content_hash_schema"] == "utterplan-unit-v2" for unit in result.data["units"]
         )
-        plan = UtterancePlan.from_dict(value)
-        assert plan.schema_version == 3
-        assert plan.plan_id == result.data["plan_id"]
+        if path.name == "multilingual.json":
+            with pytest.raises(PlanValidationError) as error:
+                UtterancePlan.from_dict(value)
+            assert error.value.code == "segment.not_renderable"
+            with pytest.raises(PlanValidationError, match="segment.not_renderable"):
+                UtterancePlan.from_dict(result.data)
+        else:
+            plan = UtterancePlan.from_dict(value)
+            assert plan.schema_version == 3
+            assert plan.plan_id == result.data["plan_id"]
         assert value == before
 
 

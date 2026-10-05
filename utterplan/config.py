@@ -115,6 +115,7 @@ class PlannerConfig:
     linguistics: LinguisticsConfig = field(default_factory=LinguisticsConfig)
     ssmd: SSMDConfig = field(default_factory=SSMDConfig)
     overlap_mode: Literal["snap", "strict"] = "snap"
+    renderability_mode: Literal["strict", "repair"] = "strict"
     language_aliases: Mapping[str, str] = field(default_factory=dict)
     diagnostics: bool = True
 
@@ -129,6 +130,8 @@ class PlannerConfig:
             raise ConfigurationError("unit must be 'paragraph' or 'sentence'")
         if self.overlap_mode not in {"snap", "strict"}:
             raise ConfigurationError("overlap_mode must be 'snap' or 'strict'")
+        if self.renderability_mode not in {"strict", "repair"}:
+            raise ConfigurationError("renderability_mode must be 'strict' or 'repair'")
         if not isinstance(self.language_aliases, Mapping):
             raise ConfigurationError("language_aliases must be a string-to-string mapping")
         if any(

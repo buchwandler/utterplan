@@ -58,8 +58,8 @@ def test_token_text_must_match_spoken_slice():
 def test_compact_optional_fields_are_omitted():
     value = plan().to_dict()
     assert value["segments"]
-    assert all("structural_start" not in item for item in value["segments"])
-    assert all("structural_end" not in item for item in value["segments"])
+    assert all(item["structural_start"] is not None for item in value["segments"])
+    assert all(item["structural_end"] is not None for item in value["segments"])
     assert all(item["directives"] == {} for item in value["segments"])
     assert all("pos" not in item for item in value["tokens"])
     assert all("tag" not in item for item in value["tokens"])

@@ -1,97 +1,114 @@
 {
+  "texts": {
+    "structural": "Hello world",
+    "spoken": "Hello world"
+  },
+  "preparation": {
+    "backend": "identity",
+    "languages": [
+      "en-us"
+    ],
+    "replacements": []
+  },
+  "languages": [
+    {
+      "id": "lang-0",
+      "spoken_start": 0,
+      "spoken_end": 11,
+      "language": "en-us",
+      "source": "document-default"
+    }
+  ],
   "annotations": [],
   "boundaries": [
     {
-      "attrs": {
-        "anchor": "after",
-        "pause_origin": "planner_default",
-        "strength": "medium"
-      },
-      "kind": "explicit",
-      "origin": "ssmd",
       "position": 5,
+      "kind": "explicit",
       "seconds": 0.3,
-      "strength": "medium"
+      "origin": "ssmd",
+      "strength": "medium",
+      "attrs": {
+        "strength": "medium",
+        "anchor": "after",
+        "pause_origin": "planner_default"
+      }
     }
   ],
+  "segments": [
+    {
+      "text": "Hello",
+      "spoken_start": 0,
+      "spoken_end": 5,
+      "language": "en-us",
+      "paragraph": 0,
+      "sentence": 0,
+      "clause": 0,
+      "pause_before": {
+        "seconds": 0.0,
+        "events": []
+      },
+      "pause_after": {
+        "seconds": 0.3,
+        "events": [
+          "boundary-000000"
+        ]
+      },
+      "directives": {},
+      "token_indices": [
+        0
+      ],
+      "annotation_ids": []
+    },
+    {
+      "text": " world",
+      "spoken_start": 5,
+      "spoken_end": 11,
+      "language": "en-us",
+      "paragraph": 0,
+      "sentence": 0,
+      "clause": 1,
+      "pause_before": {
+        "seconds": 0.0,
+        "events": []
+      },
+      "pause_after": {
+        "seconds": 0.0,
+        "events": []
+      },
+      "directives": {},
+      "token_indices": [
+        1
+      ],
+      "annotation_ids": []
+    }
+  ],
+  "units": [
+    {
+      "kind": "paragraph",
+      "spoken_start": 0,
+      "spoken_end": 11,
+      "segment_ids": [
+        "seg-000000",
+        "seg-000001"
+      ],
+      "marker_ids": []
+    }
+  ],
+  "markers": [],
   "document_metadata": {
     "header": {},
     "sequence_fallback_mode": "spell",
     "planning": {
-      "engine_independent": true,
       "linguistic_passes": 2,
-      "pass_a_tokens": 2
+      "engine_independent": true,
+      "pass_a_tokens": 2,
+      "renderability": {
+        "mode": "strict",
+        "checked_segments": 2,
+        "repair_count": 0,
+        "guaranteed": true
+      }
     }
   },
-  "language_detection": null,
-  "languages": [
-    {
-      "id": "lang-0",
-      "language": "en-us",
-      "source": "document-default",
-      "spoken_end": 11,
-      "spoken_start": 0
-    }
-  ],
-  "markers": [],
-  "preparation": {
-    "backend": "identity",
-    "languages": ["en-us"],
-    "replacements": []
-  },
-  "segments": [
-    {
-      "annotation_ids": [],
-      "clause": 0,
-      "directives": {},
-      "language": "en-us",
-      "paragraph": 0,
-      "pause_after": {
-        "events": ["boundary-000000"],
-        "seconds": 0.3
-      },
-      "pause_before": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "sentence": 0,
-      "spoken_end": 5,
-      "spoken_start": 0,
-      "text": "Hello",
-      "token_indices": [0]
-    },
-    {
-      "annotation_ids": [],
-      "clause": 1,
-      "directives": {},
-      "language": "en-us",
-      "paragraph": 0,
-      "pause_after": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "pause_before": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "sentence": 0,
-      "spoken_end": 11,
-      "spoken_start": 5,
-      "text": " world",
-      "token_indices": [1]
-    }
-  ],
-  "texts": {
-    "spoken": "Hello world",
-    "structural": "Hello world"
-  },
-  "units": [
-    {
-      "kind": "paragraph",
-      "marker_ids": [],
-      "segment_ids": ["seg-000000", "seg-000001"],
-      "spoken_end": 11,
-      "spoken_start": 0
-    }
-  ]
+  "language_detection": null
 }

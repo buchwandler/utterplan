@@ -9,7 +9,7 @@ from typing import Literal, cast
 from . import PlannerConfig, UtterancePlan, __version__
 from .compiler import InputFormat, compile_document
 from .config import LinguisticsConfig, PauseConfig
-from .exceptions import PlanFormatError, UtterPlanError
+from .exceptions import PlanFormatError, PlanRenderabilityError, UtterPlanError
 from .explain import format_explanation
 from .migration import MigrationResult, migrate_plan_data
 
@@ -75,6 +75,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="spokenform",
     )
     compile_parser.add_argument("--pause-mode", choices=("tts", "manual", "auto"), default="tts")
+    compile_parser.add_argument(
+        "--renderability",
+        choices=("strict", "repair"),
+        default="strict",
+        help="reject non-renderable segments or apply safe deterministic repairs",
+    )
     compile_parser.add_argument(
         "--spacy",
         choices=("auto", "off", "sm", "md", "lg", "trf"),
@@ -253,6 +259,7 @@ def _compile(args: argparse.Namespace) -> int:
         unit=args.unit,
         pauses=PauseConfig(mode=args.pause_mode),
         linguistics=_linguistics_config(args.spacy),
+        renderability_mode=args.renderability,
     )
     plan = compile_document(
         source,
@@ -272,7 +279,42 @@ def _compile(args: argparse.Namespace) -> int:
                 f"wrote {args.output} ({len(plan.segments)} segments, {len(plan.units)} units)",
                 file=sys.stderr,
             )
+    if args.renderability == "repair":
+        planning = plan.document_metadata.get("planning", {})
+        report = planning.get("renderability", {}) if isinstance(planning, dict) else {}
+        repair_count = report.get("repair_count", 0) if isinstance(report, dict) else 0
+        suffix = "s" if repair_count != 1 else ""
+        print(
+            f"renderability: guaranteed; {repair_count} punctuation segment{suffix} repaired",
+            file=sys.stderr,
+        )
     return 0
+
+
+def _format_renderability_error(error: PlanRenderabilityError, args: argparse.Namespace) -> str:
+    source_label = str(args.file) if getattr(args, "file", None) is not None else "input"
+    positional = getattr(args, "text", ())
+    if source_label == "input" and len(positional) == 1:
+        candidate = Path(positional[0])
+        if candidate.is_file():
+            source_label = str(candidate)
+    lines = [f"utterplan: plan is not renderable: {len(error.issues)} segments"]
+    for issue in error.issues:
+        if issue.line is not None and issue.column is not None:
+            lines.append(f"\n{source_label}:{issue.line}:{issue.column}")
+        else:
+            lines.append(f"\n{source_label}: {issue.reason}")
+        lines.append(f"  {issue.segment_id}  {issue.reason}")
+        excerpt = issue.source_excerpt if issue.source_excerpt is not None else issue.text
+        lines.append(f"  {excerpt}")
+        if issue.column is not None:
+            lines.append(f"  {' ' * max(0, issue.column - 1)}^")
+        lines.append(f"  spoken: {issue.spoken_start}:{issue.spoken_end}")
+        if issue.structural_start is not None and issue.structural_end is not None:
+            lines.append(f"  structural: {issue.structural_start}:{issue.structural_end}")
+    if error.issues and error.issues[0].hint:
+        lines.append(f"\nHint: {error.issues[0].hint}")
+    return "\n".join(lines)
 
 
 def _migration_result(path: Path) -> MigrationResult:
@@ -384,6 +426,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         _inspect(plan, args)
         return 0
+    except PlanRenderabilityError as exc:
+        print(_format_renderability_error(exc, args), file=sys.stderr)
+        return 1
     except (OSError, UtterPlanError, ValueError, TypeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

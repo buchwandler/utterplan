@@ -22,6 +22,7 @@ def test_compile_cli_defaults() -> None:
     assert args.pause_mode == "tts"
     assert args.spacy == "off"
 
+    assert args.renderability == "strict"
 
 def test_compile_literal_text_to_stdout_json(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["compile", "Hello world.", "--lang", "en-us"]) == 0
@@ -162,6 +163,67 @@ Hello.""",
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "Traceback" not in captured.err
+
+
+def test_compile_strict_renderability_reports_source_and_writes_no_plan(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "broken.txt"
+    output = tmp_path / "plan.utterplan.json"
+    source.write_text("Hello.\n\n.\n\nWorld.", encoding="utf-8")
+
+    result = main(
+        [
+            "compile",
+            "--file",
+            str(source),
+            "--lang",
+            "en-us",
+            "--text-preparation",
+            "identity",
+            "-o",
+            str(output),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 1
+    assert not output.exists()
+    assert captured.out == ""
+    assert f"{source}:3:1" in captured.err
+    assert "punctuation_only" in captured.err
+    assert "spoken:" in captured.err and "structural:" in captured.err
+
+
+def test_compile_repair_cli_reports_guaranteed_renderability(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "repair.txt"
+    output = tmp_path / "plan.utterplan.json"
+    source.write_text("Hello.\n\n.\n\nWorld.", encoding="utf-8")
+
+    result = main(
+        [
+            "compile",
+            "--file",
+            str(source),
+            "--lang",
+            "en-us",
+            "--text-preparation",
+            "identity",
+            "--renderability",
+            "repair",
+            "-o",
+            str(output),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert json.loads(output.read_text(encoding="utf-8"))["document_metadata"]["planning"][
+        "renderability"
+    ]["guaranteed"] is True
+    assert "renderability: guaranteed; 1 punctuation segment repaired" in captured.err
 
 
 def test_top_level_version(capsys: pytest.CaptureFixture[str]) -> None:

@@ -3,11 +3,20 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, Literal
 
 from .config import PlannerConfig, parse_duration
 from .exceptions import ConfigurationError, PlanFormatError, PlanningError
 from .model import AnnotationSpan, BoundaryEvent, Diagnostic, Marker
+
+
+@dataclass(frozen=True, slots=True)
+class SourceTextSpan:
+    structural_start: int
+    structural_end: int
+    source_start: int
+    source_end: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +31,9 @@ class ParsedDocument:
     warnings: tuple[str, ...] = ()
     diagnostics: tuple[Diagnostic, ...] = ()
     document_language: str = ""
+    text_spans: tuple[SourceTextSpan, ...] = ()
+
+
 
 
 def effective_sequence_fallback_mode(
@@ -54,6 +66,7 @@ class PlainDocumentParser:
         return ParsedDocument(
             source_text=text,
             structural_text=text,
+            text_spans=(SourceTextSpan(0, len(text), 0, len(text)),),
             boundaries=boundaries,
             document_language=config.language,
         )
@@ -94,6 +107,42 @@ class SSMDDocumentParser:
             raise PlanFormatError(f"{first.message}{location}", code=first.code, path="$.source")
 
         structural = str(parsed.clean_text)
+        raw_events = tuple(parsed.events)
+        legacy_scene_breaks: tuple[tuple[int, int, int], ...] = ()
+        legacy_spans: tuple[SourceTextSpan, ...] = ()
+        if structural == text:
+            structural, legacy_scene_breaks, legacy_spans = _normalize_legacy_scene_breaks(text)
+            if legacy_scene_breaks:
+                raw_events = tuple(
+                    SimpleNamespace(
+                        kind=event.kind,
+                        pos=_remap_removed_text_position(
+                            int(getattr(event, "pos", getattr(event, "position", 0))),
+                            legacy_scene_breaks,
+                        ),
+                        attrs=event.attrs,
+                        anchor=getattr(event, "anchor", "after"),
+                        source_start=getattr(event, "source_start", None),
+                        source_end=getattr(event, "source_end", None),
+                    )
+                    for event in raw_events
+                )
+        source_spans: list[SourceTextSpan] = list(legacy_spans)
+        if not legacy_spans:
+            for span in getattr(parsed, "text_spans", ()):
+                if span is None:
+                    continue
+                source_spans.append(
+                    SourceTextSpan(
+                        structural_start=int(span.char_start),
+                        structural_end=int(span.char_end),
+                        source_start=int(span.source_start),
+                        source_end=int(span.source_end),
+                    )
+                )
+        if not source_spans and not legacy_scene_breaks and str(parsed.clean_text) == text:
+            source_spans.append(SourceTextSpan(0, len(text), 0, len(text)))
+        text_spans = tuple(source_spans)
         recovered_audio = _recover_zero_width_audio_annotations(ssmd, text, parsed, config)
         annotations = tuple(
             AnnotationSpan(
@@ -125,7 +174,7 @@ class SSMDDocumentParser:
         boundaries: list[BoundaryEvent] = []
         markers: list[Marker] = []
         warnings = [str(value) for value in parsed.warnings]
-        for event in parsed.events:
+        for event in raw_events:
             attrs = {str(k): _plain_value(v) for k, v in event.attrs.items()}
             kind = str(event.kind)
             position = int(getattr(event, "pos", getattr(event, "position", 0)))
@@ -185,6 +234,29 @@ class SSMDDocumentParser:
                     )
                 )
 
+        for position, source_start, source_end in legacy_scene_breaks:
+            attrs = {"strength": "x-strong", "legacy_horizontal_rule": True}
+            pause_origin = _duration_origin(attrs, config, parsed.header)
+            if pause_origin == "none":
+                pause_origin = "planner_default"
+            boundaries.append(
+                BoundaryEvent(
+                    id=f"boundary-{len(boundaries):06d}",
+                    position=position,
+                    kind="explicit",
+                    seconds=_duration(attrs, config, parsed.header),
+                    origin="ssmd",
+                    strength="x-strong",
+                    attrs={
+                        **attrs,
+                        "anchor": "after",
+                        "source_start": source_start,
+                        "source_end": source_end,
+                        "pause_origin": pause_origin,
+                    },
+                )
+            )
+
         metadata: dict[str, Any] = {"header": header, "sequence_fallback_mode": fallback_mode}
         for key in (
             "ssmd_version",
@@ -215,7 +287,130 @@ class SSMDDocumentParser:
             warnings=tuple(warnings),
             diagnostics=tuple(item for item in diagnostics if item.severity != "error"),
             document_language=document_language,
+            text_spans=text_spans,
         )
+
+
+def map_structural_span_to_source(
+    parsed: ParsedDocument,
+    start: int,
+    end: int,
+) -> tuple[int | None, int | None]:
+    """Map a structural-text span to original source offsets when reliable."""
+    if start < 0 or end < start or end > len(parsed.structural_text):
+        return None, None
+    if parsed.source_text == parsed.structural_text:
+        return start, end
+    spans = tuple(
+        span
+        for span in parsed.text_spans
+        if (
+            0 <= span.structural_start <= span.structural_end <= len(parsed.structural_text)
+            and 0 <= span.source_start <= span.source_end <= len(parsed.source_text)
+        )
+    )
+    if not spans:
+        return None, None
+    if start == end:
+        containing = [
+            span for span in spans if span.structural_start <= start <= span.structural_end
+        ]
+        if containing:
+            span = min(
+                containing,
+                key=lambda item: (
+                    item.structural_end - item.structural_start,
+                    item.source_start,
+                ),
+            )
+            relative = start - span.structural_start
+            source_position = span.source_start + min(
+                relative, span.source_end - span.source_start
+            )
+            return source_position, source_position
+        preceding = [span for span in spans if span.structural_end < start]
+        following = [span for span in spans if span.structural_start > start]
+        previous = max(preceding, key=lambda item: item.structural_end) if preceding else None
+        next_span = min(following, key=lambda item: item.structural_start) if following else None
+        if previous is None and next_span is None:
+            return None, None
+        if previous is None:
+            assert next_span is not None
+            position = next_span.source_start
+        elif next_span is None or start - previous.structural_end <= next_span.structural_start - start:
+            position = previous.source_end
+        else:
+            position = next_span.source_start
+        return position, position
+
+    overlapping = [
+        span
+        for span in spans
+        if span.structural_start < end and span.structural_end > start
+    ]
+    if not overlapping:
+        return None, None
+    return (
+        min(span.source_start for span in overlapping),
+        max(span.source_end for span in overlapping),
+    )
+
+
+def _normalize_legacy_scene_breaks(
+    text: str,
+) -> tuple[str, tuple[tuple[int, int, int], ...], tuple[SourceTextSpan, ...]]:
+    """Normalize standalone legacy horizontal rules when SSMD leaves them as text."""
+    matches = tuple(
+        re.finditer(r"(?m)^[ \t]*---[ \t]*(?:\r?\n(?:[ \t]*\r?\n)?)?", text)
+    )
+    if not matches:
+        return text, (), ()
+
+    pieces: list[str] = []
+    spans: list[SourceTextSpan] = []
+    breaks: list[tuple[int, int, int]] = []
+    source_cursor = 0
+    structural_cursor = 0
+    for match in matches:
+        kept = text[source_cursor : match.start()]
+        if kept:
+            pieces.append(kept)
+            spans.append(
+                SourceTextSpan(
+                    structural_start=structural_cursor,
+                    structural_end=structural_cursor + len(kept),
+                    source_start=source_cursor,
+                    source_end=match.start(),
+                )
+            )
+            structural_cursor += len(kept)
+        breaks.append((structural_cursor, match.start(), match.end()))
+        source_cursor = match.end()
+    kept = text[source_cursor:]
+    if kept:
+        pieces.append(kept)
+        spans.append(
+            SourceTextSpan(
+                structural_start=structural_cursor,
+                structural_end=structural_cursor + len(kept),
+                source_start=source_cursor,
+                source_end=len(text),
+            )
+        )
+    return "".join(pieces), tuple(breaks), tuple(spans)
+
+
+def _remap_removed_text_position(
+    position: int, removed_spans: tuple[tuple[int, int, int], ...]
+) -> int:
+    removed_before = 0
+    for _structural_position, source_start, source_end in removed_spans:
+        if position < source_start:
+            break
+        if position < source_end:
+            return source_start - removed_before
+        removed_before += source_end - source_start
+    return position - removed_before
 
 
 def _keep_ssmd_annotation(item: Any) -> bool:

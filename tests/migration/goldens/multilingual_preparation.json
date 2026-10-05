@@ -1,113 +1,124 @@
 {
+  "texts": {
+    "structural": "Hello Bonjour.",
+    "spoken": "Hello Bonjour."
+  },
+  "preparation": {
+    "backend": "spokenform",
+    "languages": [
+      "en-us",
+      "fr"
+    ],
+    "replacements": []
+  },
+  "languages": [
+    {
+      "id": "lang-0",
+      "spoken_start": 0,
+      "spoken_end": 5,
+      "language": "en-us",
+      "source": "document-default"
+    },
+    {
+      "id": "lang-1",
+      "spoken_start": 5,
+      "spoken_end": 14,
+      "language": "fr",
+      "source": "explicit-span"
+    }
+  ],
   "annotations": [
     {
+      "id": "annotation-000000",
+      "kind": "lang",
       "attrs": {
         "lang": "fr",
         "tag": "lang"
       },
-      "id": "annotation-000000",
-      "kind": "lang",
-      "source_end": 26,
-      "source_start": 6,
-      "spoken_end": 13,
+      "structural_start": 5,
+      "structural_end": 14,
       "spoken_start": 5,
-      "structural_end": 13,
-      "structural_start": 5
+      "spoken_end": 14,
+      "source_start": 6,
+      "source_end": 27
     }
   ],
   "boundaries": [],
-  "document_metadata": {
-    "header": {},
-    "planning": {
-      "engine_independent": true,
-      "linguistic_passes": 2,
-      "pass_a_tokens": 3
-    },
-    "sequence_fallback_mode": "spell"
-  },
-  "language_detection": null,
-  "languages": [
-    {
-      "id": "lang-0",
-      "language": "en-us",
-      "source": "document-default",
-      "spoken_end": 5,
-      "spoken_start": 0
-    },
-    {
-      "id": "lang-1",
-      "language": "fr",
-      "source": "explicit-span",
-      "spoken_end": 13,
-      "spoken_start": 5
-    },
-    {
-      "id": "lang-2",
-      "language": "en-us",
-      "source": "document-default",
-      "spoken_end": 14,
-      "spoken_start": 13
-    }
-  ],
-  "markers": [],
-  "preparation": {
-    "backend": "spokenform",
-    "languages": ["en-us", "fr", "en-us"],
-    "replacements": []
-  },
   "segments": [
     {
-      "annotation_ids": [],
-      "clause": 0,
-      "directives": {},
+      "text": "Hello",
+      "spoken_start": 0,
+      "spoken_end": 5,
       "language": "en-us",
       "paragraph": 0,
-      "pause_after": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "pause_before": {
-        "events": [],
-        "seconds": 0.0
-      },
       "sentence": 0,
-      "spoken_end": 5,
-      "spoken_start": 0,
-      "text": "Hello",
-      "token_indices": [0]
+      "clause": 0,
+      "pause_before": {
+        "seconds": 0.0,
+        "events": []
+      },
+      "pause_after": {
+        "seconds": 0.0,
+        "events": []
+      },
+      "directives": {},
+      "token_indices": [
+        0
+      ],
+      "annotation_ids": []
     },
     {
-      "annotation_ids": ["annotation-000000"],
-      "clause": 0,
-      "directives": {},
+      "text": "Bonjour.",
+      "spoken_start": 6,
+      "spoken_end": 14,
       "language": "fr",
       "paragraph": 0,
-      "pause_after": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "pause_before": {
-        "events": [],
-        "seconds": 0.0
-      },
       "sentence": 0,
-      "spoken_end": 14,
-      "spoken_start": 6,
-      "text": "Bonjour.",
-      "token_indices": [1, 2]
+      "clause": 0,
+      "pause_before": {
+        "seconds": 0.0,
+        "events": []
+      },
+      "pause_after": {
+        "seconds": 0.0,
+        "events": []
+      },
+      "directives": {},
+      "token_indices": [
+        1
+      ],
+      "annotation_ids": [
+        "annotation-000000"
+      ]
     }
   ],
-  "texts": {
-    "spoken": "Hello Bonjour.",
-    "structural": "Hello Bonjour."
-  },
   "units": [
     {
       "kind": "paragraph",
-      "marker_ids": [],
-      "segment_ids": ["seg-000000", "seg-000001"],
+      "spoken_start": 0,
       "spoken_end": 14,
-      "spoken_start": 0
+      "segment_ids": [
+        "seg-000000",
+        "seg-000001"
+      ],
+      "marker_ids": []
     }
-  ]
+  ],
+  "markers": [],
+  "document_metadata": {
+    "header": {},
+    "sequence_fallback_mode": "spell",
+    "planning": {
+      "linguistic_passes": 2,
+      "engine_independent": true,
+      "pass_a_tokens": 2,
+      "renderability": {
+        "mode": "strict",
+        "checked_segments": 2,
+        "repair_count": 0,
+        "guaranteed": true
+      }
+    }
+  },
+  "language_detection": null
 }

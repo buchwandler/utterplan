@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from importlib.metadata import version
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,6 +15,29 @@ from utterplan.exceptions import PlanFormatError
 from utterplan.format import schema
 from utterplan.language import language_lookup_key
 from utterplan.pauses import boundary_is_active
+
+
+def _installed_ssmd_version() -> tuple[int, int, int]:
+    parts = version("ssmd").split(".")
+    return tuple(int(part) for part in parts[:3])  # type: ignore[return-value]
+
+
+def test_canonical_scene_break_is_structural_not_renderer_text() -> None:
+    plan = _planner().plan("Before.\n\n...p\n\nAfter.")
+
+    assert plan.texts.structural == "Before.\n\nAfter."
+    assert all("...p" not in segment.text for segment in plan.segments)
+
+
+@pytest.mark.skipif(
+    _installed_ssmd_version() < (0, 9, 3),
+    reason="legacy horizontal-rule scene breaks require SSMD 0.9.3",
+)
+def test_legacy_scene_break_is_structural_not_renderer_text() -> None:
+    plan = _planner().plan("Before.\n\n---\n\nAfter.")
+
+    assert plan.texts.structural == "Before.\n\nAfter."
+    assert all(segment.text != "---" for segment in plan.segments)
 
 
 def _planner() -> UtterancePlanner:
@@ -102,7 +126,7 @@ language_detection:
 requires:
   extensions: [acme.effects.whisper]
 ---
-Hello [there]{lang="en-GB"}.
+Hello [there.]{lang="en-GB"}
 """
     plan = _planner().plan(text)
 

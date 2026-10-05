@@ -1,78 +1,99 @@
 {
-  "annotations": [],
-  "boundaries": [],
-  "document_metadata": {
-    "header": {
-      "language_detection": {
-        "languages": ["de", "en"],
-        "mode": "auto"
-      },
-      "ssmd_version": "0.9"
-    },
-    "sequence_fallback_mode": "spell",
-    "language_detection": {
-      "languages": ["de", "en"],
-      "mode": "auto"
-    },
-    "planning": {
-      "engine_independent": true,
-      "linguistic_passes": 2,
-      "pass_a_tokens": 1
-    },
-    "ssmd_version": "0.9"
+  "texts": {
+    "structural": "Hallo.",
+    "spoken": "Hallo."
   },
-  "language_detection": {
-    "languages": ["de", "en"],
-    "mode": "auto"
+  "preparation": {
+    "backend": "identity",
+    "languages": [
+      "en-us"
+    ],
+    "replacements": []
   },
   "languages": [
     {
       "id": "lang-0",
-      "language": "en-us",
-      "source": "document-default",
+      "spoken_start": 0,
       "spoken_end": 6,
-      "spoken_start": 0
+      "language": "en-us",
+      "source": "document-default"
     }
   ],
-  "markers": [],
-  "preparation": {
-    "backend": "identity",
-    "languages": ["en-us"],
-    "replacements": []
-  },
+  "annotations": [],
+  "boundaries": [],
   "segments": [
     {
-      "annotation_ids": [],
-      "clause": 0,
-      "directives": {},
+      "text": "Hallo.",
+      "spoken_start": 0,
+      "spoken_end": 6,
       "language": "en-us",
       "paragraph": 0,
-      "pause_after": {
-        "events": [],
-        "seconds": 0.0
-      },
-      "pause_before": {
-        "events": [],
-        "seconds": 0.0
-      },
       "sentence": 0,
-      "spoken_end": 6,
-      "spoken_start": 0,
-      "text": "Hallo.",
-      "token_indices": [0]
+      "clause": 0,
+      "pause_before": {
+        "seconds": 0.0,
+        "events": []
+      },
+      "pause_after": {
+        "seconds": 0.0,
+        "events": []
+      },
+      "directives": {},
+      "token_indices": [
+        0
+      ],
+      "annotation_ids": []
     }
   ],
-  "texts": {
-    "spoken": "Hallo.",
-    "structural": "Hallo."
-  },
   "units": [
     {
       "kind": "paragraph",
-      "marker_ids": [],
-      "segment_ids": ["seg-000000"],
+      "spoken_start": 0,
       "spoken_end": 6,
-      "spoken_start": 0
+      "segment_ids": [
+        "seg-000000"
+      ],
+      "marker_ids": []
     }
-  ]
+  ],
+  "markers": [],
+  "document_metadata": {
+    "header": {
+      "ssmd_version": "0.9",
+      "language_detection": {
+        "mode": "auto",
+        "languages": [
+          "de",
+          "en"
+        ]
+      }
+    },
+    "sequence_fallback_mode": "spell",
+    "ssmd_version": "0.9",
+    "language_detection": {
+      "mode": "auto",
+      "languages": [
+        "de",
+        "en"
+      ]
+    },
+    "planning": {
+      "linguistic_passes": 2,
+      "engine_independent": true,
+      "pass_a_tokens": 1,
+      "renderability": {
+        "mode": "strict",
+        "checked_segments": 1,
+        "repair_count": 0,
+        "guaranteed": true
+      }
+    }
+  },
+  "language_detection": {
+    "mode": "auto",
+    "languages": [
+      "de",
+      "en"
+    ]
+  }
 }

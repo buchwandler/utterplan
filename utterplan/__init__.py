@@ -21,6 +21,7 @@ from .exceptions import (
     PlanFormatError,
     PlanMigrationError,
     PlanningError,
+    PlanRenderabilityError,
     PlanValidationError,
     SegmentationError,
     TextPreparationError,
@@ -55,6 +56,15 @@ from .model import (
 )
 from .planner import UtterancePlanner
 from .progress import PlannerProgressEvent, ProgressCallback, ProgressKind, ProgressPhase
+from .renderability import (
+    RenderabilityIssue,
+    RenderabilityMode,
+    RenderabilityReport,
+    assert_renderable,
+    classify_segment,
+    contains_speech_content,
+    preflight_renderability,
+)
 from .versioning import (
     CURRENT_SCHEMA_VERSION,
     FORMAT,
@@ -77,6 +87,13 @@ __all__ = [
     "parse_duration",
     "UtterancePlanner",
     "PlannerProgressEvent",
+    "RenderabilityIssue",
+    "RenderabilityMode",
+    "RenderabilityReport",
+    "assert_renderable",
+    "classify_segment",
+    "contains_speech_content",
+    "preflight_renderability",
     "ProgressCallback",
     "ProgressKind",
     "ProgressPhase",
@@ -111,6 +128,7 @@ __all__ = [
     "ConfigurationError",
     "PlanFormatError",
     "PlanValidationError",
+    "PlanRenderabilityError",
     "UnsupportedSchemaError",
     "PlanningError",
     "LanguagePlanError",

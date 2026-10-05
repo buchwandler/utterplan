@@ -78,15 +78,14 @@ def test_identity_preparation_keeps_sequence_fallback_mode_without_spokenform(
 
 def test_multilingual_preparation_composes_run_offsets():
     plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
-        'Hello [Bonjour]{lang="fr"}.'
+        'Hello [Bonjour.]{lang="fr"}'
     )
     assert plan.texts.spoken == "Hello Bonjour."
     assert [(run.language, run.spoken_start, run.spoken_end) for run in plan.languages] == [
         ("en-us", 0, 5),
-        ("fr", 5, 13),
-        ("en-us", 13, 14),
+        ("fr", 5, 14),
     ]
-    assert plan.preparation.languages == ("en-us", "fr", "en-us")
+    assert plan.preparation.languages == ("en-us", "fr")
     payload = plan.to_dict()
     assert "offset_map" not in payload["preparation"]
     assert "source_text" not in payload["preparation"]
