@@ -153,10 +153,10 @@ jobs:
           [Hello]{voice-name="test"} ...200ms world.
           EOF
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" compile \
-            "$RUNNER_TEMP/test.ssmd.md" --lang en-us --text-preparation identity --json \
-            > "$RUNNER_TEMP/test.utterplan.json"
+            "$RUNNER_TEMP/test.ssmd.md" --lang en-us --text-preparation identity \
+            > "$RUNNER_TEMP/test.utterplan.toml"
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" validate \
-            "$RUNNER_TEMP/test.utterplan.json"
+            "$RUNNER_TEMP/test.utterplan.toml"
           cat > "$RUNNER_TEMP/test-0.8.ssmd.md" <<'EOF'
           ---
           ssmd_version: "0.8"
@@ -164,7 +164,7 @@ jobs:
           Hello.
           EOF
           if "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" compile \
-            "$RUNNER_TEMP/test-0.8.ssmd.md" --lang en-us --text-preparation identity --json \
+            "$RUNNER_TEMP/test-0.8.ssmd.md" --lang en-us --text-preparation identity \
             > "$RUNNER_TEMP/test-0.8.out" 2>&1; then
             cat "$RUNNER_TEMP/test-0.8.out"
             echo "Installed wheel accepted an SSMD 0.8 document" >&2
@@ -174,4 +174,4 @@ jobs:
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" migrate \
             "$GITHUB_WORKSPACE/tests/schema_history/v1/basic.json" --check
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" inspect \
-            "$RUNNER_TEMP/test.utterplan.json" --segment 0
+            "$RUNNER_TEMP/test.utterplan.toml" --segment 0

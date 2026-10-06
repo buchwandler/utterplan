@@ -1,10 +1,12 @@
 # Renderer consumer guide
 
 UtterPlan ends at a semantic planning boundary. A renderer consumes the public
-plan object and begins G2P after planning. It does not need a JSON round trip
+plan object and begins G2P after planning. It does not need a TOML round trip
 when planner and renderer run in the same process.
 
-UtterPlan accepts SSMD source syntax at version 0.9 only. Source migration is separate from serialized-plan migration; historical `.utterplan.json` files migrate sequentially to schema v4 without reparsing or replanning.
+UtterPlan accepts SSMD source syntax at version 0.9 only. Source migration is separate from plan migration. Current persisted plans use TOML; supported historical `.utterplan.json` files require the explicit `utterplan migrate` import command and migrate to schema v4 without reparsing or replanning.
+
+For persistence across processes, save a current plan as `.utterplan.toml` and load it with `UtterancePlan.load()`. `to_toml()` / `from_toml()` provide text round-tripping, and `plan_id` is stable across the wire-format projection. TOML is the normal plan format; batch reports are operational records, not plans. Import historical JSON plans explicitly with `utterplan migrate` before handing the resulting TOML to consumers.
 
 ## Migrating source and serialized plans
 
@@ -33,9 +35,9 @@ plan = planner.plan(ssmd_source)
 
 `SSMDConfig.strict_header` and `SSMDConfig.unknown_header` were removed because SSMD 0.9 owns header validation. `parse_header` is now `parse_yaml_header`, and the application-level `pause_defaults` option is now `pause_overrides`. The portable SSMD source-header key remains `pause_defaults`. At a shared boundary, an explicit source break takes precedence over application overrides, document defaults, and planner defaults, including an authored `0ms` break.
 
-### Existing UtterPlan JSON plans
+### Importing legacy JSON plans
 
-Serialized schemas v1, v2, and v3 remain supported and immutable. UtterPlan migrates supported plans through the registered chain to current schema v4. The v3-to-v4 step preserves existing boundary evidence and derives only deterministic topology; it does not reparse source, rerun NLP, or replan. Package version and serialized schema version are independent.
+Legacy serialized schemas v1, v2, and v3 remain supported and immutable; v4 JSON plans can also be explicitly imported. `utterplan migrate old.utterplan.json -o current.utterplan.toml` applies any required registered schema migration and writes current TOML. Normal `UtterancePlan.load()` does not accept JSON or auto-detect it. The v3-to-v4 step preserves existing boundary evidence and derives only deterministic topology; it does not reparse source, rerun NLP, or replan. Package version and semantic schema version are independent.
 
 ## Planning defaults
 
@@ -105,10 +107,10 @@ Consumers may rely on these plan-level fields: `texts.spoken`, `preparation`, `l
 A completed plan is immutable consumer input. Consumers may inspect and adapt the data for G2P or rendering, but must not rewrite planning decisions or mutate the plan. The canonical invariant is:
 
 ```python
-before = plan.to_json(indent=None)
+before = plan.to_toml()
 plan_id = plan.plan_id
 consume_plan(plan)
-assert plan.to_json(indent=None) == before
+assert plan.to_toml() == before
 assert plan.plan_id == plan_id
 ```
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import replace
 from importlib.metadata import version
 from pathlib import Path
@@ -9,7 +8,7 @@ from types import SimpleNamespace
 import jsonschema
 import pytest
 
-from utterplan import PlannerConfig, UtterancePlanner
+from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
 from utterplan.cli import _format_for_path, main
 from utterplan.exceptions import PlanFormatError
 from utterplan.format import schema
@@ -195,7 +194,7 @@ ssmd_version: "0.9"
         encoding="utf-8",
     )
     assert main(["compile", str(source), "--lang", "en-us", "--text-preparation", "identity"]) == 0
-    payload = json.loads(capsys.readouterr().out)
+    payload = UtterancePlan.from_toml(capsys.readouterr().out).to_dict()
     assert payload["source"]["format"] == "ssmd"
 
 
@@ -205,7 +204,7 @@ def test_cli_auto_detection_keeps_ordinary_markdown_plain(
     source = tmp_path / "ordinary.md"
     source.write_text("# Ordinary Markdown", encoding="utf-8")
     assert main(["compile", str(source), "--lang", "en-us", "--text-preparation", "identity"]) == 0
-    payload = json.loads(capsys.readouterr().out)
+    payload = UtterancePlan.from_toml(capsys.readouterr().out).to_dict()
     assert payload["source"]["format"] == "plain"
 
 
@@ -293,7 +292,7 @@ def test_sequence_fallback_mode_roundtrips_and_is_part_of_plan_identity() -> Non
 
     restored = type(plan).from_dict(plan.to_dict())
     assert restored.document_metadata["sequence_fallback_mode"] == "preserve"
-    assert type(plan).from_json(plan.to_json()) == plan
+    assert type(plan).from_toml(plan.to_toml()) == plan
 
     changed_policy = replace(
         plan,

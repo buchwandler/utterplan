@@ -3,7 +3,7 @@ from pathlib import Path
 
 from utterplan import UtterancePlan
 
-DEFAULT_PLAN = Path(__file__).with_name("example.utterplan.json")
+DEFAULT_PLAN = Path(__file__).with_name("example.utterplan.toml")
 
 
 def main() -> None:

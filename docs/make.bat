@@ -17,7 +17,7 @@ if "%1" == "help" (
 	echo.  html      to make standalone HTML files
 	echo.  dirhtml   to make HTML files named index.html in directories
 	echo.  pickle    to make pickle files
-	echo.  json      to make JSON files
+	echo.  json      to make Sphinx JSON-builder output, not UtterPlan plans
 	echo.  htmlhelp  to make HTML files and a HTML help project
 	echo.  qthelp    to make HTML files and a qthelp project
 	echo.  latex     to make LaTeX files, you can set PAPER=a4 or PAPER=letter
@@ -57,7 +57,7 @@ if "%1" == "pickle" (
 if "%1" == "json" (
 	%SPHINXBUILD% -b json %ALLSPHINXOPTS% %BUILDDIR%/json
 	echo.
-	echo.Build finished; now you can process the JSON files.
+	echo.Build finished; process the Sphinx JSON output if needed. It is not a plan file.
 	goto end
 )
 

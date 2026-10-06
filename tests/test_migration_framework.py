@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from copy import deepcopy
 
 import pytest
@@ -11,7 +10,6 @@ from utterplan.migration import (
     MigrationStep,
     _apply_migration_chain,
     migrate_plan_data,
-    migrate_plan_json,
 )
 
 
@@ -45,12 +43,6 @@ def test_migration_does_not_mutate_input() -> None:
     before = deepcopy(original)
     migrate_plan_data(original)
     assert original == before
-
-
-def test_migrate_json_roundtrips_current_plan() -> None:
-    result = migrate_plan_json(json.dumps(_current_data()))
-    assert '"schema_version": 4' in result
-    assert '"format": "utterplan"' in result
 
 
 def test_v2_migration_preserves_legacy_audio_and_unit_hashes() -> None:

@@ -3,12 +3,14 @@
 Start with the integrated plan explanation before inspecting audio:
 
 ```text
-source / SSMD -> document.utterplan.json -> renderer diagnostics -> audio
+source / SSMD -> document.utterplan.toml -> renderer diagnostics -> audio
 ```
 
 `utterplan explain FILE` shows prepared wording, render units, languages, resolved pauses, directives, markers, and warnings together. Use `utterplan inspect` when you need raw tokens, boundaries, coordinates, or a specific segment.
 
-For SSMD plans, `explain` summarizes the parsed version, title and document language, heading events, effective typed directives, portable metadata, and warning/error codes with source locations. These are semantic plan diagnostics, not renderer execution results. UtterPlan parses SSMD 0.9 only. Migrate an older source file first with `ssmd migrate FILE --to 0.9`; `utterplan migrate` is for plan JSON schemas.
+Safe punctuation-only repair is the default during compilation. If a semantic blocker prevents repair, the error includes source location, prepared fragment, spoken context, the blocked repair reason, and a concrete next action; UtterPlan never guesses symbol pronunciation or discards semantic boundaries. Use `--renderability strict` to see safe repair opportunities without applying them. Batch compilation reports each repair and continues with later sources.
+
+For SSMD plans, `explain` summarizes the parsed version, title and document language, heading events, effective typed directives, portable metadata, and warning/error codes with source locations. These are semantic plan diagnostics, not renderer execution results. UtterPlan parses SSMD 0.9 only. Migrate an older source file first with `ssmd migrate FILE --to 0.9`; `utterplan migrate` explicitly imports a legacy JSON plan to TOML.
 
 Use `inspect --tokens` to distinguish unavailable fallback fields (`pos=-`, `tag=-`, `morph=-`) from actual values. `explain --details` shows the final linguistic run provider/model and each segment's token snapshot.
 

@@ -94,7 +94,7 @@ def test_migration_cases_roundtrip_without_renderer_state() -> None:
     }
     for case in CASES:
         plan = UtterancePlanner(case.config).plan(case.text)
-        restored = type(plan).from_json(plan.to_json())
+        restored = type(plan).from_toml(plan.to_toml())
         assert restored == plan
         serialized = json.dumps(plan.to_dict(), ensure_ascii=False)
         assert not any(f'"{field}"' in serialized for field in forbidden)

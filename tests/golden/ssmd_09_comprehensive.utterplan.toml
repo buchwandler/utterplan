@@ -1,0 +1,1189 @@
+format = "utterplan"
+schema_version = 4
+plan_id = "sha256:659917ddd9ff6c7043f9ab69858157d1f4a876ab127037b3898fac9cc7b2ece3"
+warnings = []
+
+[producer]
+name = "utterplan"
+version = "0.3.7"
+
+[config]
+diagnostics = true
+document_format = "ssmd"
+language = "en-us"
+overlap_mode = "snap"
+renderability_mode = "strict"
+text_preparation = "identity"
+unit = "paragraph"
+
+[config.language_aliases]
+
+[config.linguistics]
+require_spacy = false
+
+[config.pauses]
+clause = 0.3
+enabled = true
+mode = "tts"
+paragraph = 1.0
+parenthetical = 0.15
+sentence = 0.6
+voice_change = 0.15
+weak = 0.15
+
+[config.ssmd]
+parse_yaml_header = true
+
+[preparation]
+backend = "identity"
+languages = ["sr-Latn"]
+warnings = []
+replacement = []
+
+[[language]]
+id = "lang-0"
+language = "sr-Latn"
+source = "document-default"
+span = [0, 288]
+
+[[linguistic_run]]
+language_run_id = "lang-0"
+provider = "fallback"
+token_span = [0, 43]
+
+[[unit]]
+id = "unit-0000"
+index = 0
+kind = "paragraph"
+span = [0, 12]
+content_hash = "sha256:07165e25f404c256320065e1c59dfeb79066d1bbcb2dc00118c61db224803e23"
+content_hash_schema = "utterplan-unit-v3"
+markers = []
+
+[[unit.segment]]
+id = "seg-000000"
+text = "Main heading"
+span = [0, 12]
+language = "sr-Latn"
+paragraph = 0
+sentence = 0
+clause = 0
+tokens = [0, 1]
+annotations = []
+structural_span = [0, 12]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.45
+events = ["boundary-000001"]
+
+[unit.segment.directives]
+
+[[unit]]
+id = "unit-0001"
+index = 1
+kind = "paragraph"
+span = [14, 145]
+content_hash = "sha256:8554fc4ff58520933807ab90e7e9d913d8c8060d138a86567cc4ce707700e36b"
+content_hash_schema = "utterplan-unit-v3"
+markers = []
+
+[[unit.segment]]
+id = "seg-000001"
+text = "Welcome"
+span = [14, 21]
+language = "sr-Latn"
+paragraph = 1
+sentence = 0
+clause = 0
+tokens = [2]
+annotations = ["annotation-000000"]
+structural_span = [14, 21]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives.voice]
+reference = "narrator"
+name = "Mira"
+languages = "sr-Latn"
+gender = "female"
+age = 30
+variant = 2
+
+[unit.segment.directives.prosody]
+rate = "medium"
+pitch = "low"
+volume = "soft"
+
+[[unit.segment]]
+id = "seg-000002"
+text = " reader."
+span = [21, 29]
+language = "sr-Latn"
+paragraph = 1
+sentence = 0
+clause = 0
+tokens = [3]
+annotations = ["annotation-000000", "annotation-000001"]
+structural_span = [21, 29]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.6
+events = ["boundary-000009"]
+
+[unit.segment.directives.voice]
+reference = "narrator"
+name = "Mira"
+languages = "sr-Latn"
+gender = "female"
+age = 30
+variant = 2
+
+[unit.segment.directives.prosody]
+rate = "medium"
+pitch = "low"
+volume = "soft"
+
+[[unit.segment]]
+id = "seg-000003"
+text = "Important"
+span = [30, 39]
+language = "sr-Latn"
+paragraph = 1
+sentence = 1
+clause = 0
+tokens = [4]
+annotations = ["annotation-000002", "annotation-000003"]
+structural_span = [30, 39]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives.voice]
+reference = "narrator"
+
+[unit.segment.directives.prosody]
+rate = "slow"
+volume = "soft"
+
+[unit.segment.directives.emphasis]
+level = "strong"
+
+[[unit.segment]]
+id = "seg-000004"
+text = " 31.12.2024, "
+span = [39, 52]
+language = "sr-Latn"
+paragraph = 1
+sentence = 1
+clause = 1
+tokens = [5]
+annotations = ["annotation-000002", "annotation-000004", "annotation-000005"]
+structural_span = [39, 52]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives.voice]
+reference = "narrator"
+
+[unit.segment.directives.prosody]
+rate = "slow"
+volume = "soft"
+
+[unit.segment.directives.say_as]
+interpret_as = "date"
+format = "dd.mm.yyyy"
+detail = "1"
+
+[[unit.segment]]
+id = "seg-000005"
+text = "H2O"
+span = [52, 55]
+language = "sr-Latn"
+paragraph = 1
+sentence = 1
+clause = 1
+tokens = [6]
+annotations = ["annotation-000002", "annotation-000005"]
+structural_span = [52, 55]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives.voice]
+reference = "narrator"
+
+[unit.segment.directives.prosody]
+rate = "slow"
+volume = "soft"
+
+[unit.segment.directives.substitution]
+alias = "water"
+
+[[unit.segment]]
+id = "seg-000006"
+text = ", and"
+span = [55, 60]
+language = "sr-Latn"
+paragraph = 1
+sentence = 1
+clause = 2
+tokens = [6, 7]
+annotations = ["annotation-000002"]
+structural_span = [55, 60]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives.voice]
+reference = "narrator"
+
+[unit.segment.directives.prosody]
+rate = "slow"
+volume = "soft"
+
+[[unit.segment]]
+id = "seg-000007"
+text = " computer."
+span = [60, 70]
+language = "sr-Latn"
+paragraph = 1
+sentence = 1
+clause = 2
+tokens = [8]
+annotations = ["annotation-000002", "annotation-000006"]
+structural_span = [60, 70]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.6
+events = ["boundary-000010"]
+
+[unit.segment.directives.voice]
+reference = "narrator"
+
+[unit.segment.directives.pronunciation]
+phonemes = "kəmˈpjuːtər"
+alphabet = "ipa"
+
+[unit.segment.directives.prosody]
+rate = "slow"
+volume = "soft"
+
+[[unit.segment]]
+id = "seg-000008"
+text = "A"
+span = [71, 72]
+language = "sr-Latn"
+paragraph = 1
+sentence = 2
+clause = 0
+tokens = [9]
+annotations = ["annotation-000002"]
+structural_span = [71, 72]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives.voice]
+reference = "narrator"
+
+[unit.segment.directives.prosody]
+rate = "slow"
+volume = "soft"
+
+[[unit.segment]]
+id = "seg-000009"
+text = " sound"
+span = [72, 78]
+language = "sr-Latn"
+paragraph = 1
+sentence = 2
+clause = 0
+tokens = [10]
+annotations = ["annotation-000002", "annotation-000007"]
+structural_span = [72, 78]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives.voice]
+reference = "narrator"
+
+[unit.segment.directives.prosody]
+rate = "slow"
+volume = "soft"
+
+[unit.segment.directives.audio]
+src = "door.wav"
+clip_begin = "1s"
+clip_end = "2s"
+speed = "110%"
+repeat_count = 1.5
+sound_level = "-3dB"
+description = "door chime"
+
+[[unit.segment]]
+id = "seg-000010"
+text = " plays, followed by"
+span = [78, 97]
+language = "sr-Latn"
+paragraph = 1
+sentence = 2
+clause = 1
+tokens = [11, 12, 13]
+annotations = ["annotation-000002"]
+structural_span = [78, 97]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives.voice]
+reference = "narrator"
+
+[unit.segment.directives.prosody]
+rate = "slow"
+volume = "soft"
+
+[[unit.segment]]
+id = "seg-000011"
+text = " whisper."
+span = [97, 106]
+language = "sr-Latn"
+paragraph = 1
+sentence = 2
+clause = 1
+tokens = [14]
+annotations = ["annotation-000002", "annotation-000008"]
+structural_span = [97, 106]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.6
+events = ["boundary-000011"]
+
+[unit.segment.directives.voice]
+reference = "narrator"
+
+[unit.segment.directives.prosody]
+rate = "slow"
+volume = "soft"
+
+[[unit.segment.directives.extensions]]
+name = "acme.effects.whisper"
+
+[unit.segment.directives.extensions.params]
+mode = "soft"
+
+[[unit.segment]]
+id = "seg-000012"
+text = "Outer scope establishes block prosody."
+span = [107, 145]
+language = "sr-Latn"
+paragraph = 1
+sentence = 3
+clause = 0
+tokens = [15, 16, 17, 18, 19]
+annotations = ["annotation-000009"]
+structural_span = [107, 145]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.45
+events = ["boundary-000002"]
+
+[unit.segment.directives.voice]
+reference = "narrator"
+
+[unit.segment.directives.prosody]
+rate = "medium"
+pitch = "low"
+volume = "soft"
+
+[[unit]]
+id = "unit-0002"
+index = 2
+kind = "paragraph"
+span = [147, 193]
+content_hash = "sha256:492f20f826686ada9998945879f07a61b179e2372373044a5b9a64607d36a8bd"
+content_hash_schema = "utterplan-unit-v3"
+markers = []
+
+[[unit.segment]]
+id = "seg-000013"
+text = "Inner scope preserves explicit rate and pitch."
+span = [147, 193]
+language = "sr-Latn"
+paragraph = 2
+sentence = 0
+clause = 0
+tokens = [20, 21, 22, 23, 24, 25, 26]
+annotations = ["annotation-000009", "annotation-000010"]
+structural_span = [147, 193]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.45
+events = ["boundary-000003"]
+
+[unit.segment.directives.voice]
+reference = "narrator"
+
+[unit.segment.directives.prosody]
+rate = "fast"
+pitch = "high"
+volume = "soft"
+
+[[unit]]
+id = "unit-0003"
+index = 3
+kind = "paragraph"
+span = [195, 225]
+content_hash = "sha256:7a9c286170466517a010527289c31894c0fdef3186170ca1b48ec13bdaca880c"
+content_hash_schema = "utterplan-unit-v3"
+markers = []
+
+[[unit.segment]]
+id = "seg-000014"
+text = "Back in the outer voice scope."
+span = [195, 225]
+language = "sr-Latn"
+paragraph = 3
+sentence = 0
+clause = 0
+tokens = [27, 28, 29, 30, 31, 32]
+annotations = ["annotation-000009"]
+structural_span = [195, 225]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.45
+events = ["boundary-000004"]
+
+[unit.segment.directives.voice]
+reference = "narrator"
+
+[unit.segment.directives.prosody]
+rate = "medium"
+pitch = "low"
+volume = "soft"
+
+[[unit]]
+id = "unit-0004"
+index = 4
+kind = "paragraph"
+span = [227, 249]
+content_hash = "sha256:4f48087b7aefc537f98d94eb4b87134bbc27a3e4623f4118cdcfaaad6ad2c058"
+content_hash_schema = "utterplan-unit-v3"
+markers = []
+
+[[unit.segment]]
+id = "seg-000015"
+text = "A pause"
+span = [227, 234]
+language = "sr-Latn"
+paragraph = 4
+sentence = 0
+clause = 0
+tokens = [33, 34]
+annotations = []
+structural_span = [227, 234]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.5
+events = ["boundary-000005"]
+
+[unit.segment.directives]
+
+[[unit.segment]]
+id = "seg-000016"
+text = " then a marker."
+span = [234, 249]
+language = "sr-Latn"
+paragraph = 4
+sentence = 0
+clause = 1
+tokens = [35, 36, 37]
+annotations = []
+structural_span = [234, 249]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.45
+events = ["boundary-000006"]
+
+[unit.segment.directives]
+
+[[unit]]
+id = "unit-0005"
+index = 5
+kind = "paragraph"
+span = [251, 268]
+content_hash = "sha256:a077f25f897fe331b41a7448425928b3fc653aa68b3d79484d4ee7764a890286"
+content_hash_schema = "utterplan-unit-v3"
+markers = ["marker-000000"]
+
+[[unit.segment]]
+id = "seg-000017"
+text = "Secondary heading"
+span = [251, 268]
+language = "sr-Latn"
+paragraph = 5
+sentence = 0
+clause = 0
+tokens = [38, 39]
+annotations = []
+structural_span = [251, 268]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.45
+events = ["boundary-000008"]
+
+[unit.segment.directives]
+
+[[unit]]
+id = "unit-0006"
+index = 6
+kind = "paragraph"
+span = [270, 288]
+content_hash = "sha256:e74d66ff2cd9f407ea95f32de391549ddb71c405d71d3a1d444ee05d73bed9e6"
+content_hash_schema = "utterplan-unit-v3"
+markers = []
+
+[[unit.segment]]
+id = "seg-000018"
+text = "After the heading."
+span = [270, 288]
+language = "sr-Latn"
+paragraph = 6
+sentence = 0
+clause = 0
+tokens = [40, 41, 42]
+annotations = []
+structural_span = [270, 288]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives]
+
+[[annotation]]
+id = "annotation-000000"
+kind = "directive"
+structural_span = [14, 29]
+spoken_span = [14, 29]
+source_span = [431, 598]
+
+[annotation.attrs]
+age = "30"
+gender = "female"
+pitch = "low"
+rate = "medium"
+tag = "voice"
+variant = "2"
+voice = "narrator"
+voice-languages = "sr-Latn"
+voice-name = "Mira"
+
+[[annotation]]
+id = "annotation-000001"
+kind = "lang"
+structural_span = [21, 28]
+spoken_span = [21, 28]
+source_span = [568, 592]
+
+[annotation.attrs]
+lang = "sr-Latn"
+tag = "lang"
+
+[[annotation]]
+id = "annotation-000002"
+kind = "directive"
+structural_span = [30, 106]
+spoken_span = [30, 106]
+source_span = [598, 946]
+
+[annotation.attrs]
+tag = "voice"
+voice = "narrator"
+
+[[annotation]]
+id = "annotation-000003"
+kind = "emphasis"
+structural_span = [30, 39]
+spoken_span = [30, 39]
+source_span = [620, 650]
+
+[annotation.attrs]
+emphasis = "strong"
+tag = "emphasis"
+
+[[annotation]]
+id = "annotation-000004"
+kind = "say-as"
+structural_span = [39, 50]
+spoken_span = [39, 50]
+source_span = [651, 705]
+
+[annotation.attrs]
+as = "date"
+detail = "1"
+format = "dd.mm.yyyy"
+tag = "say-as"
+
+[[annotation]]
+id = "annotation-000005"
+kind = "sub"
+structural_span = [51, 55]
+spoken_span = [51, 55]
+source_span = [707, 725]
+
+[annotation.attrs]
+sub = "water"
+tag = "sub"
+
+[[annotation]]
+id = "annotation-000006"
+kind = "phoneme"
+structural_span = [60, 69]
+spoken_span = [60, 69]
+source_span = [731, 774]
+
+[annotation.attrs]
+alphabet = "ipa"
+ph = "kəmˈpjuːtər"
+tag = "phoneme"
+
+[[annotation]]
+id = "annotation-000007"
+kind = "audio"
+structural_span = [72, 78]
+spoken_span = [72, 78]
+source_span = [778, 871]
+
+[annotation.attrs]
+clip = "1s-2s"
+desc = "door chime"
+level = "-3dB"
+repeat = "1.5"
+speed = "110%"
+src = "door.wav"
+tag = "audio"
+
+[[annotation]]
+id = "annotation-000008"
+kind = "extension"
+structural_span = [97, 105]
+spoken_span = [97, 105]
+source_span = [891, 940]
+
+[annotation.attrs]
+ext = "acme.effects.whisper"
+mode = "soft"
+tag = "extension"
+
+[[annotation]]
+id = "annotation-000009"
+kind = "directive"
+structural_span = [107, 225]
+spoken_span = [107, 225]
+source_span = [946, 1151]
+
+[annotation.attrs]
+pitch = "low"
+rate = "medium"
+tag = "voice"
+voice = "narrator"
+
+[[annotation]]
+id = "annotation-000010"
+kind = "directive"
+structural_span = [147, 193]
+spoken_span = [147, 193]
+source_span = [1034, 1115]
+
+[annotation.attrs]
+pitch = "high"
+rate = "fast"
+tag = "prosody"
+
+[[semantic_boundary]]
+id = "semantic-boundary-000000"
+position = 12
+kind = "paragraph"
+origin = "planner"
+
+[[semantic_boundary]]
+id = "semantic-boundary-000001"
+position = 29
+kind = "sentence"
+origin = "planner"
+
+[[semantic_boundary]]
+id = "semantic-boundary-000002"
+position = 70
+kind = "sentence"
+origin = "planner"
+
+[[semantic_boundary]]
+id = "semantic-boundary-000003"
+position = 106
+kind = "sentence"
+origin = "planner"
+
+[[semantic_boundary]]
+id = "semantic-boundary-000004"
+position = 145
+kind = "paragraph"
+origin = "planner"
+
+[[semantic_boundary]]
+id = "semantic-boundary-000005"
+position = 193
+kind = "paragraph"
+origin = "planner"
+
+[[semantic_boundary]]
+id = "semantic-boundary-000006"
+position = 225
+kind = "paragraph"
+origin = "planner"
+
+[[semantic_boundary]]
+id = "semantic-boundary-000007"
+position = 249
+kind = "paragraph"
+origin = "planner"
+
+[[semantic_boundary]]
+id = "semantic-boundary-000008"
+position = 268
+kind = "paragraph"
+origin = "planner"
+
+[[boundary]]
+id = "boundary-000000"
+position = 0
+kind = "heading"
+origin = "ssmd"
+seconds = 0.0
+
+[boundary.attrs]
+anchor = "before"
+level = "1"
+structural_only = true
+
+[[boundary]]
+id = "boundary-000001"
+position = 12
+kind = "paragraph"
+origin = "ssmd"
+strength = "paragraph"
+
+[boundary.attrs]
+anchor = "after"
+pause_origin = "header_default"
+source = "header_default"
+strength = "p"
+
+[[boundary]]
+id = "boundary-000002"
+position = 145
+kind = "paragraph"
+origin = "ssmd"
+strength = "paragraph"
+
+[boundary.attrs]
+anchor = "after"
+pause_origin = "header_default"
+source = "header_default"
+strength = "p"
+
+[[boundary]]
+id = "boundary-000003"
+position = 193
+kind = "paragraph"
+origin = "ssmd"
+strength = "paragraph"
+
+[boundary.attrs]
+anchor = "after"
+pause_origin = "header_default"
+source = "header_default"
+strength = "p"
+
+[[boundary]]
+id = "boundary-000004"
+position = 225
+kind = "paragraph"
+origin = "ssmd"
+strength = "paragraph"
+
+[boundary.attrs]
+anchor = "after"
+pause_origin = "header_default"
+source = "header_default"
+strength = "p"
+
+[[boundary]]
+id = "boundary-000005"
+position = 234
+kind = "explicit"
+origin = "ssmd"
+seconds = 0.5
+
+[boundary.attrs]
+anchor = "after"
+pause_origin = "explicit"
+time = "500ms"
+
+[[boundary]]
+id = "boundary-000006"
+position = 249
+kind = "paragraph"
+origin = "ssmd"
+strength = "paragraph"
+
+[boundary.attrs]
+anchor = "after"
+pause_origin = "header_default"
+source = "header_default"
+strength = "p"
+
+[[boundary]]
+id = "boundary-000007"
+position = 251
+kind = "heading"
+origin = "ssmd"
+seconds = 0.0
+
+[boundary.attrs]
+anchor = "before"
+level = "2"
+structural_only = true
+
+[[boundary]]
+id = "boundary-000008"
+position = 268
+kind = "paragraph"
+origin = "ssmd"
+strength = "paragraph"
+
+[boundary.attrs]
+anchor = "after"
+pause_origin = "header_default"
+source = "header_default"
+strength = "p"
+
+[[boundary]]
+id = "boundary-000009"
+position = 29
+kind = "sentence"
+origin = "planner"
+strength = "sentence"
+
+[boundary.attrs]
+automatic = true
+
+[[boundary]]
+id = "boundary-000010"
+position = 70
+kind = "sentence"
+origin = "planner"
+strength = "sentence"
+
+[boundary.attrs]
+automatic = true
+
+[[boundary]]
+id = "boundary-000011"
+position = 106
+kind = "sentence"
+origin = "planner"
+strength = "sentence"
+
+[boundary.attrs]
+automatic = true
+
+[[marker]]
+id = "marker-000000"
+name = "checkpoint"
+position = 249
+
+[marker.attrs]
+name = "checkpoint"
+
+[token_stream]
+items = [
+    {id = "token-0", span = [0, 4], text = "Main", lemma = "main", language = "sr-Latn"},
+    {id = "token-1", span = [5, 12], text = "heading", lemma = "heading", language = "sr-Latn"},
+    {id = "token-2", span = [14, 21], text = "Welcome", lemma = "welcome", language = "sr-Latn"},
+    {id = "token-3", span = [22, 29], text = "reader.", lemma = "reader.", language = "sr-Latn"},
+    {id = "token-4", span = [30, 39], text = "Important", lemma = "important", language = "sr-Latn"},
+    {id = "token-5", span = [40, 51], text = "31.12.2024,", lemma = "31.12.2024,", language = "sr-Latn"},
+    {id = "token-6", span = [52, 56], text = "H2O,", lemma = "h2o,", language = "sr-Latn"},
+    {id = "token-7", span = [57, 60], text = "and", lemma = "and", language = "sr-Latn"},
+    {id = "token-8", span = [61, 70], text = "computer.", lemma = "computer.", language = "sr-Latn"},
+    {id = "token-9", span = [71, 72], text = "A", lemma = "a", language = "sr-Latn"},
+    {id = "token-10", span = [73, 78], text = "sound", lemma = "sound", language = "sr-Latn"},
+    {id = "token-11", span = [79, 85], text = "plays,", lemma = "plays,", language = "sr-Latn"},
+    {id = "token-12", span = [86, 94], text = "followed", lemma = "followed", language = "sr-Latn"},
+    {id = "token-13", span = [95, 97], text = "by", lemma = "by", language = "sr-Latn"},
+    {id = "token-14", span = [98, 106], text = "whisper.", lemma = "whisper.", language = "sr-Latn"},
+    {id = "token-15", span = [107, 112], text = "Outer", lemma = "outer", language = "sr-Latn"},
+    {id = "token-16", span = [113, 118], text = "scope", lemma = "scope", language = "sr-Latn"},
+    {id = "token-17", span = [119, 130], text = "establishes", lemma = "establishes", language = "sr-Latn"},
+    {id = "token-18", span = [131, 136], text = "block", lemma = "block", language = "sr-Latn"},
+    {id = "token-19", span = [137, 145], text = "prosody.", lemma = "prosody.", language = "sr-Latn"},
+    {id = "token-20", span = [147, 152], text = "Inner", lemma = "inner", language = "sr-Latn"},
+    {id = "token-21", span = [153, 158], text = "scope", lemma = "scope", language = "sr-Latn"},
+    {id = "token-22", span = [159, 168], text = "preserves", lemma = "preserves", language = "sr-Latn"},
+    {id = "token-23", span = [169, 177], text = "explicit", lemma = "explicit", language = "sr-Latn"},
+    {id = "token-24", span = [178, 182], text = "rate", lemma = "rate", language = "sr-Latn"},
+    {id = "token-25", span = [183, 186], text = "and", lemma = "and", language = "sr-Latn"},
+    {id = "token-26", span = [187, 193], text = "pitch.", lemma = "pitch.", language = "sr-Latn"},
+    {id = "token-27", span = [195, 199], text = "Back", lemma = "back", language = "sr-Latn"},
+    {id = "token-28", span = [200, 202], text = "in", lemma = "in", language = "sr-Latn"},
+    {id = "token-29", span = [203, 206], text = "the", lemma = "the", language = "sr-Latn"},
+    {id = "token-30", span = [207, 212], text = "outer", lemma = "outer", language = "sr-Latn"},
+    {id = "token-31", span = [213, 218], text = "voice", lemma = "voice", language = "sr-Latn"},
+    {id = "token-32", span = [219, 225], text = "scope.", lemma = "scope.", language = "sr-Latn"},
+    {id = "token-33", span = [227, 228], text = "A", lemma = "a", language = "sr-Latn"},
+    {id = "token-34", span = [229, 234], text = "pause", lemma = "pause", language = "sr-Latn"},
+    {id = "token-35", span = [235, 239], text = "then", lemma = "then", language = "sr-Latn"},
+    {id = "token-36", span = [240, 241], text = "a", lemma = "a", language = "sr-Latn"},
+    {id = "token-37", span = [242, 249], text = "marker.", lemma = "marker.", language = "sr-Latn"},
+    {id = "token-38", span = [251, 260], text = "Secondary", lemma = "secondary", language = "sr-Latn"},
+    {id = "token-39", span = [261, 268], text = "heading", lemma = "heading", language = "sr-Latn"},
+    {id = "token-40", span = [270, 275], text = "After", lemma = "after", language = "sr-Latn"},
+    {id = "token-41", span = [276, 279], text = "the", lemma = "the", language = "sr-Latn"},
+    {id = "token-42", span = [280, 288], text = "heading.", lemma = "heading.", language = "sr-Latn"},
+]
+
+[[diagnostic]]
+code = "planning.complete"
+severity = "info"
+message = "Plan compiled without renderer or audio processing"
+
+[source]
+format = "ssmd"
+text = """---
+ssmd_version: "0.9"
+title: Renderer-neutral SSMD 0.9 contract
+language: sr-Latn
+voice_bindings:
+  narrator: provider-voice
+voice_defaults:
+  narrator:
+    rate: slow
+    volume: soft
+prosody_transitions:
+  enabled: true
+  same_voice_only: true
+  rate: 100ms
+pause_defaults:
+  paragraph: 450ms
+language_detection:
+  mode: auto
+  languages: [sr-Latn, en-GB]
+requires:
+  extensions:
+    - acme.effects.whisper
+---
+# Main heading
+
+:::{voice="narrator" voice-name="Mira" voice-languages="sr-Latn" gender="female" age="30" variant="2" rate="medium" pitch="low"}
+Welcome [reader]{lang="sr-Latn"}.
+:::
+:::{voice="narrator"}
+[Important]{emphasis="strong"} [31.12.2024]{as="date" format="dd.mm.yyyy" detail="1"}, [H2O]{sub="water"}, and [computer]{ph="kəmˈpjuːtər" alphabet="ipa"}.
+A [sound]{src="door.wav" desc="door chime" clip="1s-2s" speed="110%" repeat="1.5" level="-3dB"} plays, followed by [whisper]{ext="acme.effects.whisper" mode="soft"}.
+:::
+::::{voice="narrator" rate="medium" pitch="low"}
+Outer scope establishes block prosody.
+:::{rate="fast" pitch="high"}
+Inner scope preserves explicit rate and pitch.
+:::
+Back in the outer voice scope.
+::::
+
+A pause ...500ms then a marker. @checkpoint
+
+## Secondary heading
+
+After the heading.
+"""
+
+[texts]
+structural = """Main heading
+
+Welcome reader. Important 31.12.2024, H2O, and computer. A sound plays, followed by whisper. Outer scope establishes block prosody.
+
+Inner scope preserves explicit rate and pitch.
+
+Back in the outer voice scope.
+
+A pause then a marker.
+
+Secondary heading
+
+After the heading."""
+spoken = """Main heading
+
+Welcome reader. Important 31.12.2024, H2O, and computer. A sound plays, followed by whisper. Outer scope establishes block prosody.
+
+Inner scope preserves explicit rate and pitch.
+
+Back in the outer voice scope.
+
+A pause then a marker.
+
+Secondary heading
+
+After the heading."""
+
+[document_metadata]
+language = "sr-Latn"
+sequence_fallback_mode = "spell"
+ssmd_version = "0.9"
+title = "Renderer-neutral SSMD 0.9 contract"
+
+[document_metadata.header]
+language = "sr-Latn"
+ssmd_version = "0.9"
+title = "Renderer-neutral SSMD 0.9 contract"
+
+[document_metadata.header.language_detection]
+languages = ["sr-Latn", "en-GB"]
+mode = "auto"
+
+[document_metadata.header.pause_defaults]
+paragraph = "450ms"
+
+[document_metadata.header.prosody_transitions]
+enabled = true
+rate = "100ms"
+same_voice_only = true
+
+[document_metadata.header.requires]
+extensions = ["acme.effects.whisper"]
+
+[document_metadata.header.voice_bindings]
+narrator = "provider-voice"
+
+[document_metadata.header.voice_defaults.narrator]
+rate = "slow"
+volume = "soft"
+
+[document_metadata.language_detection]
+languages = ["sr-Latn", "en-GB"]
+mode = "auto"
+
+[document_metadata.pause_defaults]
+paragraph = "450ms"
+
+[document_metadata.planning]
+engine_independent = true
+linguistic_passes = 2
+pass_a_tokens = 43
+
+[document_metadata.planning.renderability]
+checked_segments = 19
+guaranteed = true
+mode = "strict"
+repair_count = 0
+
+[document_metadata.prosody_transitions]
+enabled = true
+rate = "100ms"
+same_voice_only = true
+
+[document_metadata.requires]
+extensions = ["acme.effects.whisper"]
+
+[document_metadata.voice_bindings]
+narrator = "provider-voice"
+
+[document_metadata.voice_defaults.narrator]
+rate = "slow"
+volume = "soft"

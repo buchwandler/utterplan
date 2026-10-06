@@ -2,7 +2,7 @@ from pathlib import Path
 
 from utterplan import PlannerConfig, UtterancePlanner
 
-OUTPUT = Path(__file__).with_name("example.utterplan.json")
+OUTPUT = Path(__file__).with_name("example.utterplan.toml")
 
 
 def main() -> None:

@@ -223,7 +223,7 @@ voice_bindings:
     assert plan.segments[0].directives.voice.reference == "narrator"
     assert plan.segments[0].directives.voice.reference != "voice-a"
     assert "offset_map" not in plan.to_dict()["preparation"]
-    assert plan == type(plan).from_json(plan.to_json())
+    assert plan == type(plan).from_toml(plan.to_toml())
 
 
 def test_language_detection_header_is_preserved_as_portable_metadata() -> None:
@@ -239,7 +239,7 @@ Hallo."""
         "mode": "auto",
         "languages": ["de", "en"],
     }
-    restored = type(plan).from_json(plan.to_json())
+    restored = type(plan).from_toml(plan.to_toml())
     assert restored.document_metadata == plan.document_metadata
 
 
@@ -310,7 +310,7 @@ Next paragraph."""
     assert plan.document_metadata["language_detection"]["languages"] == ["de-DE", "en-GB"]
     assert plan.document_metadata["requires"]["extensions"] == ["acme.effects.whisper"]
     assert plan.document_metadata["header"]["x-acme-contract"] == {"revision": 2}
-    restored = type(plan).from_json(plan.to_json())
+    restored = type(plan).from_toml(plan.to_toml())
     assert restored.document_metadata == plan.document_metadata
     assert restored.segments == plan.segments
 

@@ -182,7 +182,7 @@ def test_callback_output_matches_baseline_and_events_are_public_primitives() -> 
     observed = UtterancePlanner(config).plan(source, on_progress=events.append)
 
     assert observed.plan_id == baseline.plan_id
-    assert observed.to_json() == baseline.to_json()
+    assert observed.to_toml() == baseline.to_toml()
 
     def is_public_value(value: object) -> bool:
         if value is None or isinstance(value, (str, int, float, bool)):

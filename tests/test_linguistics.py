@@ -41,7 +41,7 @@ def test_run_analysis_is_lightweight_and_request_local():
 
 def test_provider_documents_are_not_serialized():
     plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello world.")
-    serialized = plan.to_json()
+    serialized = plan.to_toml()
     assert "provider_doc" not in serialized
     assert "spacy.tokens" not in serialized
 
@@ -359,10 +359,10 @@ def test_fake_spacy_fields_and_provenance_survive_roundtrip(monkeypatch):
     assert plan.linguistic_runs[0].provider == "spacy"
     assert plan.linguistic_runs[0].model == "fake_model"
     assert plan.linguistic_runs[0].provider_version == "3.7.0"
-    serialized = plan.to_json()
+    serialized = plan.to_toml()
     assert "provider_doc" not in serialized
     assert "spacy.tokens" not in serialized
-    restored = UtterancePlan.from_json(serialized)
+    restored = UtterancePlan.from_toml(serialized)
     assert restored.tokens == plan.tokens
     assert restored.linguistic_runs == plan.linguistic_runs
 
@@ -421,7 +421,7 @@ def test_identity_preparation_analyzes_once_and_preserves_plan(
 
     assert len(calls) == 1
     assert observed.plan_id == baseline.plan_id
-    assert observed.to_json() == baseline.to_json()
+    assert observed.to_toml() == baseline.to_toml()
     assert observed.document_metadata["planning"]["linguistic_passes"] == 2
     skipped = next(
         event

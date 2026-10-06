@@ -86,6 +86,11 @@ class PlanRenderabilityError(PlanningError):
             )
         super().__init__(summary)
 
+    def __str__(self) -> str:
+        from .renderability import format_renderability_error
+
+        return format_renderability_error(self)
+
 
 class LanguagePlanError(PlanningError):
     """Language spans cannot be resolved."""

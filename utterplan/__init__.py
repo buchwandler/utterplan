@@ -1,4 +1,5 @@
 from ._version import __version__
+from .batch import BatchProgressCallback, CompileOutcome, CompileRequest, compile_to_files
 from .compiler import (
     CompileResult,
     InputFormat,
@@ -29,7 +30,7 @@ from .exceptions import (
     UtterPlanError,
 )
 from .language import LanguageRun, build_language_runs, normalize_language
-from .migration import MigrationResult, MigrationStep, migrate_plan_data, migrate_plan_json
+from .migration import MigrationResult, MigrationStep, migrate_plan_data
 from .model import (
     AnnotationSpan,
     AudioDirective,
@@ -58,12 +59,16 @@ from .model import (
 from .planner import UtterancePlanner
 from .progress import PlannerProgressEvent, ProgressCallback, ProgressKind, ProgressPhase
 from .renderability import (
+    RenderabilityAction,
     RenderabilityIssue,
     RenderabilityMode,
+    RenderabilityRepair,
     RenderabilityReport,
     assert_renderable,
+    assess_renderability_repair,
     classify_segment,
     contains_speech_content,
+    format_renderability_error,
     preflight_renderability,
 )
 from .versioning import (
@@ -76,11 +81,15 @@ from .versioning import (
 __all__ = [
     "__version__",
     "CompileResult",
+    "BatchProgressCallback",
+    "CompileOutcome",
+    "CompileRequest",
     "PreparationChange",
     "InputFormat",
     "PreparationTrace",
     "PreparationTraceUnit",
     "compile_document",
+    "compile_to_files",
     "PlannerConfig",
     "PauseConfig",
     "LinguisticsConfig",
@@ -88,12 +97,16 @@ __all__ = [
     "parse_duration",
     "UtterancePlanner",
     "PlannerProgressEvent",
+    "RenderabilityAction",
     "RenderabilityIssue",
     "RenderabilityMode",
     "RenderabilityReport",
+    "RenderabilityRepair",
+    "assess_renderability_repair",
     "assert_renderable",
     "classify_segment",
     "contains_speech_content",
+    "format_renderability_error",
     "preflight_renderability",
     "ProgressCallback",
     "ProgressKind",
@@ -143,5 +156,4 @@ __all__ = [
     "MigrationResult",
     "MigrationStep",
     "migrate_plan_data",
-    "migrate_plan_json",
 ]

@@ -221,4 +221,4 @@ context_utterplan*.*
 utterplan/_version.py
 
 # Generated outputs from the runnable examples
-examples/*.utterplan.json
+examples/*.utterplan.toml

@@ -7,7 +7,7 @@ its `diagnostics` explain compilation, and an optional `PreparationTrace` is
 separate diagnostic output. `UtterancePlanner.plan` remains supported for
 compatibility and returns only the plan.
 
-The Python defaults are deliberately spaCy-free: `PlannerConfig` uses `spokenform` text preparation, and `PauseConfig().mode` is `"tts"`. The CLI additionally defaults to the `spacy off` linguistic-resource policy, which uses deterministic fallback tokenization and analysis without requiring an installed spaCy model.
+The Python defaults are deliberately spaCy-free and repair-first: `PlannerConfig` uses `spokenform` text preparation and `renderability_mode="repair"`, while `PauseConfig().mode` is `"tts"`. The CLI additionally defaults to the `spacy off` linguistic-resource policy, which uses deterministic fallback tokenization and analysis without requiring an installed spaCy model.
 
 For an explicit contextual-G2P configuration, use `LinguisticsConfig(use_spacy=True, spacy_model="en_core_web_sm", require_spacy=True)`. The resulting plan records final pass-B token provenance in `linguistic_runs`; no provider document is retained.
 spaCy enrichment is opt-in through the CLI's `--spacy auto` policy or an explicit `LinguisticsConfig` with a compatible local model. It may provide richer tokenization, POS tags, lemmas, and tags, but UtterPlan never downloads a model implicitly.
@@ -41,6 +41,55 @@ the plan, is not renderer input, and does not change `plan.plan_id`. Its source
 ranges index SSMD-clean structural text; transformation output ranges index prepared
 spoken text, using Python string character offsets.
 
+## TOML persistence
+
+Schema v4 remains the semantic contract, while `.utterplan.toml` is the canonical persisted format. `to_toml()` and `from_toml()` round-trip the complete plan; `save()` writes atomically, and `load()` accepts TOML only. Normal loading does not auto-detect or fall back to JSON.
+
+```python
+from utterplan import UtterancePlan
+
+toml_text = plan.to_toml()
+restored = UtterancePlan.from_toml(toml_text)
+assert restored == plan
+plan.save("chapter.utterplan.toml")
+assert UtterancePlan.load("chapter.utterplan.toml") == plan
+```
+
+`to_dict()` and `from_dict()` remain semantic mapping APIs. For a legacy JSON file, use the explicit `utterplan migrate old.utterplan.json -o current.utterplan.toml` command; SSMD source migration is a separate operation.
+
+## Incremental batch compilation
+
+The public batch API compiles independent requests one at a time, atomically commits each successful plan, and yields an outcome without retaining the plan object. Ordinary per-document read, planning, validation, serialization, and write failures become failed outcomes and processing continues by default. Set `fail_fast=True` to skip later requests after the first failure. Existing files are protected unless `force=True` is explicit. An optional TOML operational report is refreshed after each outcome.
+
+```python
+from pathlib import Path
+
+from utterplan import CompileRequest, PlannerConfig, compile_to_files
+
+requests = [
+    CompileRequest(
+        id="chapter-1",
+        source=Path("chapters/one.ssmd"),
+        output=Path("plans/one.utterplan.toml"),
+        input_format="auto",
+    ),
+    CompileRequest(
+        id="chapter-2",
+        source=Path("chapters/two.ssmd"),
+        output=Path("plans/two.utterplan.toml"),
+        input_format="auto",
+    ),
+]
+for outcome in compile_to_files(
+    requests,
+    config=PlannerConfig(language="en-us"),
+    report_path="plans/compile-report.toml",
+):
+    print(outcome.status, outcome.source_label, outcome.output)
+```
+
+The report is operational data, not a semantic plan, and must not be passed to `UtterancePlan.load()`. Unexpected programming and progress-callback errors propagate rather than being converted to document failures.
+
 ## Planner progress callbacks
 
 `UtterancePlanner.plan`, `UtterancePlanner.compile`, and `compile_document` accept an optional keyword-only `on_progress` callback. It receives typed `PlannerProgressEvent` objects synchronously in the planner thread. Progress is operational only: it is not added to `PlannerConfig` or the plan, and enabling a callback does not change plan identity or serialization.
@@ -70,7 +119,7 @@ Callbacks should be lightweight. An exception raised by a callback propagates to
 
 ## SSMD input and semantic plan
 
-The SSMD parser accepts dialect 0.9 only. Select SSMD explicitly for unversioned canonical fragments with `PlannerConfig(document_format="ssmd")`. Older SSMD source must be migrated with `ssmd migrate FILE --to 0.9`; `migrate_plan_data` and `utterplan migrate` apply to serialized UtterPlan JSON, not source documents.
+The SSMD parser accepts dialect 0.9 only. Select SSMD explicitly for unversioned canonical fragments with `PlannerConfig(document_format="ssmd")`. Older SSMD source must be migrated with `ssmd migrate FILE --to 0.9`; `migrate_plan_data` operates on serialized plan mappings, while `utterplan migrate` explicitly imports legacy JSON plan files into canonical TOML, not source documents.
 
 `PlannerConfig.document_format` defaults to `"plain"`, so SSMD syntax is never inferred for an ordinary Python string. Set `document_format="ssmd"` for SSMD documents or fragments.
 
@@ -253,7 +302,7 @@ The public model also exposes `languages`, `annotations`, `boundaries`,
 
 `TokenAnnotation` contains `text`, `language`, `lemma`, `pos`, `tag`, and `morph`. Token text and offsets address `texts.spoken`; `morph` is a compact provider string such as `Tense=Pres|VerbForm=Fin`. `LinguisticRun` records whether those facts came from spaCy, fallback tokenization, or unknown legacy provenance.
 
-`TextPreparationInfo` exposes serializable provenance only. Exact source-to-spoken mapping is transient planner state and is not part of `UtterancePlan` or its JSON contract.
+`TextPreparationInfo` exposes serializable provenance only. Exact source-to-spoken mapping is transient planner state and is not part of `UtterancePlan` or its TOML contract.
 
 ## Errors
 
@@ -261,6 +310,8 @@ Planning and loading failures derive from `utterplan.UtterPlanError`. Important
 public subclasses include `ConfigurationError`, `PlanningError`,
 `PlanFormatError`, `PlanValidationError`, and `UnsupportedSchemaError`.
 `PlanMigrationError` and `MigrationPathError` report migration-specific failures. `UnsupportedSchemaError` remains reserved for a schema newer than the installed package understands.
+
+`PlanRenderabilityError` presents the same actionable source and spoken context as the CLI, including safe repair opportunities, semantic blockers, and a next action. Safe punctuation-only repair is the default; choose `PlannerConfig(renderability_mode="strict")` when a caller needs to reject every repair opportunity. Symbols are never assigned guessed pronunciations.
 
 ## Schema migration API
 
@@ -271,7 +322,6 @@ from utterplan import (
     MigrationStep,
     SUPPORTED_SCHEMA_VERSIONS,
     migrate_plan_data,
-    migrate_plan_json,
  )
 
 result: MigrationResult = migrate_plan_data(serialized_mapping)

@@ -33,7 +33,7 @@ from .parsers import (
 from .pauses import boundary_is_active, resolve_pauses
 from .preparation import IdentityTextPreparer, SourceToSpokenMap, SpokenformTextPreparer
 from .progress import PlannerProgressEvent, ProgressCallback, _notify_progress
-from .renderability import RenderabilityIssue, contains_speech_content, preflight_segments
+from .renderability import RenderabilityIssue, preflight_segments
 from .units import make_units
 
 
@@ -297,14 +297,23 @@ class UtterancePlanner:
             )
             for segment in segments
         ]
-        initial_renderability = preflight_segments(segments, tokens, parsed=parsed)
+        initial_renderability = preflight_segments(
+            segments,
+            tokens,
+            parsed=parsed,
+            spoken_text=spoken,
+            boundaries=boundaries,
+            pause_config=pause_config,
+            annotations=prepared.annotations,
+            semantic_boundaries=semantic_boundaries,
+        )
         renderability_repairs: tuple[RenderabilityIssue, ...] = ()
         checked_segment_count = initial_renderability.checked_segments
         if initial_renderability.issues:
             if config.renderability_mode == "strict":
                 raise PlanRenderabilityError(initial_renderability.issues, mode="strict")
             if any(
-                issue.code != "renderability.punctuation_only"
+                issue.repair_assessment is None or not issue.repair_assessment.safe
                 for issue in initial_renderability.issues
             ):
                 raise PlanRenderabilityError(initial_renderability.issues, mode="repair")
@@ -312,9 +321,6 @@ class UtterancePlanner:
                 segments,
                 initial_renderability.issues,
                 spoken,
-                boundaries,
-                pause_config,
-                prepared.annotations,
             )
             segments = [
                 replace(segment, id=f"seg-{index:06d}") for index, segment in enumerate(segments)
@@ -331,7 +337,16 @@ class UtterancePlanner:
                 )
                 for segment in segments
             ]
-            post_repair = preflight_segments(segments, tokens, parsed=parsed)
+            post_repair = preflight_segments(
+                segments,
+                tokens,
+                parsed=parsed,
+                spoken_text=spoken,
+                boundaries=boundaries,
+                pause_config=pause_config,
+                annotations=prepared.annotations,
+                semantic_boundaries=semantic_boundaries,
+            )
             if post_repair.issues:
                 raise PlanRenderabilityError(post_repair.issues, mode="repair")
         renderability_checked_segments = checked_segment_count
@@ -1539,163 +1554,81 @@ def _repair_renderer_segments(
     segments: list[PlanSegment],
     issues: tuple[RenderabilityIssue, ...],
     text: str,
-    boundaries: list[BoundaryEvent],
-    pause_config: PauseConfig,
-    annotations: tuple[AnnotationSpan, ...],
 ) -> tuple[list[PlanSegment], tuple[RenderabilityIssue, ...]]:
+    """Apply only the safe actions already selected by non-mutating assessment."""
     current = list(segments)
     repairs: list[RenderabilityIssue] = []
     for issue in issues:
         index = next(
             (i for i, segment in enumerate(current) if segment.id == issue.segment_id), None
         )
-        if index is None:
-            continue
-        punctuation = current[index]
-        significant = [char for char in punctuation.text if not char.isspace()]
-        terminal = bool(significant and significant[-1] in ".!?…。！？")
-        directions = (-1, 1) if terminal else (1, -1)
-        merged = False
-        for direction in directions:
-            neighbor_index = index + direction
-            if not 0 <= neighbor_index < len(current):
-                continue
-            neighbor = current[neighbor_index]
-            if not _can_merge_punctuation(
-                punctuation,
-                neighbor,
-                direction,
-                text,
-                boundaries,
-                pause_config,
-                annotations,
-            ):
-                continue
-            start = min(punctuation.spoken_start, neighbor.spoken_start)
-            end = max(punctuation.spoken_end, neighbor.spoken_end)
-            replacement_segment = replace(
-                neighbor,
-                text=text[start:end],
-                spoken_start=start,
-                spoken_end=end,
-                structural_start=None,
-                structural_end=None,
-                token_indices=(),
-                annotation_ids=(),
-            )
-            current[neighbor_index] = replacement_segment
-            del current[index]
-            repairs.append(replace(issue, repair="merge_neutral_punctuation"))
-            merged = True
-            break
-        if merged:
-            continue
-        if not _can_drop_punctuation(punctuation, annotations):
+        assessment = issue.repair_assessment
+        if index is None or assessment is None or not assessment.safe:
             failed = replace(
                 issue,
                 code="renderability.repair_failed",
                 reason="repair_failed",
-                hint="The punctuation segment has semantic or media constraints that prevent safe merging or omission.",
+                hint="The assessed safe punctuation action could not be applied to this segment topology.",
             )
             raise PlanRenderabilityError((failed,), mode="repair")
+
+        punctuation = current[index]
+        if assessment.action == "drop":
+            del current[index]
+            repairs.append(replace(issue, repair="drop_non_speech_punctuation"))
+            continue
+
+        if assessment.action not in {"merge_previous", "merge_next"}:
+            failed = replace(
+                issue,
+                code="renderability.repair_failed",
+                reason="repair_failed",
+                hint="No supported repair action was selected for this punctuation segment.",
+            )
+            raise PlanRenderabilityError((failed,), mode="repair")
+        expected_neighbor_index = index + (-1 if assessment.action == "merge_previous" else 1)
+        neighbor_index = next(
+            (
+                i
+                for i, segment in enumerate(current)
+                if segment.id == assessment.neighbor_segment_id
+            ),
+            None,
+        )
+        if neighbor_index is None or neighbor_index != expected_neighbor_index:
+            failed = replace(
+                issue,
+                code="renderability.repair_failed",
+                reason="repair_failed",
+                hint="The assessed adjacent speech segment is no longer adjacent; no repair was applied.",
+            )
+            raise PlanRenderabilityError((failed,), mode="repair")
+        neighbor = current[neighbor_index]
+        start = min(punctuation.spoken_start, neighbor.spoken_start)
+        end = max(punctuation.spoken_end, neighbor.spoken_end)
+        replacement_segment = replace(
+            neighbor,
+            text=text[start:end],
+            spoken_start=start,
+            spoken_end=end,
+            structural_start=None,
+            structural_end=None,
+            token_indices=(),
+            annotation_ids=(),
+        )
+        current[neighbor_index] = replacement_segment
         del current[index]
-        repairs.append(replace(issue, repair="drop_non_speech_punctuation"))
+        repairs.append(replace(issue, repair="merge_neutral_punctuation"))
     return current, tuple(repairs)
-
-
-def _can_merge_punctuation(
-    punctuation: PlanSegment,
-    neighbor: PlanSegment,
-    direction: int,
-    text: str,
-    boundaries: list[BoundaryEvent],
-    pause_config: PauseConfig,
-    annotations: tuple[AnnotationSpan, ...],
-) -> bool:
-    if (
-        not _is_neutral_punctuation_text(punctuation.text)
-        or not contains_speech_content(neighbor.text)
-        or punctuation.language != neighbor.language
-        or punctuation.paragraph != neighbor.paragraph
-        or punctuation.directives != neighbor.directives
-    ):
-        return False
-    if direction < 0:
-        gap_start, gap_end = neighbor.spoken_end, punctuation.spoken_start
-    else:
-        gap_start, gap_end = punctuation.spoken_end, neighbor.spoken_start
-    if gap_start > gap_end or text[gap_start:gap_end].strip():
-        return False
-    if any(
-        gap_start <= boundary.position <= gap_end and boundary_is_active(boundary, pause_config)
-        for boundary in boundaries
-    ):
-        return False
-    if _audio_crosses_join(gap_start, gap_end, annotations):
-        return False
-    return not any(
-        not _language_annotation(annotation)
-        and _semantic_annotation(annotation)
-        and any(
-            position is not None and gap_start <= position <= gap_end
-            for position in (annotation.spoken_start, annotation.spoken_end)
-        )
-        for annotation in annotations
-    )
-
-
-def _audio_crosses_join(
-    gap_start: int, gap_end: int, annotations: tuple[AnnotationSpan, ...]
-) -> bool:
-    for annotation in _audio_annotations(annotations):
-        start, end = annotation.spoken_start, annotation.spoken_end
-        if start is None or end is None:
-            continue
-        if start == end:
-            if gap_start <= start <= gap_end:
-                return True
-        elif gap_start == gap_end:
-            if start < gap_start < end:
-                return True
-        elif start < gap_end and end > gap_start:
-            return True
-    return False
-
-
-def _can_drop_punctuation(segment: PlanSegment, annotations: tuple[AnnotationSpan, ...]) -> bool:
-    directives = segment.directives
-    if any(
-        value is not None
-        for value in (
-            directives.audio,
-            directives.pronunciation,
-            directives.substitution,
-            directives.say_as,
-        )
-    ):
-        return False
-    protected_tags = {"audio", "phoneme", "pronunciation", "sub", "say-as"}
-    for annotation in annotations:
-        tag = str(annotation.attrs.get("tag") or annotation.kind).lower().replace("_", "-")
-        if tag not in protected_tags:
-            continue
-        if annotation.id in segment.annotation_ids:
-            return False
-        start, end = annotation.spoken_start, annotation.spoken_end
-        if start is None or end is None:
-            continue
-        if (start == end and segment.spoken_start <= start <= segment.spoken_end) or (
-            start < segment.spoken_end and end > segment.spoken_start
-        ):
-            return False
-    return True
 
 
 def _renderability_repair_diagnostic(issue: RenderabilityIssue) -> Diagnostic:
     if issue.repair == "drop_non_speech_punctuation":
-        message = f"Removed isolated punctuation-only renderer segment {issue.text!r}"
+        message = f"Repaired isolated punctuation {issue.text!r} by removing the punctuation-only segment."
+    elif issue.repair_assessment is not None and issue.repair_assessment.action == "merge_previous":
+        message = f"Repaired isolated punctuation {issue.text!r} by merging it into the previous spoken segment."
     else:
-        message = f"Merged neutral punctuation into an adjacent spoken segment {issue.text!r}"
+        message = f"Repaired isolated punctuation {issue.text!r} by merging it into the following spoken segment."
     return Diagnostic(
         code="planning.renderability.repaired",
         message=message,
@@ -1704,7 +1637,7 @@ def _renderability_repair_diagnostic(issue: RenderabilityIssue) -> Diagnostic:
         source_end=issue.source_end,
         line=issue.line,
         column=issue.column,
-        hint="Review the source if this punctuation was intended to be spoken.",
+        hint="Review the source context if this punctuation was intended to be spoken separately.",
     )
 
 

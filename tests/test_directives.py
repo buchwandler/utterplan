@@ -185,5 +185,5 @@ def test_new_directive_models_round_trip_through_plan_json() -> None:
         '[whispered]{ext="whisper" amount="soft"}'
     )
 
-    assert type(plan).from_json(plan.to_json()) == plan
+    assert type(plan).from_toml(plan.to_toml()) == plan
     jsonschema.validate(plan.to_dict(), schema())

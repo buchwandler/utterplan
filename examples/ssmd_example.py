@@ -5,7 +5,7 @@ def main() -> None:
     plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
         "Hello ...s world"
     )
-    print(plan.to_json())
+    print(plan.to_toml())
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ def main() -> None:
     args = parser.parse_args()
 
     source = args.source.read_text(encoding="utf-8")
-    output = args.output or args.source.with_suffix(".utterplan.json")
+    output = args.output or args.source.with_suffix(".utterplan.toml")
     plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(source)
     plan.save(output)
     print(f"Saved {output}")

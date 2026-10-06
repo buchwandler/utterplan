@@ -1,0 +1,223 @@
+format = "utterplan"
+schema_version = 4
+plan_id = "sha256:042507500c865572a011df68f10d0c4b4ceed1e22cb42455e0ae384fdfbdd499"
+annotation = []
+marker = []
+warnings = []
+
+[producer]
+name = "utterplan"
+version = "0.3.7"
+
+[config]
+diagnostics = true
+document_format = "plain"
+language = "en-us"
+overlap_mode = "snap"
+renderability_mode = "strict"
+text_preparation = "spokenform"
+unit = "paragraph"
+
+[config.language_aliases]
+
+[config.linguistics]
+require_spacy = false
+
+[config.pauses]
+clause = 0.3
+enabled = true
+mode = "auto"
+paragraph = 1.0
+parenthetical = 0.15
+sentence = 0.6
+voice_change = 0.15
+weak = 0.15
+
+[config.ssmd]
+parse_yaml_header = true
+
+[preparation]
+backend = "spokenform"
+languages = ["en-us"]
+warnings = []
+version = "0.4.5"
+replacement = []
+
+[[language]]
+id = "lang-0"
+language = "en-us"
+source = "document-default"
+span = [0, 77]
+
+[[linguistic_run]]
+language_run_id = "lang-0"
+provider = "fallback"
+token_span = [0, 13]
+
+[[unit]]
+id = "unit-0000"
+index = 0
+kind = "paragraph"
+span = [0, 77]
+content_hash = "sha256:92cd6655ed559605fb4e17a87fe9f75c2d86e9f1373add268b2d7664d70b1387"
+content_hash_schema = "utterplan-unit-v3"
+markers = []
+
+[[unit.segment]]
+id = "seg-000000"
+text = "The backup battery "
+span = [0, 19]
+language = "en-us"
+paragraph = 0
+sentence = 0
+clause = 0
+tokens = [0, 1, 2]
+annotations = []
+structural_span = [0, 19]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives]
+
+[[unit.segment]]
+id = "seg-000001"
+text = "(still warm from the morning test)"
+span = [19, 53]
+language = "en-us"
+paragraph = 0
+sentence = 0
+clause = 1
+tokens = [3, 4, 5, 6, 7, 8]
+annotations = []
+structural_span = [19, 53]
+
+[unit.segment.pause_before]
+seconds = 0.15
+events = ["boundary-000000"]
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives]
+
+[[unit.segment]]
+id = "seg-000002"
+text = " sat beside the console."
+span = [53, 77]
+language = "en-us"
+paragraph = 0
+sentence = 0
+clause = 2
+tokens = [9, 10, 11, 12]
+annotations = []
+structural_span = [53, 77]
+
+[unit.segment.pause_before]
+seconds = 0.15
+events = ["boundary-000001"]
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives]
+
+[[semantic_boundary]]
+id = "semantic-boundary-000000"
+position = 19
+kind = "parenthetical"
+origin = "phrasplit"
+language_run_id = "lang-0"
+
+[semantic_boundary.attrs]
+detected_kind = "parenthetical_open"
+detector_end = 20
+detector_run_spoken_start = 0
+detector_start = 19
+
+[[semantic_boundary]]
+id = "semantic-boundary-000001"
+position = 53
+kind = "parenthetical"
+origin = "phrasplit"
+language_run_id = "lang-0"
+
+[semantic_boundary.attrs]
+detected_kind = "parenthetical_close"
+detector_end = 53
+detector_run_spoken_start = 0
+detector_start = 52
+
+[[boundary]]
+id = "boundary-000000"
+position = 19
+kind = "parenthetical"
+origin = "phrasplit"
+strength = "weak"
+
+[boundary.attrs]
+anchor = "before"
+automatic = true
+detected_kind = "parenthetical_open"
+semantic_boundary_id = "semantic-boundary-000000"
+
+[[boundary]]
+id = "boundary-000001"
+position = 53
+kind = "parenthetical"
+origin = "phrasplit"
+strength = "weak"
+
+[boundary.attrs]
+anchor = "before"
+automatic = true
+detected_kind = "parenthetical_close"
+semantic_boundary_id = "semantic-boundary-000001"
+
+[token_stream]
+items = [
+    {id = "token-0", span = [0, 3], text = "The", lemma = "the", language = "en-us"},
+    {id = "token-1", span = [4, 10], text = "backup", lemma = "backup", language = "en-us"},
+    {id = "token-2", span = [11, 18], text = "battery", lemma = "battery", language = "en-us"},
+    {id = "token-3", span = [19, 25], text = "(still", lemma = "(still", language = "en-us"},
+    {id = "token-4", span = [26, 30], text = "warm", lemma = "warm", language = "en-us"},
+    {id = "token-5", span = [31, 35], text = "from", lemma = "from", language = "en-us"},
+    {id = "token-6", span = [36, 39], text = "the", lemma = "the", language = "en-us"},
+    {id = "token-7", span = [40, 47], text = "morning", lemma = "morning", language = "en-us"},
+    {id = "token-8", span = [48, 53], text = "test)", lemma = "test)", language = "en-us"},
+    {id = "token-9", span = [54, 57], text = "sat", lemma = "sat", language = "en-us"},
+    {id = "token-10", span = [58, 64], text = "beside", lemma = "beside", language = "en-us"},
+    {id = "token-11", span = [65, 68], text = "the", lemma = "the", language = "en-us"},
+    {id = "token-12", span = [69, 77], text = "console.", lemma = "console.", language = "en-us"},
+]
+
+[[diagnostic]]
+code = "planning.complete"
+severity = "info"
+message = "Plan compiled without renderer or audio processing"
+
+[source]
+format = "plain"
+text = """The backup battery (still warm from the morning test) sat beside the console."""
+
+[texts]
+structural = """The backup battery (still warm from the morning test) sat beside the console."""
+spoken = """The backup battery (still warm from the morning test) sat beside the console."""
+
+[document_metadata.planning]
+engine_independent = true
+linguistic_passes = 2
+pass_a_tokens = 13
+
+[document_metadata.planning.renderability]
+checked_segments = 3
+guaranteed = true
+mode = "strict"
+repair_count = 0

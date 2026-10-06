@@ -13,7 +13,7 @@ def _load(name: str) -> UtterancePlan:
 
 
 def test_basic_explanation_is_human_oriented_and_exact() -> None:
-    output = format_explanation(_load("basic_en.utterplan.json"))
+    output = format_explanation(_load("basic_en.utterplan.toml"))
 
     assert output == (
         "UtterPlan explanation\n\n"
@@ -37,7 +37,7 @@ def test_basic_explanation_is_human_oriented_and_exact() -> None:
 
 
 def test_preparation_replacements_are_explained_without_ranges_by_default() -> None:
-    plan = _load("spokenform_offsets.utterplan.json")
+    plan = _load("spokenform_offsets.utterplan.toml")
     output = format_explanation(plan)
 
     assert '"Dr." -> "Doctor"  (abbreviation: abbr:Dr.)' in output
@@ -51,7 +51,7 @@ def test_preparation_replacements_are_explained_without_ranges_by_default() -> N
 
 
 def test_parenthetical_pauses_use_resolved_pause_and_boundary_provenance() -> None:
-    output = format_explanation(_load("parenthetical.utterplan.json"))
+    output = format_explanation(_load("parenthetical.utterplan.toml"))
 
     assert output.count("pause 0.15 s") == 2
     assert "before: pause 0.15 s: parenthetical opening, detected by phrasplit" in output
@@ -60,14 +60,14 @@ def test_parenthetical_pauses_use_resolved_pause_and_boundary_provenance() -> No
 
 
 def test_explicit_pause_uses_resolved_segment_duration() -> None:
-    output = format_explanation(_load("ssmd_breaks.utterplan.json"))
+    output = format_explanation(_load("ssmd_breaks.utterplan.toml"))
 
     assert "after: pause 0.50 s: explicit boundary, from SSMD" in output
     assert "after: pause 0.15 s: explicit boundary, from SSMD" in output
 
 
 def test_directives_are_humanized() -> None:
-    output = format_explanation(_load("directives.utterplan.json"))
+    output = format_explanation(_load("directives.utterplan.toml"))
 
     assert "effective prosody: rate 1.2, pitch +2st, volume 80%" in output
     assert "emphasis: strong" in output
@@ -75,7 +75,7 @@ def test_directives_are_humanized() -> None:
 
 
 def test_ssmd_explanation_summarizes_semantics_and_metadata() -> None:
-    output = format_explanation(_load("ssmd_09_comprehensive.utterplan.json"), details=True)
+    output = format_explanation(_load("ssmd_09_comprehensive.utterplan.toml"), details=True)
 
     assert "SSMD version: 0.9" in output
     assert 'title: "Renderer-neutral SSMD 0.9 contract"' in output
@@ -106,7 +106,7 @@ Hello."""
 
 
 def test_multilingual_segments_are_in_render_order() -> None:
-    output = format_explanation(_load("multilingual.utterplan.json"))
+    output = format_explanation(_load("multilingual.utterplan.toml"))
 
     labels = [output.index(label) for label in ("[en-us]", "[fr]")]
     assert labels[0] < labels[1]
@@ -115,7 +115,7 @@ def test_multilingual_segments_are_in_render_order() -> None:
 
 
 def test_markers_are_shown_in_their_owning_unit() -> None:
-    output = format_explanation(_load("markers.utterplan.json"))
+    output = format_explanation(_load("markers.utterplan.toml"))
 
     assert "Unit 2: sentence" in output
     assert "markers: @mark" in output
@@ -123,7 +123,7 @@ def test_markers_are_shown_in_their_owning_unit() -> None:
 
 
 def test_details_include_technical_identity_and_correlated_ids() -> None:
-    output = format_explanation(_load("parenthetical.utterplan.json"), details=True)
+    output = format_explanation(_load("parenthetical.utterplan.toml"), details=True)
 
     assert "plan id: sha256:" in output
     assert "schema: 4" in output
@@ -141,14 +141,14 @@ def test_details_include_technical_identity_and_correlated_ids() -> None:
 
 
 def test_explanation_is_deterministic() -> None:
-    plan = _load("directives.utterplan.json")
+    plan = _load("directives.utterplan.toml")
 
     assert format_explanation(plan) == format_explanation(plan)
     assert format_explanation(plan, details=True) == format_explanation(plan, details=True)
 
 
 def test_empty_collections_are_concise() -> None:
-    output = format_explanation(_load("basic_en.utterplan.json"))
+    output = format_explanation(_load("basic_en.utterplan.toml"))
 
     assert "No written-to-spoken changes." in output
     assert "No warnings." in output

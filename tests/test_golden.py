@@ -9,9 +9,9 @@ from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
 from utterplan.format import schema
 
 ROOT = Path(__file__).resolve().parent
-GOLDEN = sorted((ROOT / "golden").glob("*.utterplan.json"))
+GOLDEN = sorted((ROOT / "golden").glob("*.utterplan.toml"))
 COMPREHENSIVE_SOURCE = ROOT / "fixtures" / "ssmd_09_comprehensive.ssmd"
-COMPREHENSIVE_GOLDEN = ROOT / "golden" / "ssmd_09_comprehensive.utterplan.json"
+COMPREHENSIVE_GOLDEN = ROOT / "golden" / "ssmd_09_comprehensive.utterplan.toml"
 
 
 def test_golden_plans_roundtrip_and_validate() -> None:
@@ -19,13 +19,18 @@ def test_golden_plans_roundtrip_and_validate() -> None:
     for path in GOLDEN:
         plan = UtterancePlan.load(path)
         jsonschema.validate(plan.to_dict(), schema())
-        assert UtterancePlan.from_json(plan.to_json()) == plan
+        assert UtterancePlan.from_toml(plan.to_toml()) == plan
 
 
 def test_canonical_ssmd_09_compiles_to_comprehensive_v4_golden() -> None:
     source = COMPREHENSIVE_SOURCE.read_text(encoding="utf-8")
     plan = UtterancePlanner(
-        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
+        PlannerConfig(
+            language="en-us",
+            document_format="ssmd",
+            text_preparation="identity",
+            renderability_mode="strict",
+        )
     ).plan(source)
     expected = UtterancePlan.load(COMPREHENSIVE_GOLDEN)
     expected = replace(

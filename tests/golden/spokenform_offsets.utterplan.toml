@@ -1,0 +1,150 @@
+format = "utterplan"
+schema_version = 4
+plan_id = "sha256:8feaafe9fc0f571e85c524cbb08731ea6a94d4d2ee00346b78a37e345228eeb5"
+annotation = []
+semantic_boundary = []
+boundary = []
+marker = []
+warnings = []
+
+[producer]
+name = "utterplan"
+version = "0.3.7"
+
+[config]
+diagnostics = true
+document_format = "plain"
+language = "en-us"
+overlap_mode = "snap"
+renderability_mode = "strict"
+text_preparation = "spokenform"
+unit = "paragraph"
+
+[config.language_aliases]
+
+[config.linguistics]
+require_spacy = false
+
+[config.pauses]
+clause = 0.3
+enabled = true
+mode = "tts"
+paragraph = 1.0
+parenthetical = 0.15
+sentence = 0.6
+voice_change = 0.15
+weak = 0.15
+
+[config.ssmd]
+parse_yaml_header = true
+
+[preparation]
+backend = "spokenform"
+languages = ["en-us"]
+warnings = []
+version = "0.4.5"
+
+[[preparation.replacement]]
+source_span = [0, 3]
+output_span = [0, 6]
+kind = "abbreviation"
+language = "en_US"
+replacement = "Doctor"
+rule = "abbr:Dr."
+source = "Dr."
+
+[[preparation.replacement]]
+source_span = [17, 21]
+output_span = [20, 34]
+kind = "structured"
+language = "en"
+replacement = "five kilograms"
+rule = "en.quantity"
+source = "5 kg"
+
+[[preparation.replacement]]
+source_span = [25, 31]
+output_span = [38, 52]
+kind = "structured"
+language = "en"
+replacement = "January fourth"
+rule = "en.date.mdy_text"
+source = "Jan. 4"
+
+[[language]]
+id = "lang-0"
+language = "en-us"
+source = "document-default"
+span = [0, 53]
+
+[[linguistic_run]]
+language_run_id = "lang-0"
+provider = "fallback"
+token_span = [0, 8]
+
+[[unit]]
+id = "unit-0000"
+index = 0
+kind = "paragraph"
+span = [0, 53]
+content_hash = "sha256:2de5d0134092b70b9deea2d1b4e5f98f289f921a75e0f42b21e30e1fecfa9ffc"
+content_hash_schema = "utterplan-unit-v3"
+markers = []
+
+[[unit.segment]]
+id = "seg-000000"
+text = "Doctor Smith bought five kilograms on January fourth."
+span = [0, 53]
+language = "en-us"
+paragraph = 0
+sentence = 0
+clause = 0
+tokens = [0, 1, 2, 3, 4, 5, 6, 7]
+annotations = []
+structural_span = [0, 32]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives]
+
+[token_stream]
+items = [
+    {id = "token-0", span = [0, 6], text = "Doctor", lemma = "doctor", language = "en-us"},
+    {id = "token-1", span = [7, 12], text = "Smith", lemma = "smith", language = "en-us"},
+    {id = "token-2", span = [13, 19], text = "bought", lemma = "bought", language = "en-us"},
+    {id = "token-3", span = [20, 24], text = "five", lemma = "five", language = "en-us"},
+    {id = "token-4", span = [25, 34], text = "kilograms", lemma = "kilograms", language = "en-us"},
+    {id = "token-5", span = [35, 37], text = "on", lemma = "on", language = "en-us"},
+    {id = "token-6", span = [38, 45], text = "January", lemma = "january", language = "en-us"},
+    {id = "token-7", span = [46, 53], text = "fourth.", lemma = "fourth.", language = "en-us"},
+]
+
+[[diagnostic]]
+code = "planning.complete"
+severity = "info"
+message = "Plan compiled without renderer or audio processing"
+
+[source]
+format = "plain"
+text = """Dr. Smith bought 5 kg on Jan. 4."""
+
+[texts]
+structural = """Dr. Smith bought 5 kg on Jan. 4."""
+spoken = """Doctor Smith bought five kilograms on January fourth."""
+
+[document_metadata.planning]
+engine_independent = true
+linguistic_passes = 2
+pass_a_tokens = 8
+
+[document_metadata.planning.renderability]
+checked_segments = 1
+guaranteed = true
+mode = "strict"
+repair_count = 0

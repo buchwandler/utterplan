@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -204,23 +203,6 @@ def migrate_plan_data(
     )
 
 
-def migrate_plan_json(
-    value: str,
-    *,
-    target_version: int | None = None,
-    indent: int | None = 2,
-) -> str:
-    try:
-        data = json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise PlanFormatError(str(exc), code="json.invalid") from exc
-    result = migrate_plan_data(data, target_version=target_version)
-    return (
-        json.dumps(result.data, ensure_ascii=False, sort_keys=True, indent=indent, allow_nan=False)
-        + "\n"
-    )
-
-
 __all__ = [
     "MigrationResult",
     "MigrationStep",
@@ -228,5 +210,4 @@ __all__ = [
     "_apply_migration_chain",
     "inspect_envelope",
     "migrate_plan_data",
-    "migrate_plan_json",
 ]

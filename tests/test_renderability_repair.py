@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from utterplan import (
     AnnotationSpan,
     BoundaryEvent,
+    EmphasisDirective,
     PlannerConfig,
     PlanRenderabilityError,
     PlanSegment,
+    SegmentDirectives,
+    SemanticBoundary,
     UtterancePlanner,
+    assess_renderability_repair,
     classify_segment,
-    preflight_renderability,
 )
 from utterplan.config import PauseConfig
 from utterplan.planner import _repair_renderer_segments
@@ -42,20 +47,37 @@ def _punctuation_issue(segment: PlanSegment, index: int = 1):
     return issue
 
 
-def test_repair_drops_isolated_punctuation_and_records_guarantee() -> None:
-    config = PlannerConfig(
-        language="en-US",
-        text_preparation="identity",
-        renderability_mode="repair",
+def _assess(
+    segments: list[PlanSegment],
+    issue,
+    text: str,
+    *,
+    boundaries: tuple[BoundaryEvent, ...] = (),
+    annotations: tuple[AnnotationSpan, ...] = (),
+    semantic_boundaries: tuple[SemanticBoundary, ...] = (),
+):
+    assessment = assess_renderability_repair(
+        issue,
+        segments[issue.segment_index],
+        segments,
+        spoken_text=text,
+        boundaries=boundaries,
+        pause_config=PauseConfig(),
+        annotations=annotations,
+        semantic_boundaries=semantic_boundaries,
     )
-    plan = UtterancePlanner(config).plan("Hello.\n\n.\n\nWorld.")
+    return replace(issue, repair_assessment=assessment)
 
+
+def test_repair_is_the_default_and_records_a_source_located_guarantee() -> None:
+    config = PlannerConfig(language="en-US", text_preparation="identity")
+    plan = UtterancePlanner(config).plan("Hello.\n\n.\n\nWorld.")
     repeated = UtterancePlanner(config).plan("Hello.\n\n.\n\nWorld.")
+
+    assert config.renderability_mode == "repair"
     assert repeated.plan_id == plan.plan_id
-    assert repeated.to_json() == plan.to_json()
+    assert repeated.to_toml() == plan.to_toml()
     assert [segment.text for segment in plan.segments] == ["Hello.", "World."]
-    report = preflight_renderability(plan)
-    assert report.ok
     assert plan.document_metadata["planning"]["renderability"] == {
         "mode": "repair",
         "checked_segments": 3,
@@ -64,33 +86,69 @@ def test_repair_drops_isolated_punctuation_and_records_guarantee() -> None:
     }
     repairs = [item for item in plan.diagnostics if item.code == "planning.renderability.repaired"]
     assert len(repairs) == 1
-    assert repairs[0].message == "Removed isolated punctuation-only renderer segment '.'"
+    assert "by removing the punctuation-only segment" in repairs[0].message
     assert repairs[0].line == 3
     assert plan.texts.spoken == "Hello.\n\n.\n\nWorld."
 
 
-def test_safe_merge_uses_canonical_text_and_revalidates() -> None:
+def test_default_repairs_exact_comma_space_with_isolated_planner_topology(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import utterplan.planner as planner_module
+
+    def split_around_comma_space(text: str, *_args, **_kwargs) -> list[PlanSegment]:
+        start = text.index(",")
+        end = start + 2
+        return [
+            _segment("seg-000000", text[:start], 0, start),
+            _segment("seg-000001", text[start:end], start, end),
+            _segment("seg-000002", text[end:], end, len(text)),
+        ]
+
+    monkeypatch.setattr(planner_module, "_segment", split_around_comma_space)
+    source = "Before, after"
+    config = PlannerConfig(language="en-US", text_preparation="identity")
+    plan = UtterancePlanner(config).plan(source)
+
+    assert plan.document_metadata["planning"]["renderability"]["guaranteed"] is True
+    assert plan.segments[1].text == ", after"
+    repaired = [item for item in plan.diagnostics if item.code == "planning.renderability.repaired"]
+    assert len(repaired) == 1
+    assert "', '" in repaired[0].message
+
+    strict = UtterancePlanner(replace(config, renderability_mode="strict"))
+    with pytest.raises(PlanRenderabilityError) as error:
+        strict.plan(source)
+    issue = error.value.issues[0]
+    assert issue.text == ", "
+    assert issue.repair_assessment is not None
+    assert issue.repair_assessment.safe is True
+    assert issue.repair_assessment.action == "merge_next"
+    assert "Automatic repair: safe; merge with the following spoken segment." in str(error.value)
+    assert "Spoken context:" in str(error.value)
+
+
+def test_safe_merge_uses_assessed_action_and_canonical_text() -> None:
     lexical = _segment("seg-000000", "Hello", 0, 5)
     punctuation = _segment("seg-000001", ".", 5, 6)
-    issue = _punctuation_issue(punctuation)
+    segments = [lexical, punctuation]
+    issue = _assess(segments, _punctuation_issue(punctuation), "Hello.")
 
-    repaired, repairs = _repair_renderer_segments(
-        [lexical, punctuation], (issue,), "Hello.", [], PauseConfig(), ()
-    )
+    assert issue.repair_assessment is not None
+    assert issue.repair_assessment.action == "merge_previous"
+    assert issue.repair_assessment.safe is True
+    repaired, repairs = _repair_renderer_segments(segments, (issue,), "Hello.")
 
     assert len(repaired) == 1
     assert repaired[0].text == "Hello."
     assert (repaired[0].spoken_start, repaired[0].spoken_end) == (0, 6)
     assert repairs[0].repair == "merge_neutral_punctuation"
-    assert preflight_renderability(
-        type("Plan", (), {"segments": tuple(repaired), "tokens": ()})()
-    ).ok
+    assert classify_segment(repaired[0], 0) is None
 
 
-def test_repair_never_merges_across_active_pause_and_preserves_boundary() -> None:
+def test_active_pause_at_join_blocks_merge_but_preserves_safe_drop() -> None:
     lexical = _segment("seg-000000", "Hello", 0, 5)
     punctuation = _segment("seg-000001", ".", 5, 6)
-    issue = _punctuation_issue(punctuation)
     boundary = BoundaryEvent(
         id="boundary-000000",
         position=5,
@@ -99,26 +157,61 @@ def test_repair_never_merges_across_active_pause_and_preserves_boundary() -> Non
         origin="ssmd",
         strength="sentence",
     )
-    boundaries = [boundary]
-
-    repaired, repairs = _repair_renderer_segments(
-        [lexical, punctuation], (issue,), "Hello.", boundaries, PauseConfig(), ()
+    segments = [lexical, punctuation]
+    issue = _assess(
+        segments,
+        _punctuation_issue(punctuation),
+        "Hello.",
+        boundaries=(boundary,),
     )
 
+    assert issue.repair_assessment is not None
+    assert issue.repair_assessment.safe is True
+    assert issue.repair_assessment.action == "drop"
+    assert "active pause at spoken position 5" in issue.repair_assessment.blockers
+    repaired, repairs = _repair_renderer_segments(segments, (issue,), "Hello.")
     assert [segment.text for segment in repaired] == ["Hello"]
     assert repairs[0].repair == "drop_non_speech_punctuation"
-    assert boundaries == [boundary]
+    assert (boundary.position, boundary.seconds) == (5, 0.5)
 
 
-def test_repair_does_not_merge_across_language_change() -> None:
-    french = _segment("seg-fr", "bonjour", 0, 7, language="fr-FR")
-    punctuation = _segment("seg-punc", ".", 7, 8, language="en-US")
-    issue = _punctuation_issue(punctuation)
-
-    repaired, repairs = _repair_renderer_segments(
-        [french, punctuation], (issue,), "bonjour.", [], PauseConfig(), ()
+def test_active_pause_inside_punctuation_blocks_merge_and_drop() -> None:
+    punctuation = _segment("seg-000001", "?!", 5, 7)
+    boundary = BoundaryEvent(
+        id="boundary-inside",
+        position=6,
+        kind="explicit",
+        seconds=0.5,
+        origin="ssmd",
+        strength="sentence",
+    )
+    segments = [punctuation]
+    issue = _assess(
+        segments,
+        _punctuation_issue(punctuation, index=0),
+        "Hello?!",
+        boundaries=(boundary,),
     )
 
+    assert issue.repair_assessment is not None
+    assert issue.repair_assessment.safe is False
+    assert "active pause at spoken position 6" in issue.repair_assessment.blockers
+    with pytest.raises(PlanRenderabilityError):
+        _repair_renderer_segments(segments, (issue,), "Hello?!")
+    assert segments == [punctuation]
+
+
+def test_language_change_blocks_merge_but_allows_safe_neutral_drop() -> None:
+    french = _segment("seg-fr", "bonjour", 0, 7, language="fr-FR")
+    punctuation = _segment("seg-punc", ".", 7, 8, language="en-US")
+    segments = [french, punctuation]
+    issue = _assess(segments, _punctuation_issue(punctuation), "bonjour.")
+
+    assert issue.repair_assessment is not None
+    assert issue.repair_assessment.safe is True
+    assert issue.repair_assessment.action == "drop"
+    assert "language changes from en-US to fr-FR" in issue.repair_assessment.blockers
+    repaired, repairs = _repair_renderer_segments(segments, (issue,), "bonjour.")
     assert [segment.text for segment in repaired] == ["bonjour"]
     assert repairs[0].repair == "drop_non_speech_punctuation"
 
@@ -126,7 +219,6 @@ def test_repair_does_not_merge_across_language_change() -> None:
 def test_audio_instruction_at_join_prevents_merge_and_drop() -> None:
     lexical = _segment("seg-000000", "Hello", 0, 5)
     punctuation = _segment("seg-000001", ".", 5, 6)
-    issue = _punctuation_issue(punctuation)
     audio = AnnotationSpan(
         id="annotation-audio",
         kind="audio",
@@ -136,17 +228,91 @@ def test_audio_instruction_at_join_prevents_merge_and_drop() -> None:
         spoken_start=5,
         spoken_end=5,
     )
+    segments = [lexical, punctuation]
+    issue = _assess(
+        segments,
+        _punctuation_issue(punctuation),
+        "Hello.",
+        annotations=(audio,),
+    )
 
+    assert issue.repair_assessment is not None
+    assert issue.repair_assessment.safe is False
+    assert any("audio" in blocker for blocker in issue.repair_assessment.blockers)
     with pytest.raises(PlanRenderabilityError) as error:
-        _repair_renderer_segments(
-            [lexical, punctuation], (issue,), "Hello.", [], PauseConfig(), (audio,)
-        )
-
+        _repair_renderer_segments(segments, (issue,), "Hello.")
     assert error.value.mode == "repair"
     assert error.value.issues[0].code == "renderability.repair_failed"
+    assert "audio" in str(error.value)
 
 
-def test_symbol_only_content_fails_both_modes() -> None:
+def test_semantic_directives_and_boundaries_block_punctuation_removal() -> None:
+    lexical = _segment("seg-000000", "Hello", 0, 5)
+    punctuation = replace(
+        _segment("seg-000001", "?!", 5, 7),
+        directives=SegmentDirectives(emphasis=EmphasisDirective(level="strong")),
+    )
+    segments = [lexical, punctuation]
+    issue = _assess(segments, _punctuation_issue(punctuation), "Hello?!")
+
+    assert issue.repair_assessment is not None
+    assert issue.repair_assessment.safe is False
+    assert any("emphasis directive" in blocker for blocker in issue.repair_assessment.blockers)
+
+    plain_punctuation = _segment("seg-000002", "?!", 5, 7)
+    isolated = [plain_punctuation]
+    issue = _assess(
+        isolated,
+        _punctuation_issue(plain_punctuation, index=0),
+        "Hello?!",
+        semantic_boundaries=(SemanticBoundary("semantic-0", 6, "clause"),),
+    )
+    assert issue.repair_assessment is not None
+    assert issue.repair_assessment.safe is False
+    assert "clause semantic boundary at spoken position 6" in issue.repair_assessment.blockers
+
+
+@pytest.mark.parametrize(
+    ("tag", "attrs"),
+    (
+        ("pronunciation", {"tag": "pronunciation", "ph": "dʒɪf"}),
+        ("sub", {"tag": "sub", "sub": "spoken words"}),
+        ("say-as", {"tag": "say-as", "as": "characters"}),
+    ),
+)
+def test_semantic_annotations_on_punctuation_block_merge_and_removal(
+    tag: str, attrs: dict[str, str]
+) -> None:
+    lexical = _segment("seg-000000", "Hello", 0, 5)
+    punctuation = replace(
+        _segment("seg-000001", "?!", 5, 7),
+        annotation_ids=("annotation-semantic",),
+    )
+    annotation = AnnotationSpan(
+        id="annotation-semantic",
+        kind=tag,
+        attrs=attrs,
+        structural_start=5,
+        structural_end=7,
+        spoken_start=5,
+        spoken_end=7,
+    )
+    segments = [lexical, punctuation]
+    issue = _assess(
+        segments,
+        _punctuation_issue(punctuation),
+        "Hello?!",
+        annotations=(annotation,),
+    )
+
+    assert issue.repair_assessment is not None
+    assert issue.repair_assessment.safe is False
+    assert (
+        f"{tag} annotation belongs to the punctuation segment" in issue.repair_assessment.blockers
+    )
+
+
+def test_symbol_only_content_fails_without_a_guessed_repair() -> None:
     for mode in ("strict", "repair"):
         config = PlannerConfig(
             language="en-US",
@@ -155,5 +321,9 @@ def test_symbol_only_content_fails_both_modes() -> None:
         )
         with pytest.raises(PlanRenderabilityError) as error:
             UtterancePlanner(config).plan("€")
-        assert error.value.issues[0].code == "renderability.symbol_only"
+        issue = error.value.issues[0]
+        assert issue.code == "renderability.symbol_only"
+        assert issue.repair_assessment is not None
+        assert issue.repair_assessment.safe is False
+        assert "will not guess" in str(error.value)
         assert error.value.mode == mode

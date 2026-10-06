@@ -576,30 +576,35 @@ class UtterancePlan:
             "diagnostics": [_plain(x) for x in self.diagnostics],
         }
 
-    def to_json(self, *, indent: int | None = 2) -> str:
-        return (
-            __import__("json").dumps(
-                self.to_dict(), ensure_ascii=False, sort_keys=True, indent=indent, allow_nan=False
-            )
-            + "\n"
-        )
+    def to_toml(self) -> str:
+        """Return the canonical human-readable TOML representation."""
+        from .toml_codec import dumps_toml
+
+        return dumps_toml(self)
 
     def save(self, path: str | Path) -> None:
-        Path(path).write_text(self.to_json(), encoding="utf-8")
+        """Atomically save this plan as TOML."""
+        from .atomic_io import atomic_write_text
+
+        atomic_write_text(path, self.to_toml(), create_parent=True)
 
     @classmethod
-    def from_json(cls, value: str) -> UtterancePlan:
-        import json
+    def from_toml(cls, value: str) -> UtterancePlan:
+        """Decode a TOML representation of a semantic schema-v4 plan."""
+        from .toml_codec import loads_toml
 
-        try:
-            data = json.loads(value)
-        except json.JSONDecodeError as exc:
-            raise PlanFormatError(str(exc), code="json.invalid") from exc
-        return cls.from_dict(data)
+        return loads_toml(value)
 
     @classmethod
     def load(cls, path: str | Path) -> UtterancePlan:
-        return cls.from_json(Path(path).read_text(encoding="utf-8"))
+        """Load a canonical TOML plan; JSON is never auto-detected."""
+        source = Path(path)
+        if source.suffix.lower() == ".json":
+            raise PlanFormatError(
+                "JSON is not a supported plan-file format; use 'utterplan migrate' to convert it to TOML",
+                code="format.unsupported_json",
+            )
+        return cls.from_toml(source.read_text(encoding="utf-8"))
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> UtterancePlan:
@@ -1187,13 +1192,13 @@ def validate_plan(plan: UtterancePlan) -> None:
     from .renderability import assert_renderable
 
     assert_renderable(plan)
-    for boundary in plan.boundaries:
-        if not (0 <= boundary.position <= len(text)):
+    for event in plan.boundaries:
+        if not (0 <= event.position <= len(text)):
             raise PlanValidationError(
                 "boundary position is outside spoken text", code="boundary.out_of_range"
             )
-        if boundary.seconds is not None and (
-            not math.isfinite(float(boundary.seconds)) or float(boundary.seconds) < 0
+        if event.seconds is not None and (
+            not math.isfinite(float(event.seconds)) or float(event.seconds) < 0
         ):
             raise PlanValidationError(
                 "boundary seconds must be finite and non-negative", code="boundary.seconds"

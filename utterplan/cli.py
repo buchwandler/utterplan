@@ -3,29 +3,34 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import Literal, cast
 
 from . import PlannerConfig, UtterancePlan, __version__
+from .atomic_io import atomic_write_text
+from .batch import CompileOutcome, CompileRequest, compile_to_files
 from .compiler import InputFormat, compile_document
 from .config import LinguisticsConfig, PauseConfig
 from .exceptions import PlanFormatError, PlanRenderabilityError, UtterPlanError
 from .explain import format_explanation
 from .migration import MigrationResult, migrate_plan_data
+from .renderability import format_renderability_error
 
 _EXAMPLES = """examples:
   utterplan compile chapter.ssmd.md
-  utterplan compile chapter.ssmd.md --language de-DE
-  utterplan compile plain.txt --input-format plain --language de-DE
-  utterplan compile chapter.ssmd.md --json
-  utterplan validate chapter.ssmd.md
-  utterplan validate plain.txt --input-format plain --language de-DE
-  utterplan validate chapter.utterplan.json
-  utterplan inspect chapter.utterplan.json --segment 0
-  utterplan explain chapter.utterplan.json
-  utterplan migrate old.utterplan.json -o current.utterplan.json
-  utterplan migrate old.utterplan.json --check
+  utterplan compile chapter.ssmd.md -o plans/chapter.utterplan.toml
+  utterplan compile plain.txt --input-format plain --language de-DE --stdout
+  utterplan compile-many chapters/*.ssmd --output-dir build/plans
+  utterplan validate chapter.utterplan.toml
+  utterplan inspect chapter.utterplan.toml --segment 0
+  utterplan explain chapter.utterplan.toml
+  utterplan migrate old.utterplan.json -o old.utterplan.toml
 """
+
+
+class _CliUsageError(Exception):
+    pass
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,8 +83,8 @@ def build_parser() -> argparse.ArgumentParser:
     compile_parser.add_argument(
         "--renderability",
         choices=("strict", "repair"),
-        default="strict",
-        help="reject non-renderable segments or apply safe deterministic repairs",
+        default="repair",
+        help="safely repair isolated punctuation by default; strict rejects every repair opportunity",
     )
     compile_parser.add_argument(
         "--spacy",
@@ -92,10 +97,43 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="replace an existing output file"
     )
     compile_parser.add_argument(
-        "--json",
+        "--stdout",
         action="store_true",
-        help="also print the complete plan JSON when --output is used",
+        help="also print the TOML plan when --output is used",
     )
+
+    batch_parser = commands.add_parser(
+        "compile-many",
+        help="compile independent source files into one TOML plan per file",
+    )
+    batch_parser.add_argument(
+        "inputs", nargs="+", type=Path, help="source files in processing order"
+    )
+    batch_parser.add_argument("--output-dir", type=Path, required=True)
+    batch_parser.add_argument("--language", "--lang", dest="language")
+    batch_parser.add_argument("--input-format", choices=("auto", "plain", "ssmd"), default="auto")
+    batch_parser.add_argument("--unit", choices=("paragraph", "sentence"), default="paragraph")
+    batch_parser.add_argument(
+        "--text-preparation", choices=("spokenform", "identity"), default="spokenform"
+    )
+    batch_parser.add_argument("--pause-mode", choices=("tts", "manual", "auto"), default="tts")
+    batch_parser.add_argument(
+        "--renderability",
+        choices=("strict", "repair"),
+        default="repair",
+        help="safely repair isolated punctuation by default; strict rejects every repair opportunity",
+    )
+    batch_parser.add_argument(
+        "--spacy",
+        choices=("auto", "off", "sm", "md", "lg", "trf"),
+        default="off",
+        help="linguistic-resource policy; default is the deterministic fallback",
+    )
+    batch_parser.add_argument("--force", action="store_true", help="replace existing plan files")
+    batch_parser.add_argument(
+        "--fail-fast", action="store_true", help="skip remaining inputs after the first failure"
+    )
+    batch_parser.add_argument("--report", type=Path, help="TOML operational report path")
 
     validate_parser = commands.add_parser(
         "validate", help="validate a source document or saved semantic plan"
@@ -111,7 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     migrate_parser = commands.add_parser(
-        "migrate", help="migrate a saved plan to the current schema"
+        "migrate", help="explicitly import and migrate a legacy JSON plan to TOML"
     )
     migrate_parser.add_argument("input", type=Path)
     migrate_parser.add_argument("-o", "--output", type=Path)
@@ -251,6 +289,120 @@ def _linguistics_config(policy: str) -> LinguisticsConfig:
     )
 
 
+def _batch_output_name(source: Path) -> str:
+    lower_name = source.name.lower()
+    for suffix in (".ssmd.md", ".ssmd", ".md"):
+        if lower_name.endswith(suffix):
+            return source.name[: -len(suffix)] + ".utterplan.toml"
+    return source.stem + ".utterplan.toml"
+
+
+def _compile_many(args: argparse.Namespace) -> int:
+    sources: list[Path] = args.inputs
+    outputs = [args.output_dir / _batch_output_name(source) for source in sources]
+    owners: dict[Path, Path] = {}
+    for source, output in zip(sources, outputs, strict=True):
+        key = output.resolve()
+        if key in owners:
+            raise _CliUsageError(
+                f"inputs {owners[key]} and {source} map to the same output {output}"
+            )
+        owners[key] = source
+
+    report_path = args.report or (args.output_dir / "compile-report.toml")
+    if report_path.resolve() in owners:
+        raise _CliUsageError(f"batch report path collides with plan output: {report_path}")
+
+    config = PlannerConfig(
+        language=args.language or "en-US",
+        document_format="plain",
+        text_preparation=args.text_preparation,
+        unit=args.unit,
+        pauses=PauseConfig(mode=args.pause_mode),
+        linguistics=_linguistics_config(args.spacy),
+        renderability_mode=args.renderability,
+    )
+    requests = [
+        CompileRequest(
+            id=f"item-{index:06d}",
+            source=source,
+            output=output,
+            input_format=cast(Literal["auto", "plain", "ssmd"], args.input_format),
+            fallback_language=args.language,
+            source_label=str(source),
+            require_language=args.language is None,
+        )
+        for index, (source, output) in enumerate(zip(sources, outputs, strict=True), start=1)
+    ]
+    outcomes: list[CompileOutcome] = []
+    iterator = iter(
+        compile_to_files(
+            requests,
+            config=config,
+            fail_fast=args.fail_fast,
+            force=args.force,
+            report_path=report_path,
+        )
+    )
+    total = len(requests)
+    written = 0
+    for index, request in enumerate(requests, start=1):
+        print(f"[{index}/{total}] {request.source_label}", file=sys.stderr)
+        outcome = next(iterator)
+        outcomes.append(outcome)
+        if outcome.status == "written":
+            written += 1
+            for diagnostic in outcome.repair_diagnostics:
+                location = (
+                    f"{diagnostic.line}:{diagnostic.column}"
+                    if diagnostic.line is not None and diagnostic.column is not None
+                    else "source"
+                )
+                print(f"       repaired at {location}: {diagnostic.message}", file=sys.stderr)
+            print(f"       wrote {outcome.output}", file=sys.stderr)
+        elif outcome.status == "failed":
+            print("       FAILED", file=sys.stderr)
+            if outcome.error_message:
+                for line in outcome.error_message.splitlines():
+                    print(f"       {line}", file=sys.stderr)
+            if not args.fail_fast and index < total:
+                next_label = requests[index].source_label or requests[index].id
+                print(
+                    f"       continuing with {next_label}; {written} plans are already saved",
+                    file=sys.stderr,
+                )
+        else:
+            print("       skipped after an earlier failure", file=sys.stderr)
+
+    with suppress(StopIteration):
+        next(iterator)
+
+    failed = [outcome for outcome in outcomes if outcome.status == "failed"]
+    skipped = sum(outcome.status == "skipped" for outcome in outcomes)
+    print("UtterPlan compile summary", file=sys.stderr)
+    print(f"  requested: {total}", file=sys.stderr)
+    print(f"  written:   {written}", file=sys.stderr)
+    print(f"  failed:    {len(failed)}", file=sys.stderr)
+    if skipped:
+        print(f"  skipped:   {skipped}", file=sys.stderr)
+    if failed:
+        print("\nFailed:", file=sys.stderr)
+        for outcome in failed:
+            location = (
+                f":{outcome.line}:{outcome.column}"
+                if outcome.line is not None and outcome.column is not None
+                else ""
+            )
+            code = outcome.error_code or "unknown"
+            print(
+                f"  [{outcome.index}/{total}] {outcome.source_label}{location}  {code}",
+                file=sys.stderr,
+            )
+        if written:
+            print(f"\n{written} valid plan files were preserved.", file=sys.stderr)
+    return 1 if failed else 0
+
+
 def _compile(args: argparse.Namespace) -> int:
     source, input_format = _read_compile_input(args)
     if args.output is not None and args.output.exists() and not args.force:
@@ -272,12 +424,12 @@ def _compile(args: argparse.Namespace) -> int:
         config=config,
         fallback_language=args.language,
     ).plan
-    payload = plan.to_json()
+    payload = plan.to_toml()
     if args.output is None:
         print(payload, end="")
     else:
-        args.output.write_text(payload, encoding="utf-8")
-        if args.json:
+        atomic_write_text(args.output, payload, create_parent=True)
+        if args.stdout:
             print(payload, end="")
         else:
             print(
@@ -288,11 +440,12 @@ def _compile(args: argparse.Namespace) -> int:
         planning = plan.document_metadata.get("planning", {})
         report = planning.get("renderability", {}) if isinstance(planning, dict) else {}
         repair_count = report.get("repair_count", 0) if isinstance(report, dict) else 0
-        suffix = "s" if repair_count != 1 else ""
-        print(
-            f"renderability: guaranteed; {repair_count} punctuation segment{suffix} repaired",
-            file=sys.stderr,
-        )
+        if repair_count:
+            suffix = "s" if repair_count != 1 else ""
+            print(
+                f"renderability: guaranteed; {repair_count} punctuation segment{suffix} repaired",
+                file=sys.stderr,
+            )
     return 0
 
 
@@ -303,23 +456,7 @@ def _format_renderability_error(error: PlanRenderabilityError, args: argparse.Na
         candidate = Path(positional[0])
         if candidate.is_file():
             source_label = str(candidate)
-    lines = [f"utterplan: plan is not renderable: {len(error.issues)} segments"]
-    for issue in error.issues:
-        if issue.line is not None and issue.column is not None:
-            lines.append(f"\n{source_label}:{issue.line}:{issue.column}")
-        else:
-            lines.append(f"\n{source_label}: {issue.reason}")
-        lines.append(f"  {issue.segment_id}  {issue.reason}")
-        excerpt = issue.source_excerpt if issue.source_excerpt is not None else issue.text
-        lines.append(f"  {excerpt}")
-        if issue.column is not None:
-            lines.append(f"  {' ' * max(0, issue.column - 1)}^")
-        lines.append(f"  spoken: {issue.spoken_start}:{issue.spoken_end}")
-        if issue.structural_start is not None and issue.structural_end is not None:
-            lines.append(f"  structural: {issue.structural_start}:{issue.structural_end}")
-    if error.issues and error.issues[0].hint:
-        lines.append(f"\nHint: {error.issues[0].hint}")
-    return "\n".join(lines)
+    return format_renderability_error(error, source_label=source_label)
 
 
 def _migration_result(path: Path) -> MigrationResult:
@@ -347,49 +484,41 @@ def _migrate(args: argparse.Namespace) -> int:
         if result.steps:
             print(f"steps: {steps}")
         return 0
-    payload = (
-        json.dumps(result.data, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False)
-        + "\n"
-    )
+
+    plan = UtterancePlan.from_dict(result.data)
+    payload = plan.to_toml()
     if args.output is None:
         print(payload, end="")
     else:
         if args.output.exists() and not args.force:
             raise ValueError(f"output exists: {args.output}; use --force to replace it")
-        args.output.write_text(payload, encoding="utf-8")
+        atomic_write_text(args.output, payload, create_parent=True)
         print(
-            f"migrated {args.input} (schema {result.source_version} -> {result.target_version})",
+            f"imported {args.input} as TOML (schema {result.source_version} -> {result.target_version})",
             file=sys.stderr,
         )
     return 0
 
 
-def _is_saved_plan(path: Path, source: str) -> bool:
-    if path.suffix.lower() in {".json", ".utterplan"}:
-        return True
-    try:
-        value = json.loads(source)
-    except json.JSONDecodeError:
-        return False
-    return isinstance(value, dict) and value.get("format") == "utterplan"
-
-
 def _validate(args: argparse.Namespace) -> int:
     path: Path = args.input
-    source = path.read_text(encoding="utf-8")
-    if args.input_format == "auto" and _is_saved_plan(path, source):
-        result = _migration_result(path)
-        plan = UtterancePlan.from_dict(result.data)
+    name = path.name.lower()
+    if name.endswith(".utterplan.json") or path.suffix.lower() == ".json":
+        raise PlanFormatError(
+            "JSON is not a supported plan-file format; use 'utterplan migrate INPUT.json -o OUTPUT.utterplan.toml'",
+            code="format.unsupported_json",
+        )
+    if name.endswith(".utterplan.toml") or path.suffix.lower() == ".toml":
+        plan = UtterancePlan.load(path)
         print("valid")
-        print(f"source schema version: {result.source_version}")
-        print(f"current schema version: {plan.schema_version}")
-        print(f"migration required: {'yes' if result.changed else 'no'}")
+        print(f"schema version: {plan.schema_version}")
         print(f"plan ID: {plan.plan_id}")
         print(f"segments: {len(plan.segments)}")
         print(f"units: {len(plan.units)}")
         print(f"warnings: {len(plan.warnings)}")
         return 0
 
+    source = path.read_text(encoding="utf-8")
     input_format = (
         _format_for_path(path, source)
         if args.input_format == "auto"
@@ -421,6 +550,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "compile":
             return _compile(args)
+        if args.command == "compile-many":
+            return _compile_many(args)
         if args.command == "migrate":
             return _migrate(args)
         if args.command == "validate":
@@ -431,6 +562,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         _inspect(plan, args)
         return 0
+    except _CliUsageError as exc:
+        print(f"utterplan: {exc}", file=sys.stderr)
+        return 2
     except PlanRenderabilityError as exc:
         print(_format_renderability_error(exc, args), file=sys.stderr)
         return 1
@@ -483,11 +617,11 @@ def _inspect(plan: UtterancePlan, args: argparse.Namespace) -> None:
         print("\nSemantic boundaries (spoken coordinates)")
         if not plan.semantic_boundaries:
             print("  None.")
-        for boundary in plan.semantic_boundaries:
-            run_id = boundary.language_run_id or "-"
+        for semantic_boundary in plan.semantic_boundaries:
+            run_id = semantic_boundary.language_run_id or "-"
             print(
-                f"  {boundary.id}  {boundary.position:>6}  {boundary.kind:<14} "
-                f"{boundary.origin}  run={run_id}"
+                f"  {semantic_boundary.id}  {semantic_boundary.position:>6}  {semantic_boundary.kind:<14} "
+                f"{semantic_boundary.origin}  run={run_id}"
             )
     if args.tokens:
         print("\nTokens")

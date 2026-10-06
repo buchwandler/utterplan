@@ -115,7 +115,7 @@ class PlannerConfig:
     linguistics: LinguisticsConfig = field(default_factory=LinguisticsConfig)
     ssmd: SSMDConfig = field(default_factory=SSMDConfig)
     overlap_mode: Literal["snap", "strict"] = "snap"
-    renderability_mode: Literal["strict", "repair"] = "strict"
+    renderability_mode: Literal["strict", "repair"] = "repair"
     language_aliases: Mapping[str, str] = field(default_factory=dict)
     diagnostics: bool = True
 

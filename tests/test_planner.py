@@ -247,7 +247,7 @@ def test_media_only_document_uses_declared_language_and_round_trips() -> None:
     assert plan.segments[0].directives.audio is not None
     assert len(plan.units) == 1
     plan.validate()
-    assert type(plan).from_json(plan.to_json()) == plan
+    assert type(plan).from_toml(plan.to_toml()) == plan
 
 
 def test_point_audio_at_document_start_uses_following_language_context() -> None:

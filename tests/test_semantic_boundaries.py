@@ -51,7 +51,7 @@ def test_semantic_boundary_roundtrip_and_attrs_are_plain_json() -> None:
 
     serialized = plan.to_dict()
     assert serialized["semantic_boundaries"] == [boundary.to_dict()]
-    assert UtterancePlan.from_json(plan.to_json()) == plan
+    assert UtterancePlan.from_toml(plan.to_toml()) == plan
     assert json.loads(json.dumps(boundary.to_dict())) == boundary.to_dict()
     assert serialized["semantic_boundaries"][0]["kind"] == "vendor_future_kind"
 

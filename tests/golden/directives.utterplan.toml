@@ -1,0 +1,150 @@
+format = "utterplan"
+schema_version = 4
+plan_id = "sha256:6576a191dd68876d0c8d12f2dc6834f459780faea16f75a1ae2c3a9cb499f22e"
+semantic_boundary = []
+boundary = []
+marker = []
+warnings = []
+
+[producer]
+name = "utterplan"
+version = "0.1.3"
+
+[producer.migration]
+original_plan_id = "sha256:915e4616737424fee64389c97697e5bb03753e3e44388fd8f9cfcc534a285e12"
+original_schema_version = 2
+
+[[producer.migration.steps]]
+from = 2
+to = 3
+
+[[producer.migration.steps]]
+from = 3
+to = 4
+
+[config]
+diagnostics = true
+document_format = "ssmd"
+language = "en-us"
+overlap_mode = "snap"
+text_preparation = "spokenform"
+unit = "paragraph"
+
+[config.language_aliases]
+
+[config.linguistics]
+require_spacy = false
+
+[config.pauses]
+clause = 0.3
+enabled = true
+mode = "tts"
+paragraph = 1.0
+parenthetical = 0.15
+sentence = 0.6
+voice_change = 0.15
+weak = 0.15
+
+[config.ssmd]
+parse_yaml_header = true
+
+[preparation]
+backend = "spokenform"
+languages = ["en-us"]
+warnings = []
+version = "0.4.5"
+replacement = []
+
+[[language]]
+id = "lang-0"
+language = "en-us"
+source = "explicit-span"
+span = [0, 4]
+
+[[linguistic_run]]
+language_run_id = "lang-0"
+provider = "fallback"
+token_span = [0, 1]
+
+[[unit]]
+id = "unit-0000"
+index = 0
+kind = "paragraph"
+span = [0, 4]
+content_hash = "sha256:a9fb1e3a6cd0df1e17e649d45673844f95598afe1437ccf515b9eb6c1b6453a2"
+content_hash_schema = "utterplan-unit-v3"
+markers = []
+
+[[unit.segment]]
+id = "seg-000000"
+text = "fast"
+span = [0, 4]
+language = "en-us"
+paragraph = 0
+sentence = 0
+clause = 0
+tokens = [0]
+annotations = ["annotation-000000", "annotation-000001"]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives.prosody]
+rate = "1.2"
+pitch = "+2st"
+volume = "80%"
+
+[unit.segment.directives.emphasis]
+level = "strong"
+
+[[annotation]]
+id = "annotation-000000"
+kind = "language"
+structural_span = [0, 4]
+spoken_span = [0, 4]
+
+[annotation.attrs]
+lang = "en-us"
+
+[[annotation]]
+id = "annotation-000001"
+kind = "inline"
+structural_span = [0, 4]
+spoken_span = [0, 4]
+
+[annotation.attrs]
+emphasis = "strong"
+pitch = "+2st"
+rate = "1.2"
+tag = "prosody"
+volume = "80%"
+
+[token_stream]
+items = [
+    {id = "token-0", span = [0, 4], text = "fast", lemma = "fast", language = "en-us"},
+]
+
+[[diagnostic]]
+code = "planning.complete"
+severity = "info"
+message = "Plan compiled without renderer or audio processing"
+
+[source]
+format = "ssmd"
+text = """[fast]{rate="1.2" pitch="+2st" volume="80%" emphasis="strong"}"""
+
+[texts]
+structural = """fast"""
+spoken = """fast"""
+
+[document_metadata.header]
+
+[document_metadata.planning]
+engine_independent = true
+linguistic_passes = 2
+pass_a_tokens = 1

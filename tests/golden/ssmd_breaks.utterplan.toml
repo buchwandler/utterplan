@@ -1,0 +1,191 @@
+format = "utterplan"
+schema_version = 4
+plan_id = "sha256:97e1a40edd2d2da442a1916e46190048a1d304c28d7ad0fd9fcbdf35330e6015"
+annotation = []
+semantic_boundary = []
+marker = []
+warnings = []
+
+[producer]
+name = "utterplan"
+version = "0.3.7"
+
+[config]
+diagnostics = true
+document_format = "ssmd"
+language = "en-us"
+overlap_mode = "snap"
+renderability_mode = "strict"
+text_preparation = "spokenform"
+unit = "paragraph"
+
+[config.language_aliases]
+
+[config.linguistics]
+require_spacy = false
+
+[config.pauses]
+clause = 0.3
+enabled = true
+mode = "tts"
+paragraph = 1.0
+parenthetical = 0.15
+sentence = 0.6
+voice_change = 0.15
+weak = 0.15
+
+[config.ssmd]
+parse_yaml_header = true
+
+[preparation]
+backend = "spokenform"
+languages = ["en-us"]
+warnings = []
+version = "0.4.5"
+replacement = []
+
+[[language]]
+id = "lang-0"
+language = "en-us"
+source = "document-default"
+span = [0, 18]
+
+[[linguistic_run]]
+language_run_id = "lang-0"
+provider = "fallback"
+token_span = [0, 3]
+
+[[unit]]
+id = "unit-0000"
+index = 0
+kind = "paragraph"
+span = [0, 18]
+content_hash = "sha256:618af600551e6dc83a3874c072929c3be2b84afc0d6e28f269a0f29741c413b4"
+content_hash_schema = "utterplan-unit-v3"
+markers = []
+
+[[unit.segment]]
+id = "seg-000000"
+text = "Hello"
+span = [0, 5]
+language = "en-us"
+paragraph = 0
+sentence = 0
+clause = 0
+tokens = [0]
+annotations = []
+structural_span = [0, 5]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.5
+events = ["boundary-000000"]
+
+[unit.segment.directives]
+
+[[unit.segment]]
+id = "seg-000001"
+text = " world"
+span = [5, 11]
+language = "en-us"
+paragraph = 0
+sentence = 0
+clause = 1
+tokens = [1]
+annotations = []
+structural_span = [5, 11]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.15
+events = ["boundary-000001"]
+
+[unit.segment.directives]
+
+[[unit.segment]]
+id = "seg-000002"
+text = " again."
+span = [11, 18]
+language = "en-us"
+paragraph = 0
+sentence = 0
+clause = 2
+tokens = [2]
+annotations = []
+structural_span = [11, 18]
+
+[unit.segment.pause_before]
+seconds = 0.0
+events = []
+
+[unit.segment.pause_after]
+seconds = 0.0
+events = []
+
+[unit.segment.directives]
+
+[[boundary]]
+id = "boundary-000000"
+position = 5
+kind = "explicit"
+origin = "ssmd"
+seconds = 0.5
+
+[boundary.attrs]
+anchor = "after"
+pause_origin = "explicit"
+time = "500ms"
+
+[[boundary]]
+id = "boundary-000001"
+position = 11
+kind = "explicit"
+origin = "ssmd"
+strength = "none"
+
+[boundary.attrs]
+anchor = "after"
+pause_origin = "none"
+strength = "none"
+
+[token_stream]
+items = [
+    {id = "token-0", span = [0, 5], text = "Hello", lemma = "hello", language = "en-us"},
+    {id = "token-1", span = [6, 11], text = "world", lemma = "world", language = "en-us"},
+    {id = "token-2", span = [12, 18], text = "again.", lemma = "again.", language = "en-us"},
+]
+
+[[diagnostic]]
+code = "planning.complete"
+severity = "info"
+message = "Plan compiled without renderer or audio processing"
+
+[source]
+format = "ssmd"
+text = """Hello ...500ms world ...n again."""
+
+[texts]
+structural = """Hello world again."""
+spoken = """Hello world again."""
+
+[document_metadata]
+sequence_fallback_mode = "spell"
+
+[document_metadata.header]
+
+[document_metadata.planning]
+engine_independent = true
+linguistic_passes = 2
+pass_a_tokens = 3
+
+[document_metadata.planning.renderability]
+checked_segments = 3
+guaranteed = true
+mode = "strict"
+repair_count = 0

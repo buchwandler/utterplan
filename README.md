@@ -17,13 +17,13 @@ consumer workspaces, and stops before G2P, synthesis, and audio.
 Compile literal text directly:
 
 ```bash
-utterplan compile "Doctor Smith bought 5 kg." --input-format plain --language en-us --json
+utterplan compile "Doctor Smith bought 5 kg." --input-format plain --language en-us
 ```
 
 Compile a file to a plan file:
 
 ```bash
-utterplan compile examples/chapter.ssmd -o chapter.utterplan.json
+utterplan compile examples/chapter.ssmd -o chapter.utterplan.toml
 ```
 
 SSMD header `language` is authoritative, so `--language` is optional when it is present. Otherwise pass `--language` as the fallback; plain input always requires a language. `--language` never forces a language over SSMD semantics.
@@ -31,22 +31,28 @@ SSMD header `language` is authoritative, so `--language` is optional when it is 
 Use stdin and shell pipelines:
 
 ```bash
-cat examples/chapter.ssmd | utterplan compile --lang en-us --input-format ssmd | jq .
+cat examples/chapter.ssmd | utterplan compile --lang en-us --input-format ssmd > chapter.utterplan.toml
 ```
+
+Compile independent documents incrementally; every successful plan is saved immediately, and ordinary failures do not discard earlier outputs:
+
+```bash
+utterplan compile-many examples/*.ssmd --output-dir build/plans
+```
+
+This writes one `.utterplan.toml` per source plus an atomically refreshed `compile-report.toml`. Use `--fail-fast` to skip later inputs after a failure, `--force` to replace existing plans, or `--report PATH` to choose another report location.
 
 The CLI also provides:
 
-```bash
+````bash
 utterplan --version
-utterplan validate chapter.utterplan.json
-utterplan inspect chapter.utterplan.json --segment 0
-utterplan inspect chapter.utterplan.json --semantic-boundaries
-utterplan explain chapter.utterplan.json
-```
+utterplan validate chapter.utterplan.toml
+utterplan inspect chapter.utterplan.toml --segment 0
+utterplan inspect chapter.utterplan.toml --semantic-boundaries
+utterplan explain chapter.utterplan.toml
 
 `explain` presents the compiled plan as a human-readable speech plan, while `inspect` exposes lower-level diagnostic fields.
-Compile JSON is written to stdout when no output file is supplied. Status
-messages use stderr, and existing output files require `--force`.
+Canonical plan output is TOML (`.utterplan.toml`) and is written to stdout when no output file is supplied. Status messages use stderr, and existing output files require `--force`. Safe punctuation repair is the default; use `--renderability strict` to reject every repair opportunity.
 
 ## SSMD source contract
 
@@ -60,15 +66,18 @@ command:
 
 ```bash
 ssmd migrate old.ssmd --to 0.9
-```
+````
 
-`utterplan migrate` is only for historical `.utterplan.json` schema migration. It does not migrate SSMD source.
+`utterplan migrate` explicitly imports supported historical `.utterplan.json` plans and writes current TOML. It does not migrate SSMD source.
+Normal plan loading is TOML-only: `UtterancePlan.load()` and plan-inspection commands reject JSON rather than auto-detecting it.
 
 ## Planning defaults
 
 The minimal CLI defaults are explicit: `spokenform` is the default text-preparation backend, `tts` is the default pause mode, and `spacy off` is the default linguistic-resource policy. With `spacy off`, UtterPlan uses its deterministic fallback tokenizer and analysis and does not depend on an installed spaCy model.
 
 Python `PlannerConfig` defaults to `document_format="plain"`; set it to `"ssmd"` when a Python string contains SSMD source.
+
+Python `PlannerConfig.renderability_mode` also defaults to safe punctuation-only repair; choose `"strict"` to reject every repair opportunity. Neither mode guesses a symbol's pronunciation or crosses semantic blockers.
 
 `spacy auto` is opt-in. When enabled and a compatible local model is available, UtterPlan may expose richer tokenization, POS tags, lemmas, and tags; `auto` is not the default.
 
@@ -91,8 +100,8 @@ result = compile_document(
 )
 plan = result.plan
 assert result.trace is not None
-plan.save("example.utterplan.json")
-assert UtterancePlan.load("example.utterplan.json") == plan
+plan.save("example.utterplan.toml")
+assert UtterancePlan.load("example.utterplan.toml") == plan
 ```
 
 `compile_document` is the stable public one-document API shared by consumers. The
@@ -100,7 +109,7 @@ immutable `CompileResult` contains the semantic plan, diagnostics, and optional
 explanatory trace. Trace is not serialized in the plan and does not affect its
 identity. Plain text must be explicitly selected in Python and always requires a
 language fallback. Existing `UtterancePlanner.plan` remains supported and returns
-only the plan; JSON is the portable persistence and interchange format.
+only the plan; TOML is the portable persistence and interchange format.
 
 For operational progress from a long-running Python plan, pass `on_progress` to
 `UtterancePlanner.plan`, `UtterancePlanner.compile`, or `compile_document`. The
@@ -160,7 +169,7 @@ renderer repository rather than UtterPlan's test suite.
 
 ## Versions
 
-The package version is dynamically derived from Git tags by setuptools-scm. Package version and UtterPlan schema version are independent. Current plans use schema v4; released schema v1, v2, and v3 remain immutable and supported through sequential migrations.
+The package version is dynamically derived from Git tags by setuptools-scm. Package version and UtterPlan schema version are independent. Current `.utterplan.toml` plans use semantic schema v4; released schema v1, v2, and v3 remain immutable and supported through sequential migrations.
 
 Schema v4 adds stable `SemanticBoundary` records in spoken-text coordinates. Migration converts serialized plan data only: the registered v3-to-v4 step preserves existing evidence and derives topology where possible, but does not rerun parsing, NLP, planning, G2P, rendering, or audio processing. Unit hashes use `utterplan-unit-v3` and include relative semantic-boundary positions; older hash algorithms remain available for their historical migration paths.
 Schema v4 retains typed renderer-neutral SSMD semantics, final pass-B token facts, and per-language-run provider provenance. Plans never serialize provider documents, models, sessions, phonemes, token IDs, or audio.

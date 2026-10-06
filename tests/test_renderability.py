@@ -15,6 +15,7 @@ from utterplan import (
     UtterancePlanner,
     classify_segment,
     contains_speech_content,
+    format_renderability_error,
 )
 from utterplan.parsers import ParsedDocument, SourceTextSpan, map_structural_span_to_source
 from utterplan.units import make_units
@@ -49,7 +50,9 @@ def test_planner_returns_plans_for_unicode_lexical_text() -> None:
 
 def test_strict_preflight_reports_every_failure_in_source_order() -> None:
     source = "First.\n\n.\n\n?\n\nLast."
-    planner = UtterancePlanner(PlannerConfig(language="en-US", text_preparation="identity"))
+    planner = UtterancePlanner(
+        PlannerConfig(language="en-US", text_preparation="identity", renderability_mode="strict")
+    )
 
     with pytest.raises(PlanRenderabilityError) as error:
         planner.plan(source)
@@ -69,7 +72,9 @@ def test_renderability_mode_is_validated_and_participates_in_plan_identity() -> 
     with pytest.raises(ConfigurationError, match="renderability_mode"):
         PlannerConfig(language="en-US", renderability_mode="disabled")  # type: ignore[arg-type]
 
-    strict = UtterancePlanner(PlannerConfig(language="en-US")).plan("Hello.")
+    strict = UtterancePlanner(PlannerConfig(language="en-US", renderability_mode="strict")).plan(
+        "Hello."
+    )
     repair = UtterancePlanner(PlannerConfig(language="en-US", renderability_mode="repair")).plan(
         "Hello."
     )
@@ -106,7 +111,7 @@ def test_missing_nonidentity_source_map_does_not_invent_coordinates() -> None:
 
 def test_spokenform_offsets_map_later_renderability_issue_back_to_source() -> None:
     source = "Dr. Smith.\n\n.\n\nWorld."
-    planner = UtterancePlanner(PlannerConfig(language="en-US"))
+    planner = UtterancePlanner(PlannerConfig(language="en-US", renderability_mode="strict"))
 
     with pytest.raises(PlanRenderabilityError) as error:
         planner.plan(source)
@@ -170,7 +175,10 @@ def test_renderability_error_preserves_issues_mode_and_summary() -> None:
     assert error.issues == (first, second)
     assert error.mode == "strict"
     assert "2 renderer segments" in str(error)
-    assert "seg-000000" in str(error)
+    assert "isolated punctuation became its own speech segment" in str(error)
+    assert "seg-000000" in format_renderability_error(error, technical=True)
+    assert str(error) == format_renderability_error(error)
+    assert "chapter.ssmd: " in format_renderability_error(error, source_label="chapter.ssmd")
 
 
 def test_schema_v3_loading_rejects_punctuation_only_renderer_segment() -> None:

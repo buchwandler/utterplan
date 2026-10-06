@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import math
 import re
 import sys
@@ -8,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import tomlkit
 
 from utterplan import (
     LinguisticsConfig,
@@ -92,7 +92,7 @@ def assert_public_consumer_contract(plan: UtterancePlan) -> None:
 
     serialized = plan.to_dict()
     assert list(serialized).index("semantic_boundaries") < list(serialized).index("boundaries")
-    restored = UtterancePlan.from_json(plan.to_json())
+    restored = UtterancePlan.from_toml(plan.to_toml())
     assert restored == plan
     assert restored.semantic_boundaries == plan.semantic_boundaries
     assert restored.texts.spoken == plan.texts.spoken
@@ -110,10 +110,10 @@ voice_bindings:
 ---
 One. @mark [Two]{voice="narrator"}."""
     )
-    before = plan.to_json(indent=None)
+    before = plan.to_toml()
     plan_id = plan.plan_id
     _fake_renderer(plan)
-    assert plan.to_json(indent=None) == before
+    assert plan.to_toml() == before
     assert plan.plan_id == plan_id
 
 
@@ -279,8 +279,10 @@ def test_zero_width_media_uses_only_public_consumer_fields() -> None:
 def test_shared_consumer_fixture_has_one_canonical_semantic_interpretation() -> None:
     fixtures = Path(__file__).parent / "fixtures"
     source = (fixtures / "canonical_consumer_contract.ssmd").read_text(encoding="utf-8")
-    expected = json.loads(
-        (fixtures / "canonical_consumer_contract.expected.json").read_text(encoding="utf-8")
+    expected = dict(
+        tomlkit.parse(
+            (fixtures / "canonical_consumer_contract.expected.toml").read_text(encoding="utf-8")
+        )
     )
     result = compile_document(
         source,
