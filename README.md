@@ -44,12 +44,13 @@ This writes one `.utterplan.toml` per source plus an atomically refreshed `compi
 
 The CLI also provides:
 
-````bash
+```bash
 utterplan --version
 utterplan validate chapter.utterplan.toml
 utterplan inspect chapter.utterplan.toml --segment 0
 utterplan inspect chapter.utterplan.toml --semantic-boundaries
 utterplan explain chapter.utterplan.toml
+```
 
 `explain` presents the compiled plan as a human-readable speech plan, while `inspect` exposes lower-level diagnostic fields.
 Canonical plan output is TOML (`.utterplan.toml`) and is written to stdout when no output file is supplied. Status messages use stderr, and existing output files require `--force`. Safe punctuation repair is the default; use `--renderability strict` to reject every repair opportunity.
@@ -66,7 +67,7 @@ command:
 
 ```bash
 ssmd migrate old.ssmd --to 0.9
-````
+```
 
 `utterplan migrate` explicitly imports supported historical `.utterplan.json` plans and writes current TOML. It does not migrate SSMD source.
 Normal plan loading is TOML-only: `UtterancePlan.load()` and plan-inspection commands reject JSON rather than auto-detecting it.

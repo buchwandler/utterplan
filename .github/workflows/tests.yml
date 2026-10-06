@@ -48,7 +48,8 @@ jobs:
             "phrasplit==0.3.9" \
             "ssmd==0.9.3" \
             "spokenform==0.4.3" \
-            "typing_extensions>=4.0"
+            "typing_extensions==4.0.0" \
+            "tomlkit==0.13.0"
           python -m pip install --no-deps -e .
       - name: Run lower-bound tests
         run: python -m pytest -q
@@ -87,6 +88,7 @@ jobs:
               "utterplan/schemas/v1.schema.json",
               "utterplan/schemas/v2.schema.json",
               "utterplan/schemas/v3.schema.json",
+              "utterplan/schemas/v4.schema.json",
           }
           expected_ranges = {
               "phrasplit": ("0.3.9", "0.4"),
@@ -175,3 +177,18 @@ jobs:
             "$GITHUB_WORKSPACE/tests/schema_history/v1/basic.json" --check
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" inspect \
             "$RUNNER_TEMP/test.utterplan.toml" --segment 0
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install documentation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[docs]"
+      - name: Build documentation
+        run: sphinx-build -W --keep-going -b html docs docs/_build/html

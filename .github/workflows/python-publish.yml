@@ -89,6 +89,7 @@ jobs:
                   "utterplan/schemas/v1.schema.json",
                   "utterplan/schemas/v2.schema.json",
                   "utterplan/schemas/v3.schema.json",
+                  "utterplan/schemas/v4.schema.json",
               }
               assert expected <= names
           PY

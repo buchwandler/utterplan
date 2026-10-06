@@ -794,6 +794,8 @@ def _toml_item(value: Any, path: tuple[str, ...]) -> Any:
             return array
         return [_toml_item(item, path) for item in value]
     if isinstance(value, str) and path in _TEXT_PATHS:
+        if value.startswith(("\n", "\r")):
+            return tomlkit.string(value)
         return tomlkit.string(value, multiline=True)
     return value
 

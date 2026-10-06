@@ -30,4 +30,4 @@ def test_public_package_resources() -> None:
     assert (package / "compiler.py").is_file()
     assert (package / "utterplan.schema.json").is_file()
     schemas = package / "schemas"
-    assert all((schemas / f"v{version}.schema.json").is_file() for version in (1, 2, 3))
+    assert all((schemas / f"v{version}.schema.json").is_file() for version in (1, 2, 3, 4))
