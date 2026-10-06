@@ -1,0 +1,213 @@
+{
+  "annotations": [
+    {
+      "attrs": {
+        "lang": "fr",
+        "tag": "lang"
+      },
+      "id": "annotation-000000",
+      "kind": "lang",
+      "source_end": 27,
+      "source_start": 6,
+      "spoken_end": 14,
+      "spoken_start": 5,
+      "structural_end": 14,
+      "structural_start": 5
+    }
+  ],
+  "boundaries": [],
+  "config": {
+    "diagnostics": true,
+    "document_format": "ssmd",
+    "language": "en-us",
+    "language_aliases": {},
+    "linguistics": {
+      "require_spacy": false,
+      "spacy_model": null,
+      "spacy_model_size": null,
+      "use_spacy": null
+    },
+    "overlap_mode": "snap",
+    "pauses": {
+      "clause": 0.3,
+      "enabled": true,
+      "mode": "tts",
+      "paragraph": 1.0,
+      "parenthetical": 0.15,
+      "sentence": 0.6,
+      "voice_change": 0.15,
+      "weak": 0.15
+    },
+    "renderability_mode": "strict",
+    "ssmd": {
+      "parse_yaml_header": true,
+      "pause_overrides": null
+    },
+    "text_preparation": "spokenform",
+    "unit": "paragraph"
+  },
+  "diagnostics": [
+    {
+      "code": "planning.complete",
+      "message": "Plan compiled without renderer or audio processing",
+      "path": null,
+      "severity": "info"
+    }
+  ],
+  "document_metadata": {
+    "header": {},
+    "planning": {
+      "engine_independent": true,
+      "linguistic_passes": 2,
+      "pass_a_tokens": 2,
+      "renderability": {
+        "checked_segments": 2,
+        "guaranteed": true,
+        "mode": "strict",
+        "repair_count": 0
+      }
+    },
+    "sequence_fallback_mode": "spell"
+  },
+  "format": "utterplan",
+  "languages": [
+    {
+      "id": "lang-0",
+      "language": "en-us",
+      "source": "document-default",
+      "spoken_end": 5,
+      "spoken_start": 0
+    },
+    {
+      "id": "lang-1",
+      "language": "fr",
+      "source": "explicit-span",
+      "spoken_end": 14,
+      "spoken_start": 5
+    }
+  ],
+  "linguistic_runs": [
+    {
+      "language_run_id": "lang-0",
+      "model": null,
+      "model_version": null,
+      "provider": "fallback",
+      "provider_version": null,
+      "token_end": 1,
+      "token_start": 0
+    },
+    {
+      "language_run_id": "lang-1",
+      "model": null,
+      "model_version": null,
+      "provider": "fallback",
+      "provider_version": null,
+      "token_end": 2,
+      "token_start": 1
+    }
+  ],
+  "markers": [],
+  "plan_id": "sha256:e83795803d47feacc33abe844e89327c90edde6fe150aa07e99a9f3c14b3d00b",
+  "preparation": {
+    "backend": "spokenform",
+    "languages": ["en-us", "fr"],
+    "replacements": [],
+    "version": "0.4.5",
+    "warnings": []
+  },
+  "producer": {
+    "name": "utterplan",
+    "version": "0.3.5"
+  },
+  "schema_version": 3,
+  "segments": [
+    {
+      "annotation_ids": [],
+      "clause": 0,
+      "directives": {},
+      "id": "seg-000000",
+      "language": "en-us",
+      "paragraph": 0,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 5,
+      "spoken_start": 0,
+      "structural_end": 5,
+      "structural_start": 0,
+      "text": "Hello",
+      "token_indices": [0]
+    },
+    {
+      "annotation_ids": ["annotation-000000"],
+      "clause": 0,
+      "directives": {},
+      "id": "seg-000001",
+      "language": "fr",
+      "paragraph": 0,
+      "pause_after": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "pause_before": {
+        "events": [],
+        "seconds": 0.0
+      },
+      "sentence": 0,
+      "spoken_end": 14,
+      "spoken_start": 6,
+      "structural_end": 14,
+      "structural_start": 6,
+      "text": "Bonjour.",
+      "token_indices": [1]
+    }
+  ],
+  "source": {
+    "format": "ssmd",
+    "text": "Hello [Bonjour.]{lang=\"fr\"}"
+  },
+  "texts": {
+    "spoken": "Hello Bonjour.",
+    "structural": "Hello Bonjour."
+  },
+  "tokens": [
+    {
+      "id": "token-0",
+      "language": "en-us",
+      "lemma": "hello",
+      "morph": null,
+      "spoken_end": 5,
+      "spoken_start": 0,
+      "text": "Hello"
+    },
+    {
+      "id": "token-1",
+      "language": "fr",
+      "lemma": "bonjour.",
+      "morph": null,
+      "spoken_end": 14,
+      "spoken_start": 6,
+      "text": "Bonjour."
+    }
+  ],
+  "units": [
+    {
+      "content_hash": "sha256:10d92a43bb17b6e819857fd10caff374e513651b1c8d4be21ebf03acb6b563f2",
+      "content_hash_schema": "utterplan-unit-v2",
+      "id": "unit-0000",
+      "index": 0,
+      "kind": "paragraph",
+      "marker_ids": [],
+      "segment_ids": ["seg-000000", "seg-000001"],
+      "spoken_end": 14,
+      "spoken_start": 0
+    }
+  ],
+  "warnings": []
+}

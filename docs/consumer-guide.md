@@ -4,13 +4,13 @@ UtterPlan ends at a semantic planning boundary. A renderer consumes the public
 plan object and begins G2P after planning. It does not need a JSON round trip
 when planner and renderer run in the same process.
 
-UtterPlan accepts SSMD source syntax at version 0.9 only. See [migration from 0.2 to 0.3](#migrating-from-utterplan-02-to-03) for source and serialized-plan migration paths.
+UtterPlan accepts SSMD source syntax at version 0.9 only. Source migration is separate from serialized-plan migration; historical `.utterplan.json` files migrate sequentially to schema v4 without reparsing or replanning.
 
-## Migrating from UtterPlan 0.2 to 0.3
+## Migrating source and serialized plans
 
 ### SSMD source documents
 
-UtterPlan 0.3 accepts SSMD 0.9 only. Convert older source files before compilation:
+UtterPlan 0.4 accepts SSMD 0.9 only. Convert older source files before compilation:
 
 ```bash
 ssmd migrate FILE --to 0.9
@@ -35,7 +35,7 @@ plan = planner.plan(ssmd_source)
 
 ### Existing UtterPlan JSON plans
 
-Serialized schema v1 and v2 plans remain supported. UtterPlan migrates v1 plans sequentially through v2 to current schema v3, and migrates v2 directly to v3. Migration converts serialized plan data only. It does not reparse source or replan. Package version and serialized schema version are independent.
+Serialized schemas v1, v2, and v3 remain supported and immutable. UtterPlan migrates supported plans through the registered chain to current schema v4. The v3-to-v4 step preserves existing boundary evidence and derives only deterministic topology; it does not reparse source, rerun NLP, or replan. Package version and serialized schema version are independent.
 
 ## Planning defaults
 
@@ -55,7 +55,8 @@ Use these public fields:
 - `plan.languages` provides language runs.
 - `plan.annotations` and `segment.annotation_ids` preserve declared semantic spans and source provenance.
 - `plan.tokens` and `segment.token_indices` provide linguistic token metadata.
-- `plan.boundaries` explains semantic boundary events, including headings.
+- `plan.boundaries` explains pause/timing and document events, including headings.
+- `plan.semantic_boundaries` exposes stable spoken-coordinate opportunities for clause, parenthetical, sentence, and paragraph subdivision. These records are independent of pause activation and contain no duration semantics.
 - `segment.pause_before` and `segment.pause_after` are already-resolved pauses.
 - `segment.directives` carries effective typed renderer-neutral intent, including voice, pronunciation, prosody, emphasis, say-as, substitution, audio reference, and extension reference.
 - `plan.markers` and `unit.marker_ids` identify marker ownership.
@@ -84,6 +85,18 @@ All segment ranges and renderer-facing ranges are spoken-text coordinates.
 
 Preparation provenance is diagnostic metadata for consumers. Do not depend on a serialized coordinate map. All structural-to-spoken conversion has already been resolved by the planner.
 Voice bindings and directive voice references are logical names, not backend voice IDs. Consumers translate them to engine-specific resources. UtterPlan resolves SSMD scopes and defaults but does not make engine choices, fetch audio, execute extension handlers, or recompute pause policy.
+Consumers should use the public lookup helpers rather than scanning serialized dictionaries:
+
+```python
+for boundary in plan.semantic_boundaries_for_segment(segment, kinds={"clause"}):
+    request_local_offset = boundary.position - segment.spoken_start
+    split_text = segment.text[:request_local_offset]
+```
+
+`SemanticBoundary.position` is always an offset into `plan.texts.spoken`. A
+consumer may rebase it into a segment or request-local string, but must not
+interpret it as a source or structural offset. `attrs` is diagnostic provenance;
+provider documents and parser objects are never part of the boundary contract.
 
 ## Stable renderer input view
 

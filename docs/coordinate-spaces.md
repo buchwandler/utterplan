@@ -1,6 +1,11 @@
 # Coordinate spaces
 
 UtterPlan uses explicit coordinate names. `spoken_start`, `spoken_end`, and `spoken_position` refer to half-open offsets into `texts.spoken`. Token, annotation-spoken, language-run, marker, unit, and segment ranges consumed by a renderer use this prepared/synthesis-space coordinate system.
+`SemanticBoundary.position` and the `semantic_boundaries_in_range()` /
+`semantic_boundaries_for_segment()` results use this same `texts.spoken`
+coordinate space. They are stable semantic split opportunities, not pause
+timing events; `seconds`, pause activation, and renderer policy belong to
+`plan.boundaries` and resolved segment pauses.
 
 `structural_start` and `structural_end` refer to half-open offsets into `texts.structural`. The source field contains exact caller input, which may include SSMD headers and markup; source offsets are not fabricated for renderer slicing.
 

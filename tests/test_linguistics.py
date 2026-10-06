@@ -4,8 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from utterplan import LinguisticsConfig, PlannerConfig, UtterancePlan, UtterancePlanner
+from utterplan import LinguisticsConfig, PauseConfig, PlannerConfig, UtterancePlan, UtterancePlanner
 from utterplan.exceptions import PlanningError
+from utterplan.explain import format_explanation
 from utterplan.language import LanguageRun
 from utterplan.linguistics import LinguisticResourcePool, analyze_run_analyses
 from utterplan.planner import _split_run
@@ -175,7 +176,7 @@ def test_clausal_boundaries_reuse_provider_document(monkeypatch):
         "pipeline",
         lambda self, model, require=False: pipeline,
     )
-    source = "I wanted to go, but it was raining."
+    source = "First sentence. I wanted to go, but it was raining."
     detected = []
 
     def detect_clause_boundaries(text, *, language, doc):
@@ -201,6 +202,86 @@ def test_clausal_boundaries_reuse_provider_document(monkeypatch):
     assert detected == [(source, docs[-1])]
     boundary = next(item for item in plan.boundaries if item.kind == "clausal_comma")
     assert boundary.position == source.index(",")
+    semantic = next(item for item in plan.semantic_boundaries if item.kind == "clause")
+    assert semantic.position == source.index(",") + 2
+    assert semantic.attrs["detector_start"] == source.index(",")
+    assert semantic.attrs["detector_end"] == source.index(",") + 1
+    assert boundary.attrs["semantic_boundary_id"] == semantic.id
+    assert semantic.id == "semantic-boundary-000001"
+    assert any(item.kind == "sentence" for item in plan.semantic_boundaries)
+
+
+def test_semantic_clause_is_independent_of_pause_activation(monkeypatch):
+    import phrasplit
+
+    class Pipeline:
+        def __call__(self, text):
+            tokens = [
+                SimpleNamespace(
+                    idx=match.start(),
+                    text=match.group(0),
+                    pos_="NOUN",
+                    tag_="NN",
+                    lemma_=match.group(0).lower(),
+                    morph="",
+                )
+                for match in re.finditer(r"\S+", text)
+            ]
+            return FakeProviderDoc(text, tokens)
+
+    monkeypatch.setitem(sys.modules, "spacy", SimpleNamespace(__version__="3.7.0"))
+    monkeypatch.setattr(
+        LinguisticResourcePool,
+        "pipeline",
+        lambda self, model, require=False: Pipeline(),
+    )
+    monkeypatch.setattr(
+        phrasplit,
+        "detect_clause_boundaries",
+        lambda text, *, language, doc: [
+            SimpleNamespace(kind="clausal_comma", char_start=text.index(","))
+        ],
+    )
+    source = "I wanted to go, but it was raining."
+    linguistic = LinguisticsConfig(use_spacy=True, spacy_model="fake_model", require_spacy=True)
+    plans = [
+        UtterancePlanner(
+            PlannerConfig(
+                language="en-us",
+                text_preparation="identity",
+                linguistics=linguistic,
+                pauses=pauses,
+            )
+        ).plan(source)
+        for pauses in (
+            PauseConfig(mode="tts"),
+            PauseConfig(mode="auto"),
+            PauseConfig(enabled=False),
+        )
+    ]
+
+    clauses = [
+        next(item for item in plan.semantic_boundaries if item.kind == "clause") for plan in plans
+    ]
+    assert [(item.position, item.kind, item.id) for item in clauses] == [
+        (source.index(",") + 2, "clause", "semantic-boundary-000000")
+    ] * 3
+    assert len(plans[0].segments) == 1
+    assert plans[0].segments[0].spoken_start < clauses[0].position < plans[0].segments[0].spoken_end
+    assert not any(
+        segment.pause_before.seconds or segment.pause_after.seconds for segment in plans[0].segments
+    )
+    assert any(
+        segment.pause_before.seconds or segment.pause_after.seconds for segment in plans[1].segments
+    )
+    assert not any(
+        segment.pause_before.seconds or segment.pause_after.seconds for segment in plans[2].segments
+    )
+    quiet_explanation = format_explanation(plans[0])
+    audible_explanation = format_explanation(plans[1])
+    assert f"Semantic boundary: clause at spoken offset {clauses[0].position}" in quiet_explanation
+    assert "pause 0." not in quiet_explanation
+    assert "pause 0." in audible_explanation
 
 
 def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):
@@ -215,6 +296,7 @@ def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):
     )
 
     assert not any(item.kind == "clausal_comma" for item in plan.boundaries)
+    assert not any(item.kind == "clause" for item in plan.semantic_boundaries)
 
 
 def test_segmentation_type_error_is_not_a_whole_document_fallback(monkeypatch):

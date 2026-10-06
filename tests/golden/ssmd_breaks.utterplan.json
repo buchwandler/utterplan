@@ -1,17 +1,5 @@
 {
-  "annotations": [
-    {
-      "attrs": {
-        "lang": "en-us"
-      },
-      "id": "annotation-000000",
-      "kind": "language",
-      "spoken_end": 18,
-      "spoken_start": 0,
-      "structural_end": 18,
-      "structural_start": 0
-    }
-  ],
+  "annotations": [],
   "boundaries": [
     {
       "attrs": {
@@ -62,6 +50,7 @@
       "voice_change": 0.15,
       "weak": 0.15
     },
+    "renderability_mode": "strict",
     "ssmd": {
       "parse_yaml_header": true,
       "pause_overrides": null
@@ -82,15 +71,22 @@
     "planning": {
       "engine_independent": true,
       "linguistic_passes": 2,
-      "pass_a_tokens": 3
-    }
+      "pass_a_tokens": 3,
+      "renderability": {
+        "checked_segments": 3,
+        "guaranteed": true,
+        "mode": "strict",
+        "repair_count": 0
+      }
+    },
+    "sequence_fallback_mode": "spell"
   },
   "format": "utterplan",
   "languages": [
     {
       "id": "lang-0",
       "language": "en-us",
-      "source": "explicit-span",
+      "source": "document-default",
       "spoken_end": 18,
       "spoken_start": 0
     }
@@ -107,7 +103,7 @@
     }
   ],
   "markers": [],
-  "plan_id": "sha256:5b76a831ea0296bfb8c0cacc3a0bbd3f303d859c54c55435c25d91cd81aba20c",
+  "plan_id": "sha256:97e1a40edd2d2da442a1916e46190048a1d304c28d7ad0fd9fcbdf35330e6015",
   "preparation": {
     "backend": "spokenform",
     "languages": ["en-us"],
@@ -117,12 +113,12 @@
   },
   "producer": {
     "name": "utterplan",
-    "version": "0.1.3"
+    "version": "0.3.7"
   },
-  "schema_version": 2,
+  "schema_version": 4,
   "segments": [
     {
-      "annotation_ids": ["annotation-000000"],
+      "annotation_ids": [],
       "clause": 0,
       "directives": {},
       "id": "seg-000000",
@@ -139,11 +135,13 @@
       "sentence": 0,
       "spoken_end": 5,
       "spoken_start": 0,
+      "structural_end": 5,
+      "structural_start": 0,
       "text": "Hello",
       "token_indices": [0]
     },
     {
-      "annotation_ids": ["annotation-000000"],
+      "annotation_ids": [],
       "clause": 1,
       "directives": {},
       "id": "seg-000001",
@@ -160,11 +158,13 @@
       "sentence": 0,
       "spoken_end": 11,
       "spoken_start": 5,
+      "structural_end": 11,
+      "structural_start": 5,
       "text": " world",
       "token_indices": [1]
     },
     {
-      "annotation_ids": ["annotation-000000"],
+      "annotation_ids": [],
       "clause": 2,
       "directives": {},
       "id": "seg-000002",
@@ -181,10 +181,13 @@
       "sentence": 0,
       "spoken_end": 18,
       "spoken_start": 11,
+      "structural_end": 18,
+      "structural_start": 11,
       "text": " again.",
       "token_indices": [2]
     }
   ],
+  "semantic_boundaries": [],
   "source": {
     "format": "ssmd",
     "text": "Hello ...500ms world ...n again."
@@ -224,8 +227,8 @@
   ],
   "units": [
     {
-      "content_hash": "sha256:feeeb048aadea0f1456e0f7b2599ca67a495512e087f2902fe15714a085978d7",
-      "content_hash_schema": "utterplan-unit-v2",
+      "content_hash": "sha256:618af600551e6dc83a3874c072929c3be2b84afc0d6e28f269a0f29741c413b4",
+      "content_hash_schema": "utterplan-unit-v3",
       "id": "unit-0000",
       "index": 0,
       "kind": "paragraph",

@@ -95,7 +95,7 @@
     }
   ],
   "markers": [],
-  "plan_id": "sha256:915e4616737424fee64389c97697e5bb03753e3e44388fd8f9cfcc534a285e12",
+  "plan_id": "sha256:6576a191dd68876d0c8d12f2dc6834f459780faea16f75a1ae2c3a9cb499f22e",
   "preparation": {
     "backend": "spokenform",
     "languages": ["en-us"],
@@ -104,10 +104,24 @@
     "warnings": []
   },
   "producer": {
+    "migration": {
+      "original_plan_id": "sha256:915e4616737424fee64389c97697e5bb03753e3e44388fd8f9cfcc534a285e12",
+      "original_schema_version": 2,
+      "steps": [
+        {
+          "from": 2,
+          "to": 3
+        },
+        {
+          "from": 3,
+          "to": 4
+        }
+      ]
+    },
     "name": "utterplan",
     "version": "0.1.3"
   },
-  "schema_version": 2,
+  "schema_version": 4,
   "segments": [
     {
       "annotation_ids": ["annotation-000000", "annotation-000001"],
@@ -140,6 +154,7 @@
       "token_indices": [0]
     }
   ],
+  "semantic_boundaries": [],
   "source": {
     "format": "ssmd",
     "text": "[fast]{rate=\"1.2\" pitch=\"+2st\" volume=\"80%\" emphasis=\"strong\"}"
@@ -161,8 +176,8 @@
   ],
   "units": [
     {
-      "content_hash": "sha256:93e17e4c1016b739d6790e5e8a29c22afc95f6231f93f4ecb3ec788646fb5c01",
-      "content_hash_schema": "utterplan-unit-v2",
+      "content_hash": "sha256:a9fb1e3a6cd0df1e17e649d45673844f95598afe1437ccf515b9eb6c1b6453a2",
+      "content_hash_schema": "utterplan-unit-v3",
       "id": "unit-0000",
       "index": 0,
       "kind": "paragraph",

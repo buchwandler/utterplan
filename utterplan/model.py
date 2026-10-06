@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -195,6 +196,34 @@ class BoundaryEvent:
             "seconds": self.seconds,
             "origin": self.origin,
             "strength": self.strength,
+        }
+        if self.attrs:
+            result["attrs"] = _plain(self.attrs)
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticBoundary:
+    """Stable semantic split point in spoken-text coordinates."""
+
+    id: str
+    position: int
+    kind: str
+    origin: str = "planner"
+    language_run_id: str | None = None
+    attrs: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def spoken_position(self) -> int:
+        return self.position
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "id": self.id,
+            "position": self.position,
+            "kind": self.kind,
+            "origin": self.origin,
+            "language_run_id": self.language_run_id,
         }
         if self.attrs:
             result["attrs"] = _plain(self.attrs)
@@ -493,6 +522,7 @@ class UtterancePlan:
     languages: tuple[LanguageRun, ...] = ()
     annotations: tuple[AnnotationSpan, ...] = ()
     linguistic_runs: tuple[LinguisticRun, ...] = ()
+    semantic_boundaries: tuple[SemanticBoundary, ...] = ()
     boundaries: tuple[BoundaryEvent, ...] = ()
     tokens: tuple[TokenAnnotation, ...] = ()
     segments: tuple[PlanSegment, ...] = ()
@@ -535,6 +565,7 @@ class UtterancePlan:
             "languages": [_plain(x) for x in self.languages],
             "linguistic_runs": [_plain(x) for x in self.linguistic_runs],
             "annotations": [_plain(x) for x in self.annotations],
+            "semantic_boundaries": [_plain(x) for x in self.semantic_boundaries],
             "boundaries": [_plain(x) for x in self.boundaries],
             "tokens": [_plain(x) for x in self.tokens],
             "segments": [_plain(x) for x in self.segments],
@@ -589,6 +620,60 @@ class UtterancePlan:
             segment = next(item for item in self.segments if item.id == segment)
         return tuple(self.tokens[index] for index in segment.token_indices)
 
+    def semantic_boundaries_in_range(
+        self,
+        start: int,
+        end: int,
+        *,
+        kinds: Iterable[str] | None = None,
+        interior_only: bool = True,
+    ) -> tuple[SemanticBoundary, ...]:
+        """Return semantic boundaries within a spoken-text coordinate range."""
+        if (
+            type(start) is not int
+            or type(end) is not int
+            or not (0 <= start <= end <= len(self.texts.spoken))
+        ):
+            raise ValueError("range must be valid spoken-text coordinates")
+        selected_kinds = None if kinds is None else frozenset(kinds)
+        if interior_only:
+            matches = (
+                boundary for boundary in self.semantic_boundaries if start < boundary.position < end
+            )
+        else:
+            matches = (
+                boundary
+                for boundary in self.semantic_boundaries
+                if start <= boundary.position <= end
+            )
+        if selected_kinds is not None:
+            matches = (boundary for boundary in matches if boundary.kind in selected_kinds)
+        return tuple(
+            sorted(
+                matches,
+                key=lambda boundary: (
+                    boundary.position,
+                    boundary.kind,
+                    boundary.id,
+                ),
+            )
+        )
+
+    def semantic_boundaries_for_segment(
+        self,
+        segment: PlanSegment | str,
+        *,
+        kinds: Iterable[str] | None = None,
+    ) -> tuple[SemanticBoundary, ...]:
+        """Return semantic boundaries internal to a plan segment."""
+        if isinstance(segment, str):
+            segment = next(item for item in self.segments if item.id == segment)
+        return self.semantic_boundaries_in_range(
+            segment.spoken_start,
+            segment.spoken_end,
+            kinds=kinds,
+        )
+
 
 def _replace_plan(plan: UtterancePlan, **changes: Any) -> UtterancePlan:
     values = {field: getattr(plan, field) for field in plan.__dataclass_fields__}
@@ -613,6 +698,7 @@ def _check_shape(data: Mapping[str, Any]) -> None:
         "languages",
         "linguistic_runs",
         "annotations",
+        "semantic_boundaries",
         "boundaries",
         "tokens",
         "segments",
@@ -661,6 +747,7 @@ def _check_nested_types(data: Mapping[str, Any]) -> None:
     for key in (
         "languages",
         "annotations",
+        "semantic_boundaries",
         "boundaries",
         "tokens",
         "linguistic_runs",
@@ -670,7 +757,26 @@ def _check_nested_types(data: Mapping[str, Any]) -> None:
         "warnings",
         "diagnostics",
     ):
-        _expect(data.get(key), list, f"$.{key}")
+        _expect(data.get(key, [] if key == "semantic_boundaries" else None), list, f"$.{key}")
+    for index, item in enumerate(data.get("semantic_boundaries", ())):
+        value = _expect(item, Mapping, f"$.semantic_boundaries[{index}]")
+        for key in ("id", "kind", "origin"):
+            _expect(value.get(key), str, f"$.semantic_boundaries[{index}].{key}")
+        _expect(value.get("position"), int, f"$.semantic_boundaries[{index}].position")
+        if "language_run_id" not in value:
+            raise PlanFormatError(
+                "language_run_id is required",
+                code="field.required",
+                path=f"$.semantic_boundaries[{index}].language_run_id",
+            )
+        if value["language_run_id"] is not None:
+            _expect(
+                value["language_run_id"],
+                str,
+                f"$.semantic_boundaries[{index}].language_run_id",
+            )
+        if "attrs" in value:
+            _expect(value["attrs"], Mapping, f"$.semantic_boundaries[{index}].attrs")
     for index, item in enumerate(data["languages"]):
         value = _expect(item, Mapping, f"$.languages[{index}]")
         _expect(value.get("id"), str, f"$.languages[{index}].id")
@@ -855,6 +961,17 @@ def _from_current_dict(data: Mapping[str, Any]) -> UtterancePlan:
             )
             for i, x in enumerate(data.get("annotations", ()))
         ),
+        semantic_boundaries=tuple(
+            SemanticBoundary(
+                str(x["id"]),
+                int(x["position"]),
+                str(x["kind"]),
+                str(x["origin"]),
+                x.get("language_run_id"),
+                dict(x.get("attrs", {})),
+            )
+            for x in data.get("semantic_boundaries", ())
+        ),
         boundaries=tuple(
             BoundaryEvent(
                 str(x["id"]),
@@ -959,6 +1076,7 @@ def validate_plan(plan: UtterancePlan) -> None:
     for collection, _name in (
         (plan.languages, "language"),
         (plan.annotations, "annotation"),
+        (plan.semantic_boundaries, "semantic boundary"),
         (plan.boundaries, "boundary"),
         (plan.tokens, "token"),
         (plan.segments, "segment"),
@@ -971,6 +1089,77 @@ def validate_plan(plan: UtterancePlan) -> None:
                 raise PlanValidationError(f"duplicate id {item_id}", code="id.duplicate")
             if item_id is not None:
                 ids.add(item_id)
+    semantic_keys: set[tuple[int, str]] = set()
+    previous_semantic_key: tuple[int, str, str, str] | None = None
+    language_ids = {run.id for run in plan.languages}
+    for index, boundary in enumerate(plan.semantic_boundaries):
+        path = f"$.semantic_boundaries[{index}]"
+        if not isinstance(boundary.id, str) or not boundary.id:
+            raise PlanValidationError(
+                "semantic boundary id must be non-empty",
+                code="semantic_boundary.id",
+                path=f"{path}.id",
+            )
+        if type(boundary.position) is not int or not (0 <= boundary.position <= len(text)):
+            raise PlanValidationError(
+                "semantic boundary position is outside spoken text",
+                code="semantic_boundary.out_of_range",
+                path=f"{path}.position",
+            )
+        if not isinstance(boundary.kind, str) or not boundary.kind:
+            raise PlanValidationError(
+                "semantic boundary kind must be non-empty",
+                code="semantic_boundary.kind",
+                path=f"{path}.kind",
+            )
+        if not isinstance(boundary.origin, str) or not boundary.origin:
+            raise PlanValidationError(
+                "semantic boundary origin must be non-empty",
+                code="semantic_boundary.origin",
+                path=f"{path}.origin",
+            )
+        if boundary.kind in {"clause", "parenthetical"} and not (0 < boundary.position < len(text)):
+            raise PlanValidationError(
+                f"{boundary.kind} boundaries must be interior to spoken text",
+                code="semantic_boundary.not_interior",
+                path=f"{path}.position",
+            )
+        if boundary.language_run_id is not None and boundary.language_run_id not in language_ids:
+            raise PlanValidationError(
+                "semantic boundary references unknown language run",
+                code="semantic_boundary.unknown_language_run",
+                path=f"{path}.language_run_id",
+            )
+        duplicate_key = (boundary.position, boundary.kind)
+        if duplicate_key in semantic_keys:
+            raise PlanValidationError(
+                "duplicate semantic boundary kind and position",
+                code="semantic_boundary.duplicate",
+                path=path,
+            )
+        semantic_keys.add(duplicate_key)
+        sort_key = (boundary.position, boundary.kind, boundary.origin, boundary.id)
+        if previous_semantic_key is not None and sort_key < previous_semantic_key:
+            raise PlanValidationError(
+                "semantic boundaries are not in canonical order",
+                code="semantic_boundary.order",
+                path=path,
+            )
+        previous_semantic_key = sort_key
+        if not isinstance(boundary.attrs, Mapping):
+            raise PlanValidationError(
+                "semantic boundary attrs must be a mapping",
+                code="semantic_boundary.attrs",
+                path=f"{path}.attrs",
+            )
+        try:
+            json.dumps(_plain(boundary.attrs), ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise PlanValidationError(
+                "semantic boundary attrs must be JSON-compatible",
+                code="semantic_boundary.attrs",
+                path=f"{path}.attrs",
+            ) from exc
     boundary_ids = {event.id for event in plan.boundaries}
     previous_segment_end = 0
     for segment in plan.segments:
@@ -1164,7 +1353,17 @@ def validate_plan(plan: UtterancePlan) -> None:
         unit_segments = [segment_by_id[segment_id] for segment_id in unit.segment_ids]
         marker_values = tuple(marker for marker in plan.markers if marker.id in unit.marker_ids)
         if unit.content_hash != semantic_hash(
-            unit_hash_payload(_HashUnit(unit_segments, unit.marker_ids, marker_values, plan.tokens))
+            unit_hash_payload(
+                _HashUnit(
+                    unit_segments,
+                    unit.marker_ids,
+                    marker_values,
+                    plan.tokens,
+                    plan.semantic_boundaries,
+                    unit.spoken_start,
+                    unit.spoken_end,
+                )
+            )
         ):
             raise PlanValidationError(
                 "unit content hash does not match semantics", code="unit.hash_mismatch"
@@ -1203,8 +1402,14 @@ class _HashUnit:
         marker_ids: tuple[str, ...],
         marker_values: tuple[Marker, ...],
         tokens: tuple[TokenAnnotation, ...],
+        semantic_boundaries: tuple[SemanticBoundary, ...],
+        spoken_start: int,
+        spoken_end: int,
     ) -> None:
         self.segments = segments
         self.marker_ids = marker_ids
         self.marker_values = marker_values
         self.tokens = tokens
+        self.semantic_boundaries = semantic_boundaries
+        self.spoken_start = spoken_start
+        self.spoken_end = spoken_end

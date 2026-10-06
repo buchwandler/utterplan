@@ -5,7 +5,7 @@ from copy import deepcopy
 from typing import Any
 
 from ..exceptions import PlanMigrationError
-from ..hashing import UNIT_HASH_SCHEMA, semantic_hash
+from ..hashing import LEGACY_UNIT_HASH_SCHEMA, semantic_hash
 from .registry import register_migration
 
 
@@ -131,7 +131,7 @@ def _unit_hash_payload(
         for token_index in segment.get("token_indices", ())
     ]
     return {
-        "hash_schema": UNIT_HASH_SCHEMA,
+        "hash_schema": LEGACY_UNIT_HASH_SCHEMA,
         "segments": [
             {
                 "text": segment.get("text"),
@@ -181,7 +181,9 @@ def migrate_v1_to_v2(data: Mapping[str, Any]) -> Mapping[str, Any]:
         if marker["id"] in marker_map:
             raise _error("v1 marker ids must be unique")
         marker_map[marker["id"]] = marker
-    token_values = [token for token in result["tokens"] if isinstance(token, Mapping)]
+    token_values: list[Mapping[str, Any]] = [
+        token for token in result["tokens"] if isinstance(token, Mapping)
+    ]
     if len(token_values) != len(result["tokens"]):
         raise _error("v1 token must be an object")
     for unit_index, unit in enumerate(units):
@@ -192,7 +194,7 @@ def migrate_v1_to_v2(data: Mapping[str, Any]) -> Mapping[str, Any]:
         except (KeyError, IndexError, TypeError) as exc:
             raise _error(f"v1 unit references invalid content: {exc}") from exc
         migrated_unit = dict(unit)
-        migrated_unit["content_hash_schema"] = UNIT_HASH_SCHEMA
+        migrated_unit["content_hash_schema"] = LEGACY_UNIT_HASH_SCHEMA
         migrated_unit["content_hash"] = semantic_hash(payload)
         units[unit_index] = migrated_unit
 

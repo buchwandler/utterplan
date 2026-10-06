@@ -40,6 +40,7 @@ The CLI also provides:
 utterplan --version
 utterplan validate chapter.utterplan.json
 utterplan inspect chapter.utterplan.json --segment 0
+utterplan inspect chapter.utterplan.json --semantic-boundaries
 utterplan explain chapter.utterplan.json
 ```
 
@@ -121,8 +122,11 @@ Callbacks run synchronously and exceptions propagate. See the [Python API guide]
 
 Renderers consume `PlanSegment.text`, which is prepared/spoken text, and use
 `spoken_start`/`spoken_end` for spoken-text coordinates. Resolved segment
-pauses, language, directives, annotations, boundaries, markers, units, and
-document metadata are public plan fields. Plans contain no phonemes, model
+pauses, language, directives, annotations, boundaries, semantic boundaries,
+markers, units, and
+document metadata are public plan fields. Semantic boundaries are stable
+engine-neutral opportunities for spoken-text subdivision; they are not pause
+events and carry no duration or renderer policy. Plans contain no phonemes, model
 tokens, model sessions, renderer configuration, provider documents, or audio.
 For SSMD input, `plan.annotations` preserve declared source semantics and source
 provenance, `document_metadata` preserves portable header data, and
@@ -156,10 +160,10 @@ renderer repository rather than UtterPlan's test suite.
 
 ## Versions
 
-The package version is dynamically derived from Git tags by setuptools-scm. Package version and UtterPlan schema version are independent. Current plans use schema v3; released schema v1 and v2 remain immutable and supported through sequential v1-to-v2-to-v3 and direct v2-to-v3 migrations.
+The package version is dynamically derived from Git tags by setuptools-scm. Package version and UtterPlan schema version are independent. Current plans use schema v4; released schema v1, v2, and v3 remain immutable and supported through sequential migrations.
 
-Schema v3 adds typed renderer-neutral SSMD semantics. Migration converts serialized plan data only. It does not reparse source, replan, or rerun linguistic analysis, G2P, rendering, or audio processing. Unit hashes retain the `utterplan-unit-v2` algorithm.
-Schema v3 persists final pass-B token facts, including optional POS, tag, lemma, and morphology, plus per-language-run provider provenance. Unit hashes include pronunciation-relevant token semantics but exclude model/audio state.
+Schema v4 adds stable `SemanticBoundary` records in spoken-text coordinates. Migration converts serialized plan data only: the registered v3-to-v4 step preserves existing evidence and derives topology where possible, but does not rerun parsing, NLP, planning, G2P, rendering, or audio processing. Unit hashes use `utterplan-unit-v3` and include relative semantic-boundary positions; older hash algorithms remain available for their historical migration paths.
+Schema v4 retains typed renderer-neutral SSMD semantics, final pass-B token facts, and per-language-run provider provenance. Plans never serialize provider documents, models, sessions, phonemes, token IDs, or audio.
 
 ## Development
 

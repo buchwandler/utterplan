@@ -2,17 +2,23 @@ from __future__ import annotations
 
 import json
 import math
+import re
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from utterplan import (
+    LinguisticsConfig,
     PauseConfig,
     PlannerConfig,
+    PlanSegment,
     UtterancePlan,
     UtterancePlanner,
     compile_document,
 )
+from utterplan.linguistics import LinguisticResourcePool
 
 
 def _fake_renderer(plan: UtterancePlan) -> None:
@@ -28,6 +34,12 @@ def _fake_renderer(plan: UtterancePlan) -> None:
         assert annotation.id in annotation_by_id
     for boundary in plan.boundaries:
         assert boundary.position >= 0
+    for boundary in plan.semantic_boundaries:
+        assert 0 <= boundary.position <= len(plan.texts.spoken)
+        assert (
+            plan.texts.spoken[: boundary.position] + plan.texts.spoken[boundary.position :]
+            == plan.texts.spoken
+        )
     for segment in plan.segments:
         assert segment.id in segment_by_id
         _ = segment.directives.to_dict()
@@ -42,6 +54,13 @@ def _fake_renderer(plan: UtterancePlan) -> None:
         _ = [segment_by_id[segment_id].text for segment_id in unit.segment_ids]
         _ = [marker_by_id[marker_id].name for marker_id in unit.marker_ids]
     _ = plan.document_metadata
+
+
+def _fake_renderer_clause_offsets(plan: UtterancePlan, segment: PlanSegment) -> tuple[int, ...]:
+    return tuple(
+        boundary.position - segment.spoken_start
+        for boundary in plan.semantic_boundaries_for_segment(segment, kinds=("clause",))
+    )
 
 
 def assert_public_consumer_contract(plan: UtterancePlan) -> None:
@@ -64,12 +83,18 @@ def assert_public_consumer_contract(plan: UtterancePlan) -> None:
         assert segment.pause_before.seconds >= 0
         assert segment.pause_after.seconds >= 0
 
+    for boundary in plan.semantic_boundaries:
+        assert 0 <= boundary.position <= len(plan.texts.spoken)
+        assert boundary.kind
     for unit in plan.units:
         assert all(segment_id in segments for segment_id in unit.segment_ids)
         assert all(marker_id in markers for marker_id in unit.marker_ids)
 
+    serialized = plan.to_dict()
+    assert list(serialized).index("semantic_boundaries") < list(serialized).index("boundaries")
     restored = UtterancePlan.from_json(plan.to_json())
     assert restored == plan
+    assert restored.semantic_boundaries == plan.semantic_boundaries
     assert restored.texts.spoken == plan.texts.spoken
     assert [segment.text for segment in restored.segments] == [
         segment.text for segment in plan.segments
@@ -90,6 +115,63 @@ One. @mark [Two]{voice="narrator"}."""
     _fake_renderer(plan)
     assert plan.to_json(indent=None) == before
     assert plan.plan_id == plan_id
+
+
+def test_fake_renderer_uses_clause_boundaries_through_public_api(monkeypatch) -> None:
+    import phrasplit
+
+    class ProviderDoc(list[SimpleNamespace]):
+        def __init__(self, text: str, tokens: list[SimpleNamespace]) -> None:
+            super().__init__(tokens)
+            self.text = text
+            self.sents = ()
+
+    class Pipeline:
+        def __call__(self, text: str) -> ProviderDoc:
+            tokens = [
+                SimpleNamespace(
+                    idx=match.start(),
+                    text=match.group(0),
+                    pos_="NOUN",
+                    tag_="NN",
+                    lemma_=match.group(0).lower(),
+                    morph="",
+                )
+                for match in re.finditer(r"\S+", text)
+            ]
+            return ProviderDoc(text, tokens)
+
+    monkeypatch.setitem(sys.modules, "spacy", SimpleNamespace(__version__="3.7.0"))
+    monkeypatch.setattr(
+        LinguisticResourcePool,
+        "pipeline",
+        lambda self, model, require=False: Pipeline(),
+    )
+    monkeypatch.setattr(
+        phrasplit,
+        "detect_clause_boundaries",
+        lambda text, *, language, doc: [
+            SimpleNamespace(kind="clausal_comma", char_start=text.index(","))
+        ],
+    )
+    source = "I wanted to go, but it was raining."
+    plan = UtterancePlanner(
+        PlannerConfig(
+            language="en-us",
+            text_preparation="identity",
+            linguistics=LinguisticsConfig(use_spacy=True, spacy_model="fake", require_spacy=True),
+        )
+    ).plan(source)
+    boundary = next(item for item in plan.semantic_boundaries if item.kind == "clause")
+    segment = next(
+        item for item in plan.segments if item.spoken_start < boundary.position < item.spoken_end
+    )
+
+    offsets = _fake_renderer_clause_offsets(plan, segment)
+    assert offsets == (boundary.position - segment.spoken_start,)
+    left, right = segment.text[: offsets[0]], segment.text[offsets[0] :]
+    assert left + right == segment.text
+    assert left.endswith(", ")
 
 
 def test_plain_spokenform_consumer_contract() -> None:
@@ -211,6 +293,12 @@ def test_shared_consumer_fixture_has_one_canonical_semantic_interpretation() -> 
     assert len(plan.segments) == len(expected["segments"]) == 2
     segment = plan.segments[0]
 
+    semantic_boundaries = tuple(
+        (boundary.position, boundary.kind) for boundary in plan.semantic_boundaries
+    )
+    assert semantic_boundaries == tuple(
+        (item["position"], item["kind"]) for item in expected["semantic_boundaries"]
+    )
     ttsready_report = tuple((item.text.strip(), item.language) for item in plan.segments)
     readio_lowering = tuple((item.text.strip(), item.language) for item in plan.segments)
     expected_segments = tuple(tuple(item) for item in expected["segments"])

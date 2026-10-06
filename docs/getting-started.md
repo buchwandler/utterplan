@@ -85,3 +85,14 @@ The compiled plan preserves SSMD header metadata, declared annotations, structur
 Structural text preserves the parsed document representation. Spoken text is
 the prepared text and is the coordinate space used by segments, tokens,
 markers, boundaries, and renderer-facing ranges.
+Inspect safe spoken-text subdivision opportunities separately from pause and
+timing events:
+
+```bash
+utterplan inspect hello.utterplan.json --semantic-boundaries
+```
+
+Use `plan.semantic_boundaries` or the public
+`semantic_boundaries_for_segment()` / `semantic_boundaries_in_range()` helpers.
+They expose clause, parenthetical, sentence, and paragraph opportunities without
+requiring SSMD, spaCy, Phrasplit, or renderer-specific packages.

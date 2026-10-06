@@ -17,6 +17,11 @@ def test_medial_parenthetical_boundaries_use_spoken_coordinates_and_anchors():
     assert all(event.origin == "phrasplit" for event in events)
     assert all(event.attrs["automatic"] is True for event in events)
     assert all(event.attrs["anchor"] == "before" for event in events)
+    semantic = [item for item in plan.semantic_boundaries if item.kind == "parenthetical"]
+    assert [item.position for item in semantic] == [opening, closing + 1]
+    assert [event.attrs["semantic_boundary_id"] for event in events] == [
+        item.id for item in semantic
+    ]
 
 
 def test_parenthetical_boundary_keeps_phrasplit_origin():
@@ -51,4 +56,5 @@ def test_derived_paragraph_boundary_does_not_duplicate_existing_event():
     )
     keys = [(event.position, event.kind) for event in plan.boundaries]
     assert len(keys) == len(set(keys))
+    assert [(item.position, item.kind) for item in plan.semantic_boundaries] == [(14, "paragraph")]
     assert [(event.position, event.kind) for event in plan.boundaries] == [(14, "paragraph")]

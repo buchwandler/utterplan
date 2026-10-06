@@ -77,17 +77,20 @@ preparation can invalidate their offsets.
 
 Pause events retain provenance and resolved event IDs. Pause defaults are
 normalized to finite seconds with explicit precedence, and segments expose
-resolved pauses directly. Logical voices are intent references; document
-`voice_bindings` metadata remains separate and no concrete engine voice is
-selected.
+resolved pauses directly. Semantic boundaries are a separate immutable
+collection of stable spoken-text split opportunities; they have no duration,
+activation state, or renderer choice. Logical voices are intent references;
+document `voice_bindings` metadata remains separate and no concrete engine
+voice is selected.
 
 Plan identity is deterministic and renderer-independent. It covers semantic
 source/configuration/metadata; it does not include renderer-only model, sample
 rate, or output-file settings. Unit hashes include ordered segment semantics,
 resolved pauses, marker content, and semantic token facts referenced by each
-segment. Diagnostics and producer metadata do not define unit identity. Package
-version is derived by setuptools-scm and is independent of the explicit UtterPlan
-`schema_version`.
+segment. Semantic-boundary positions relative to each unit are part of the
+`utterplan-unit-v3` hash; diagnostics and producer metadata do not define unit
+identity. Package version is derived by setuptools-scm and is independent of
+the explicit UtterPlan `schema_version`.
 
 ## Persistence compatibility boundary
 
@@ -114,4 +117,4 @@ version is derived by setuptools-scm and is independent of the explicit UtterPla
 
 Migration is not planning. UtterPlan owns persistence, schema validation, and migration. Renderers consume only the current in-memory `UtterancePlan` and do not implement historical schema branches.
 
-Schema v3 is current. Released schema v1 and v2 remain frozen; v1 migration proceeds sequentially through v2 to v3, while v2 plans migrate directly to v3. These migrations transform serialized data only and never reparse or replan source.
+Schema v4 is current. Released schemas v1, v2, and v3 remain frozen; supported plans migrate through the registered sequential chain to v4. The v3-to-v4 step transforms serialized data only and does not rerun parsing, NLP, planning, G2P, rendering, or audio processing. Consumers receive only the current in-memory model.

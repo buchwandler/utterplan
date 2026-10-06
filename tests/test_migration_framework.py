@@ -32,8 +32,8 @@ def _step(target: int):
 def test_current_plan_migration_is_deterministic_noop() -> None:
     original = _current_data()
     result = migrate_plan_data(original)
-    assert result.source_version == 3
-    assert result.target_version == 3
+    assert result.source_version == 4
+    assert result.target_version == 4
     assert result.steps == ()
     assert not result.changed
     assert result.data == original
@@ -49,7 +49,7 @@ def test_migration_does_not_mutate_input() -> None:
 
 def test_migrate_json_roundtrips_current_plan() -> None:
     result = migrate_plan_json(json.dumps(_current_data()))
-    assert '"schema_version": 3' in result
+    assert '"schema_version": 4' in result
     assert '"format": "utterplan"' in result
 
 
@@ -75,7 +75,7 @@ def test_v2_migration_preserves_legacy_audio_and_unit_hashes() -> None:
     }
     before = deepcopy(original)
 
-    result = migrate_plan_data(original)
+    result = migrate_plan_data(original, target_version=3)
 
     assert result.data["schema_version"] == 3
     assert result.data["segments"] == original["segments"]
@@ -146,7 +146,7 @@ def test_mutating_step_is_rejected() -> None:
 
 def test_future_schema_is_not_migrated() -> None:
     data = _current_data()
-    data["schema_version"] = 4
+    data["schema_version"] = 5
     with pytest.raises(UnsupportedSchemaError):
         migrate_plan_data(data)
 

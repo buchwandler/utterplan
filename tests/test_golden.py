@@ -22,7 +22,7 @@ def test_golden_plans_roundtrip_and_validate() -> None:
         assert UtterancePlan.from_json(plan.to_json()) == plan
 
 
-def test_canonical_ssmd_09_compiles_to_comprehensive_v3_golden() -> None:
+def test_canonical_ssmd_09_compiles_to_comprehensive_v4_golden() -> None:
     source = COMPREHENSIVE_SOURCE.read_text(encoding="utf-8")
     plan = UtterancePlanner(
         PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
@@ -34,7 +34,7 @@ def test_canonical_ssmd_09_compiles_to_comprehensive_v3_golden() -> None:
     )
 
     assert plan == expected
-    assert plan.schema_version == 3
+    assert plan.schema_version == 4
     assert plan.document_metadata["language"] == "sr-Latn"
     assert any(
         annotation.kind == "lang" and annotation.attrs["lang"] == "sr-Latn"

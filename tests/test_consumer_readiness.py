@@ -324,3 +324,22 @@ Hello."""
     with pytest.raises(PlanFormatError) as error:
         UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(document)
     assert error.value.code == "header.requires_invalid"
+
+
+def test_semantic_boundaries_are_public_spoken_coordinate_opportunities() -> None:
+    plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(
+        "One. Two."
+    )
+
+    boundaries = plan.semantic_boundaries_in_range(
+        0,
+        len(plan.texts.spoken),
+        kinds=("sentence",),
+        interior_only=False,
+    )
+    assert len(boundaries) == 1
+    boundary = boundaries[0]
+    assert boundary.position == plan.texts.spoken.index("Two.") - 1
+    left = plan.texts.spoken[: boundary.position]
+    right = plan.texts.spoken[boundary.position :]
+    assert left + right == plan.texts.spoken

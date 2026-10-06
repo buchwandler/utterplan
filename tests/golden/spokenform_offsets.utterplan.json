@@ -23,6 +23,7 @@
       "voice_change": 0.15,
       "weak": 0.15
     },
+    "renderability_mode": "strict",
     "ssmd": {
       "parse_yaml_header": true,
       "pause_overrides": null
@@ -42,7 +43,13 @@
     "planning": {
       "engine_independent": true,
       "linguistic_passes": 2,
-      "pass_a_tokens": 8
+      "pass_a_tokens": 8,
+      "renderability": {
+        "checked_segments": 1,
+        "guaranteed": true,
+        "mode": "strict",
+        "repair_count": 0
+      }
     }
   },
   "format": "utterplan",
@@ -67,7 +74,7 @@
     }
   ],
   "markers": [],
-  "plan_id": "sha256:5aeea47eca1c078e322ef539a1b325523e288160d88a5ace580d32371cb3d9f9",
+  "plan_id": "sha256:8feaafe9fc0f571e85c524cbb08731ea6a94d4d2ee00346b78a37e345228eeb5",
   "preparation": {
     "backend": "spokenform",
     "languages": ["en-us"],
@@ -111,9 +118,9 @@
   },
   "producer": {
     "name": "utterplan",
-    "version": "0.1.3"
+    "version": "0.3.7"
   },
-  "schema_version": 2,
+  "schema_version": 4,
   "segments": [
     {
       "annotation_ids": [],
@@ -133,10 +140,13 @@
       "sentence": 0,
       "spoken_end": 53,
       "spoken_start": 0,
+      "structural_end": 32,
+      "structural_start": 0,
       "text": "Doctor Smith bought five kilograms on January fourth.",
       "token_indices": [0, 1, 2, 3, 4, 5, 6, 7]
     }
   ],
+  "semantic_boundaries": [],
   "source": {
     "format": "plain",
     "text": "Dr. Smith bought 5 kg on Jan. 4."
@@ -221,8 +231,8 @@
   ],
   "units": [
     {
-      "content_hash": "sha256:b51dd6a43563c9327e7012a651221da71637fd909a47b76cb18f98934f71d658",
-      "content_hash_schema": "utterplan-unit-v2",
+      "content_hash": "sha256:2de5d0134092b70b9deea2d1b4e5f98f289f921a75e0f42b21e30e1fecfa9ffc",
+      "content_hash_schema": "utterplan-unit-v3",
       "id": "unit-0000",
       "index": 0,
       "kind": "paragraph",

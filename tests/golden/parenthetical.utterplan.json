@@ -5,7 +5,8 @@
       "attrs": {
         "anchor": "before",
         "automatic": true,
-        "detected_kind": "parenthetical_open"
+        "detected_kind": "parenthetical_open",
+        "semantic_boundary_id": "semantic-boundary-000000"
       },
       "id": "boundary-000000",
       "kind": "parenthetical",
@@ -18,7 +19,8 @@
       "attrs": {
         "anchor": "before",
         "automatic": true,
-        "detected_kind": "parenthetical_close"
+        "detected_kind": "parenthetical_close",
+        "semantic_boundary_id": "semantic-boundary-000001"
       },
       "id": "boundary-000001",
       "kind": "parenthetical",
@@ -50,6 +52,7 @@
       "voice_change": 0.15,
       "weak": 0.15
     },
+    "renderability_mode": "strict",
     "ssmd": {
       "parse_yaml_header": true,
       "pause_overrides": null
@@ -69,7 +72,13 @@
     "planning": {
       "engine_independent": true,
       "linguistic_passes": 2,
-      "pass_a_tokens": 13
+      "pass_a_tokens": 13,
+      "renderability": {
+        "checked_segments": 3,
+        "guaranteed": true,
+        "mode": "strict",
+        "repair_count": 0
+      }
     }
   },
   "format": "utterplan",
@@ -94,7 +103,7 @@
     }
   ],
   "markers": [],
-  "plan_id": "sha256:44963b357109e4288ff7b6ab76c9bc0eb61158f97a41f1dd8177e6bc6eed60f3",
+  "plan_id": "sha256:042507500c865572a011df68f10d0c4b4ceed1e22cb42455e0ae384fdfbdd499",
   "preparation": {
     "backend": "spokenform",
     "languages": ["en-us"],
@@ -104,9 +113,9 @@
   },
   "producer": {
     "name": "utterplan",
-    "version": "0.1.3"
+    "version": "0.3.7"
   },
-  "schema_version": 2,
+  "schema_version": 4,
   "segments": [
     {
       "annotation_ids": [],
@@ -126,6 +135,8 @@
       "sentence": 0,
       "spoken_end": 19,
       "spoken_start": 0,
+      "structural_end": 19,
+      "structural_start": 0,
       "text": "The backup battery ",
       "token_indices": [0, 1, 2]
     },
@@ -147,6 +158,8 @@
       "sentence": 0,
       "spoken_end": 53,
       "spoken_start": 19,
+      "structural_end": 53,
+      "structural_start": 19,
       "text": "(still warm from the morning test)",
       "token_indices": [3, 4, 5, 6, 7, 8]
     },
@@ -168,8 +181,38 @@
       "sentence": 0,
       "spoken_end": 77,
       "spoken_start": 53,
+      "structural_end": 77,
+      "structural_start": 53,
       "text": " sat beside the console.",
       "token_indices": [9, 10, 11, 12]
+    }
+  ],
+  "semantic_boundaries": [
+    {
+      "attrs": {
+        "detected_kind": "parenthetical_open",
+        "detector_end": 20,
+        "detector_run_spoken_start": 0,
+        "detector_start": 19
+      },
+      "id": "semantic-boundary-000000",
+      "kind": "parenthetical",
+      "language_run_id": "lang-0",
+      "origin": "phrasplit",
+      "position": 19
+    },
+    {
+      "attrs": {
+        "detected_kind": "parenthetical_close",
+        "detector_end": 53,
+        "detector_run_spoken_start": 0,
+        "detector_start": 52
+      },
+      "id": "semantic-boundary-000001",
+      "kind": "parenthetical",
+      "language_run_id": "lang-0",
+      "origin": "phrasplit",
+      "position": 53
     }
   ],
   "source": {
@@ -301,8 +344,8 @@
   ],
   "units": [
     {
-      "content_hash": "sha256:f67186d590bcc3a1b09de92bb377db3b88adf94f98a3cf3a00805115dd79edee",
-      "content_hash_schema": "utterplan-unit-v2",
+      "content_hash": "sha256:92cd6655ed559605fb4e17a87fe9f75c2d86e9f1373add268b2d7664d70b1387",
+      "content_hash_schema": "utterplan-unit-v3",
       "id": "unit-0000",
       "index": 0,
       "kind": "paragraph",

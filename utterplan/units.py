@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from .hashing import UNIT_HASH_SCHEMA, semantic_hash, unit_hash_payload
-from .model import Marker, PlanSegment, PlanUnit
+from .model import Marker, PlanSegment, PlanUnit, SemanticBoundary
 
 
 def make_units(
@@ -11,6 +11,7 @@ def make_units(
     markers: tuple[Marker, ...],
     tokens: tuple[object, ...],
     kind: str,
+    semantic_boundaries: tuple[SemanticBoundary, ...] = (),
 ) -> tuple[PlanUnit, ...]:
     if not segments:
         return ()
@@ -54,7 +55,9 @@ def make_units(
             replace(
                 provisional,
                 content_hash=semantic_hash(
-                    unit_hash_payload(_UnitView(group, marker_ids, marker_values, tokens))
+                    unit_hash_payload(
+                        _UnitView(group, marker_ids, marker_values, tokens, semantic_boundaries)
+                    )
                 ),
                 content_hash_schema=UNIT_HASH_SCHEMA,
             )
@@ -80,8 +83,12 @@ class _UnitView:
         marker_ids: tuple[str, ...],
         marker_values: tuple[Marker, ...],
         tokens: tuple[object, ...],
+        semantic_boundaries: tuple[SemanticBoundary, ...],
     ) -> None:
         self.segments = tuple(segments)
+        self.spoken_start = segments[0].spoken_start
+        self.spoken_end = segments[-1].spoken_end
+        self.semantic_boundaries = semantic_boundaries
         self.marker_ids = marker_ids
         self.marker_values = marker_values
         self.tokens = tokens

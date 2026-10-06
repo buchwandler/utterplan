@@ -471,7 +471,7 @@
       "spoken_position": 249
     }
   ],
-  "plan_id": "sha256:e2cb47fa1f0cdd4dede591f14e253c685630af99859e76b8bb84ee4afb538c8a",
+  "plan_id": "sha256:659917ddd9ff6c7043f9ab69858157d1f4a876ab127037b3898fac9cc7b2ece3",
   "preparation": {
     "backend": "identity",
     "languages": ["sr-Latn"],
@@ -481,9 +481,9 @@
   },
   "producer": {
     "name": "utterplan",
-    "version": "0.3.5"
+    "version": "0.3.7"
   },
-  "schema_version": 3,
+  "schema_version": 4,
   "segments": [
     {
       "annotation_ids": [],
@@ -1097,6 +1097,71 @@
       "token_indices": [40, 41, 42]
     }
   ],
+  "semantic_boundaries": [
+    {
+      "id": "semantic-boundary-000000",
+      "kind": "paragraph",
+      "language_run_id": null,
+      "origin": "planner",
+      "position": 12
+    },
+    {
+      "id": "semantic-boundary-000001",
+      "kind": "sentence",
+      "language_run_id": null,
+      "origin": "planner",
+      "position": 29
+    },
+    {
+      "id": "semantic-boundary-000002",
+      "kind": "sentence",
+      "language_run_id": null,
+      "origin": "planner",
+      "position": 70
+    },
+    {
+      "id": "semantic-boundary-000003",
+      "kind": "sentence",
+      "language_run_id": null,
+      "origin": "planner",
+      "position": 106
+    },
+    {
+      "id": "semantic-boundary-000004",
+      "kind": "paragraph",
+      "language_run_id": null,
+      "origin": "planner",
+      "position": 145
+    },
+    {
+      "id": "semantic-boundary-000005",
+      "kind": "paragraph",
+      "language_run_id": null,
+      "origin": "planner",
+      "position": 193
+    },
+    {
+      "id": "semantic-boundary-000006",
+      "kind": "paragraph",
+      "language_run_id": null,
+      "origin": "planner",
+      "position": 225
+    },
+    {
+      "id": "semantic-boundary-000007",
+      "kind": "paragraph",
+      "language_run_id": null,
+      "origin": "planner",
+      "position": 249
+    },
+    {
+      "id": "semantic-boundary-000008",
+      "kind": "paragraph",
+      "language_run_id": null,
+      "origin": "planner",
+      "position": 268
+    }
+  ],
   "source": {
     "format": "ssmd",
     "text": "---\nssmd_version: \"0.9\"\ntitle: Renderer-neutral SSMD 0.9 contract\nlanguage: sr-Latn\nvoice_bindings:\n  narrator: provider-voice\nvoice_defaults:\n  narrator:\n    rate: slow\n    volume: soft\nprosody_transitions:\n  enabled: true\n  same_voice_only: true\n  rate: 100ms\npause_defaults:\n  paragraph: 450ms\nlanguage_detection:\n  mode: auto\n  languages: [sr-Latn, en-GB]\nrequires:\n  extensions:\n    - acme.effects.whisper\n---\n# Main heading\n\n:::{voice=\"narrator\" voice-name=\"Mira\" voice-languages=\"sr-Latn\" gender=\"female\" age=\"30\" variant=\"2\" rate=\"medium\" pitch=\"low\"}\nWelcome [reader]{lang=\"sr-Latn\"}.\n:::\n:::{voice=\"narrator\"}\n[Important]{emphasis=\"strong\"} [31.12.2024]{as=\"date\" format=\"dd.mm.yyyy\" detail=\"1\"}, [H2O]{sub=\"water\"}, and [computer]{ph=\"kəmˈpjuːtər\" alphabet=\"ipa\"}.\nA [sound]{src=\"door.wav\" desc=\"door chime\" clip=\"1s-2s\" speed=\"110%\" repeat=\"1.5\" level=\"-3dB\"} plays, followed by [whisper]{ext=\"acme.effects.whisper\" mode=\"soft\"}.\n:::\n::::{voice=\"narrator\" rate=\"medium\" pitch=\"low\"}\nOuter scope establishes block prosody.\n:::{rate=\"fast\" pitch=\"high\"}\nInner scope preserves explicit rate and pitch.\n:::\nBack in the outer voice scope.\n::::\n\nA pause ...500ms then a marker. @checkpoint\n\n## Secondary heading\n\nAfter the heading.\n"
@@ -1496,8 +1561,8 @@
   ],
   "units": [
     {
-      "content_hash": "sha256:2fd8b30dff97fef59fe8be9f4ebb100266e40adb5912c3fbfcf2e1e4c229c52c",
-      "content_hash_schema": "utterplan-unit-v2",
+      "content_hash": "sha256:07165e25f404c256320065e1c59dfeb79066d1bbcb2dc00118c61db224803e23",
+      "content_hash_schema": "utterplan-unit-v3",
       "id": "unit-0000",
       "index": 0,
       "kind": "paragraph",
@@ -1507,8 +1572,8 @@
       "spoken_start": 0
     },
     {
-      "content_hash": "sha256:bde96ce498361c59abf17ae88786d75422898bfd9fc82ae80b37a4b71c98a8eb",
-      "content_hash_schema": "utterplan-unit-v2",
+      "content_hash": "sha256:8554fc4ff58520933807ab90e7e9d913d8c8060d138a86567cc4ce707700e36b",
+      "content_hash_schema": "utterplan-unit-v3",
       "id": "unit-0001",
       "index": 1,
       "kind": "paragraph",
@@ -1531,8 +1596,8 @@
       "spoken_start": 14
     },
     {
-      "content_hash": "sha256:fb2aeedd6d31331bf6b7e79bc4ed29063be8a74dc9913c6ef8832d690ca9b1d7",
-      "content_hash_schema": "utterplan-unit-v2",
+      "content_hash": "sha256:492f20f826686ada9998945879f07a61b179e2372373044a5b9a64607d36a8bd",
+      "content_hash_schema": "utterplan-unit-v3",
       "id": "unit-0002",
       "index": 2,
       "kind": "paragraph",
@@ -1542,8 +1607,8 @@
       "spoken_start": 147
     },
     {
-      "content_hash": "sha256:0193b76a997373a76257827988f7055e901c3f0f39856ecfc8babd4fddb6d445",
-      "content_hash_schema": "utterplan-unit-v2",
+      "content_hash": "sha256:7a9c286170466517a010527289c31894c0fdef3186170ca1b48ec13bdaca880c",
+      "content_hash_schema": "utterplan-unit-v3",
       "id": "unit-0003",
       "index": 3,
       "kind": "paragraph",
@@ -1553,8 +1618,8 @@
       "spoken_start": 195
     },
     {
-      "content_hash": "sha256:29f25326da4054b5a34e2dbb346ce130694c431da8d7bbe3ad9f6e85b8516c98",
-      "content_hash_schema": "utterplan-unit-v2",
+      "content_hash": "sha256:4f48087b7aefc537f98d94eb4b87134bbc27a3e4623f4118cdcfaaad6ad2c058",
+      "content_hash_schema": "utterplan-unit-v3",
       "id": "unit-0004",
       "index": 4,
       "kind": "paragraph",
@@ -1564,8 +1629,8 @@
       "spoken_start": 227
     },
     {
-      "content_hash": "sha256:2389ea9c5748ec2b8a2a902c6f159557adfeeb5d465291d290ff6b1997cfef25",
-      "content_hash_schema": "utterplan-unit-v2",
+      "content_hash": "sha256:a077f25f897fe331b41a7448425928b3fc653aa68b3d79484d4ee7764a890286",
+      "content_hash_schema": "utterplan-unit-v3",
       "id": "unit-0005",
       "index": 5,
       "kind": "paragraph",
@@ -1575,8 +1640,8 @@
       "spoken_start": 251
     },
     {
-      "content_hash": "sha256:000522bdabc2e9c4c4a58eb0806605d47b02555806e2731c78a5c3a893bb2eaa",
-      "content_hash_schema": "utterplan-unit-v2",
+      "content_hash": "sha256:e74d66ff2cd9f407ea95f32de391549ddb71c405d71d3a1d444ee05d73bed9e6",
+      "content_hash_schema": "utterplan-unit-v3",
       "id": "unit-0006",
       "index": 6,
       "kind": "paragraph",

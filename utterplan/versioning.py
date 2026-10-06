@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 FORMAT = "utterplan"
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 OLDEST_SUPPORTED_SCHEMA_VERSION = 1
-SUPPORTED_SCHEMA_VERSIONS: tuple[int, ...] = (1, 2, 3)
+SUPPORTED_SCHEMA_VERSIONS: tuple[int, ...] = (1, 2, 3, 4)
 # Compatibility alias retained for existing callers.
 SCHEMA_VERSION = CURRENT_SCHEMA_VERSION

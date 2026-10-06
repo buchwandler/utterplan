@@ -111,6 +111,7 @@ utterplan validate plain.txt --input-format plain --language en-us
 utterplan inspect chapter.utterplan.json --segment 0
 utterplan inspect chapter.utterplan.json --unit 0 --boundaries --tokens
 utterplan inspect chapter.utterplan.json --preparation
+utterplan inspect chapter.utterplan.json --semantic-boundaries
 ```
 
 `inspect --preparation` reports the preparation backend and version, structural and spoken text lengths, replacement count, and each replacement's structural and spoken ranges and text. This is the supported human-facing preparation diagnostic; raw coordinate lookup tables are intentionally absent from plan JSON.
@@ -127,6 +128,6 @@ utterplan migrate old.utterplan.json | jq .
 
 Without `-o`, migrated JSON is written to stdout. Status is written to stderr. Existing output files are refused unless `--force` is supplied. `--check` validates the route and reports source schema, target schema, and whether migration is required without writing a file. A future schema version is rejected rather than guessed or downgraded.
 
-Schema migration is a separate operation from SSMD source migration. UtterPlan preserves released schema v1 and v2 and migrates v1 plans sequentially through v2 to current schema v3. It never reparses source or replans. Use `ssmd migrate FILE --to 0.9` for older SSMD source documents.
+Schema migration is a separate operation from SSMD source migration. UtterPlan preserves released schemas v1, v2, and v3 and migrates supported plans through the registered chain to current schema v4. The v3-to-v4 step does not rerun parsing, NLP, or planning. Use `ssmd migrate FILE --to 0.9` for older SSMD source documents.
 
 For a saved JSON plan, `validate` performs the in-memory schema compatibility check and reports source/current schema versions without modifying the file. For an SSMD or plain-text source document, it runs the canonical one-document semantic compiler without writing a plan; plain input requires `--language`, while SSMD can use its header language or an explicit fallback.

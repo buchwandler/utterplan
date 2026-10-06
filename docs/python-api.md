@@ -101,6 +101,26 @@ print(directives.voice, directives.prosody, directives.say_as)
 
 SSMD annotations preserve declared source spans. Segment directives hold effective typed semantics after scope and voice-default resolution. `document_metadata` preserves portable header data and the SSMD version; `plan.boundaries` preserves heading events. Audio references and extension names are not executed by UtterPlan. See the [coordinate-space contract](coordinate-spaces) for source offset units and the [consumer guide](consumer-guide) for renderer responsibilities.
 
+## Semantic boundaries
+
+`SemanticBoundary` is an immutable, engine-neutral split opportunity. Its
+`position` is always in `plan.texts.spoken`, and its `kind` distinguishes clause,
+parenthetical, sentence, and paragraph structure. It is intentionally separate
+from `BoundaryEvent`: semantic boundaries do not carry pause duration or depend
+on whether a pause policy activates an event.
+
+```python
+from utterplan import SemanticBoundary
+
+for boundary in plan.semantic_boundaries_for_segment(segment, kinds={"clause"}):
+    offset = boundary.position - segment.spoken_start
+    left, right = segment.text[:offset], segment.text[offset:]
+```
+
+Use `semantic_boundaries_in_range(start, end)` when lowering a plan into a
+request-local renderer capacity. Do not import parser/provider documents or
+recompute clause analysis in the consumer.
+
 ## Audio/media segments
 
 `AudioDirective` is already part of the public API. Inspect it on the segment; its

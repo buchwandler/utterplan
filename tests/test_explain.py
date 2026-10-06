@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
+from utterplan import PauseConfig, PlannerConfig, UtterancePlan, UtterancePlanner
 from utterplan.explain import format_explanation
 
 GOLDEN = Path("tests/golden")
@@ -126,7 +126,7 @@ def test_details_include_technical_identity_and_correlated_ids() -> None:
     output = format_explanation(_load("parenthetical.utterplan.json"), details=True)
 
     assert "plan id: sha256:" in output
-    assert "schema: 3" in output
+    assert "schema: 4" in output
     assert "id: seg-000001" in output
     assert "spoken: 19:53" in output
     assert "content hash: sha256:" in output
@@ -156,3 +156,25 @@ def test_empty_collections_are_concise() -> None:
     assert "Language runs" not in output
     assert "markers:" not in output
     assert "Boundaries" not in output
+
+
+def test_semantic_boundaries_are_explained_separately_from_active_pauses() -> None:
+    text = "The backup battery (still warm from the morning test) sat beside the console."
+    quiet = UtterancePlanner(
+        PlannerConfig(language="en-us", text_preparation="identity", pauses=PauseConfig(mode="tts"))
+    ).plan(text)
+    audible = UtterancePlanner(
+        PlannerConfig(
+            language="en-us", text_preparation="identity", pauses=PauseConfig(mode="auto")
+        )
+    ).plan(text)
+
+    quiet_semantics = tuple((item.kind, item.position) for item in quiet.semantic_boundaries)
+    audible_semantics = tuple((item.kind, item.position) for item in audible.semantic_boundaries)
+    assert quiet_semantics == audible_semantics
+    quiet_output = format_explanation(quiet)
+    audible_output = format_explanation(audible)
+    assert "Semantic boundaries (spoken coordinates)" in quiet_output
+    assert "Semantic boundary: parenthetical at spoken offset" in quiet_output
+    assert "pause 0." not in quiet_output
+    assert "pause 0." in audible_output

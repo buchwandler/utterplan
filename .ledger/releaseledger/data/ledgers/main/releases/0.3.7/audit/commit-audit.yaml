@@ -1,0 +1,35 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 2
+release_version: 0.3.7
+git_base_ref: v0.3.6
+git_base_sha: 1a7a28a39b3f7083d4cb0a279c8d3badecced7a4
+git_head_ref: v0.3.7
+git_head_sha: 29dceaefcb16e38c2ad8c9ae2d513149684554cd
+git_range: 1a7a28a39b3f7083d4cb0a279c8d3badecced7a4..29dceaefcb16e38c2ad8c9ae2d513149684554cd
+commit_count: 1
+rows:
+  - sha: 29dceaefcb16e38c2ad8c9ae2d513149684554cd
+    source_ref: git:29dceaefcb16e38c2ad8c9ae2d513149684554cd
+    short_sha: 29dceae
+    changed_paths:
+      - .github/workflows/python-publish.yml
+    stats:
+      files_changed: 1
+      insertions: 1
+      deletions: 1
+    inspected: true
+    inspected_paths:
+      - .github/workflows/python-publish.yml
+    observed_behavior:
+      Adjusted the package publishing workflow configuration for the
+      maintained release toolchain.
+    public_impact: internal
+    decision: accepted
+    stale: false
+    evidence_subject: "chore: ci"
+    target_entry_key: entry-0001
+    target_entry_id: entry-0001
+    notes: CI configuration only; no runtime API or user-facing behavior change.

@@ -138,6 +138,11 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser.add_argument("--warnings", action="store_true")
     inspect_parser.add_argument("--boundaries", action="store_true")
     inspect_parser.add_argument("--tokens", action="store_true")
+    inspect_parser.add_argument(
+        "--semantic-boundaries",
+        action="store_true",
+        help="show semantic split opportunities in spoken coordinates",
+    )
     inspect_parser.add_argument("--preparation", action="store_true")
     return parser
 
@@ -468,11 +473,21 @@ def _inspect(plan: UtterancePlan, args: argparse.Namespace) -> None:
                 f"    {replacement.get('source', '')!r} -> {replacement.get('replacement', '')!r}"
             )
     if args.boundaries:
-        print("\nBoundaries")
+        print("\nBoundary events")
         for boundary in plan.boundaries:
             print(
                 f"  {boundary.id}: {boundary.kind} at {boundary.position}, "
                 f"{boundary.seconds}s, {boundary.origin}"
+            )
+    if args.semantic_boundaries:
+        print("\nSemantic boundaries (spoken coordinates)")
+        if not plan.semantic_boundaries:
+            print("  None.")
+        for boundary in plan.semantic_boundaries:
+            run_id = boundary.language_run_id or "-"
+            print(
+                f"  {boundary.id}  {boundary.position:>6}  {boundary.kind:<14} "
+                f"{boundary.origin}  run={run_id}"
             )
     if args.tokens:
         print("\nTokens")

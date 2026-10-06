@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/buchwandler/utterplan/schema/v3",
+  "$id": "https://github.com/buchwandler/utterplan/schema/v4",
   "title": "UtterPlan schema",
   "type": "object",
   "required": [
@@ -15,6 +15,7 @@
     "languages",
     "linguistic_runs",
     "annotations",
+    "semantic_boundaries",
     "boundaries",
     "tokens",
     "segments",
@@ -25,7 +26,7 @@
   ],
   "properties": {
     "format": { "const": "utterplan" },
-    "schema_version": { "const": 3 },
+    "schema_version": { "const": 4 },
     "producer": {
       "type": "object",
       "required": ["name", "version"],
@@ -56,6 +57,10 @@
     "annotations": {
       "type": "array",
       "items": { "$ref": "#/$defs/annotation" }
+    },
+    "semantic_boundaries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/semantic_boundary" }
     },
     "boundaries": { "type": "array", "items": { "$ref": "#/$defs/boundary" } },
     "tokens": { "type": "array", "items": { "$ref": "#/$defs/token" } },
@@ -166,6 +171,19 @@
         "source_end": { "type": ["integer", "null"], "minimum": 0 },
         "source_node_id": { "type": ["string", "null"] },
         "kind": { "type": "string" },
+        "attrs": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "semantic_boundary": {
+      "type": "object",
+      "required": ["id", "position", "kind", "origin", "language_run_id"],
+      "properties": {
+        "id": { "type": "string" },
+        "position": { "type": "integer", "minimum": 0 },
+        "kind": { "type": "string", "minLength": 1 },
+        "origin": { "type": "string", "minLength": 1 },
+        "language_run_id": { "type": ["string", "null"] },
         "attrs": { "type": "object" }
       },
       "additionalProperties": false
@@ -372,7 +390,7 @@
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$"
         },
-        "content_hash_schema": { "const": "utterplan-unit-v2" }
+        "content_hash_schema": { "const": "utterplan-unit-v3" }
       },
       "additionalProperties": false
     },

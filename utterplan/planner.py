@@ -22,6 +22,7 @@ from .model import (
     PlanSegment,
     PlanSource,
     PlanTexts,
+    SemanticBoundary,
     UtterancePlan,
 )
 from .parsers import (
@@ -276,8 +277,11 @@ class UtterancePlanner:
         )
         tokens = tuple(token for analysis in pass_b for token in analysis.tokens)
         linguistic_runs = _linguistic_runs(runs, pass_b)
+        semantic_boundaries, _ = _canonicalize_semantic_boundaries(
+            _detect_linguistic_semantic_boundaries(spoken, runs, pass_b)
+        )
         boundaries = list(prepared.boundaries)
-        boundaries.extend(_linguistic_boundaries(spoken, runs, pass_b, start_id=len(boundaries)))
+        boundaries.extend(_semantic_pause_events(semantic_boundaries, start_id=len(boundaries)))
         segments = _segment(
             spoken, runs, prepared.annotations, boundaries, pause_config, document_language
         )
@@ -332,10 +336,21 @@ class UtterancePlanner:
                 raise PlanRenderabilityError(post_repair.issues, mode="repair")
         renderability_checked_segments = checked_segment_count
         boundaries.extend(_derived_boundaries(segments, boundaries, pause_config))
+        semantic_boundaries = _derive_semantic_topology(segments, semantic_boundaries)
+        semantic_boundaries, semantic_id_map = _canonicalize_semantic_boundaries(
+            semantic_boundaries
+        )
+        boundaries = _relink_semantic_pause_events(boundaries, semantic_id_map)
         segments = resolve_pauses(segments, boundaries, pause_config)
         markers = tuple(_map_marker(marker, prepared.source_map) for marker in parsed.markers)
         segment_tuple = tuple(segments)
-        units = make_units(segment_tuple, markers, tokens, selected_unit)
+        units = make_units(
+            segment_tuple,
+            markers,
+            tokens,
+            selected_unit,
+            tuple(semantic_boundaries),
+        )
         _notify_progress(
             on_progress,
             PlannerProgressEvent(kind="phase.completed", phase="segmentation"),
@@ -376,6 +391,7 @@ class UtterancePlanner:
             languages=runs,
             annotations=prepared.annotations,
             linguistic_runs=linguistic_runs,
+            semantic_boundaries=tuple(semantic_boundaries),
             boundaries=tuple(boundaries),
             tokens=tokens,
             segments=segment_tuple,
@@ -1203,18 +1219,16 @@ class _FallbackSplit:
         self.text = text
 
 
-def _linguistic_boundaries(
+def _detect_linguistic_semantic_boundaries(
     text: str,
     runs: tuple[Any, ...],
     analyses: tuple[RunAnalysis, ...],
-    *,
-    start_id: int = 0,
-) -> list[BoundaryEvent]:
+) -> list[SemanticBoundary]:
     try:
         import phrasplit
     except ImportError:
         return []
-    result: list[BoundaryEvent] = []
+    result: list[SemanticBoundary] = []
     for run, analysis in zip(runs, analyses, strict=True):
         local = text[run.spoken_start : run.spoken_end]
         clause_items = []
@@ -1229,22 +1243,38 @@ def _linguistic_boundaries(
                 clause_items = []
         for item in clause_items:
             kind = str(getattr(item, "kind", ""))
-            event_kind = (
-                "parenthetical"
-                if "parenthetical" in kind
-                else "clausal_comma"
-                if ("clause" in kind or "comma" in kind)
-                else None
-            )
-            if event_kind:
+            try:
+                start = int(getattr(item, "char_start", 0))
+                raw_end = int(getattr(item, "char_end", start + 1))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not (0 <= start <= raw_end <= len(local)):
+                continue
+            end = raw_end if raw_end > start else min(len(local), start + 1)
+            attrs = {
+                "detected_kind": kind,
+                "detector_start": start,
+                "detector_end": raw_end,
+                "detector_run_spoken_start": run.spoken_start,
+            }
+            if "parenthetical" in kind:
+                semantic_kind = "parenthetical"
+                position = _parenthetical_semantic_position(kind, start, end)
+            elif "clause" in kind or "comma" in kind:
+                semantic_kind = "clause"
+                position = _normalize_clause_split_position(local, start, end)
+                attrs["detector_spoken_start"] = run.spoken_start + start
+            else:
+                continue
+            if 0 < position < len(local):
                 result.append(
-                    BoundaryEvent(
-                        f"boundary-{start_id + len(result):06d}",
-                        run.spoken_start + int(getattr(item, "char_start", 0)),
-                        event_kind,
+                    SemanticBoundary(
+                        "",
+                        run.spoken_start + position,
+                        semantic_kind,
                         origin="phrasplit",
-                        strength="weak",
-                        attrs={"detected_kind": kind, "automatic": True},
+                        language_run_id=run.id,
+                        attrs=attrs,
                     )
                 )
         try:
@@ -1255,28 +1285,167 @@ def _linguistic_boundaries(
             parenthetical_items = []
         for item in parenthetical_items:
             kind = str(getattr(item, "kind", "parenthetical"))
-            char_start = int(getattr(item, "char_start", 0))
-            char_end = int(getattr(item, "char_end", char_start))
-            if kind == "parenthetical_open":
-                local_position = char_start
-            elif kind == "parenthetical_close":
-                local_position = char_end
-            else:
+            try:
+                start = int(getattr(item, "char_start", 0))
+                raw_end = int(getattr(item, "char_end", start))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not (0 <= start <= raw_end <= len(local)):
+                continue
+            position = _parenthetical_semantic_position(kind, start, raw_end)
+            if not 0 < position < len(local):
                 continue
             result.append(
-                BoundaryEvent(
-                    f"boundary-{start_id + len(result):06d}",
-                    run.spoken_start + local_position,
+                SemanticBoundary(
+                    "",
+                    run.spoken_start + position,
                     "parenthetical",
                     origin="phrasplit",
-                    strength="weak",
+                    language_run_id=run.id,
                     attrs={
                         "detected_kind": kind,
-                        "automatic": True,
-                        "anchor": "before",
+                        "detector_start": start,
+                        "detector_end": raw_end,
+                        "detector_run_spoken_start": run.spoken_start,
                     },
                 )
             )
+    return result
+
+
+def _parenthetical_semantic_position(kind: str, start: int, end: int) -> int:
+    if kind == "parenthetical_close":
+        return end
+    return start
+
+
+def _normalize_clause_split_position(text: str, start: int, end: int) -> int:
+    if end <= start:
+        end = min(len(text), start + 1)
+    position = end
+    while position < len(text) and text[position] in ",;:，；：—–-":
+        position += 1
+    while position < len(text) and (
+        text[position] in ")]}'\"»”’" or unicodedata.category(text[position]) in {"Pe", "Pf"}
+    ):
+        position += 1
+    while position < len(text) and (
+        text[position] == "\t" or unicodedata.category(text[position]) == "Zs"
+    ):
+        position += 1
+    return position
+
+
+def _canonicalize_semantic_boundaries(
+    boundaries: list[SemanticBoundary] | tuple[SemanticBoundary, ...],
+) -> tuple[list[SemanticBoundary], dict[str, str]]:
+    grouped: dict[tuple[int, str], list[SemanticBoundary]] = {}
+    for boundary in boundaries:
+        grouped.setdefault((boundary.position, boundary.kind), []).append(boundary)
+    canonical: list[SemanticBoundary] = []
+    for position, kind in sorted(grouped):
+        producers = sorted(
+            grouped[(position, kind)],
+            key=lambda item: (item.origin, item.language_run_id or "", item.id),
+        )
+        selected = producers[0]
+        origins = sorted({item.origin for item in producers})
+        attrs = dict(selected.attrs)
+        if len(origins) > 1:
+            attrs["origins"] = origins
+        canonical.append(
+            SemanticBoundary(
+                "",
+                position,
+                kind,
+                origin=origins[0],
+                language_run_id=selected.language_run_id,
+                attrs=attrs,
+            )
+        )
+    canonical.sort(key=lambda item: (item.position, item.kind, item.origin, item.id))
+    id_map: dict[str, str] = {}
+    identified: list[SemanticBoundary] = []
+    for index, boundary in enumerate(canonical):
+        boundary_id = f"semantic-boundary-{index:06d}"
+        identified.append(replace(boundary, id=boundary_id))
+        for source in grouped[(boundary.position, boundary.kind)]:
+            if source.id:
+                id_map[source.id] = boundary_id
+    return identified, id_map
+
+
+def _semantic_pause_events(
+    semantic_boundaries: list[SemanticBoundary], *, start_id: int
+) -> list[BoundaryEvent]:
+    result: list[BoundaryEvent] = []
+    for boundary in semantic_boundaries:
+        if boundary.origin != "phrasplit":
+            continue
+        detected_kind = str(boundary.attrs.get("detected_kind", ""))
+        if boundary.kind == "clause":
+            event_kind = "clausal_comma"
+            position = int(boundary.attrs.get("detector_spoken_start", boundary.position))
+            event_attrs = {
+                "detected_kind": detected_kind,
+                "automatic": True,
+                "semantic_boundary_id": boundary.id,
+            }
+        elif boundary.kind == "parenthetical":
+            event_kind = "parenthetical"
+            position = boundary.position
+            event_attrs = {
+                "detected_kind": detected_kind,
+                "automatic": True,
+                "anchor": "before",
+                "semantic_boundary_id": boundary.id,
+            }
+        else:
+            continue
+        result.append(
+            BoundaryEvent(
+                f"boundary-{start_id + len(result):06d}",
+                position,
+                event_kind,
+                origin=boundary.origin,
+                strength="weak",
+                attrs=event_attrs,
+            )
+        )
+    return result
+
+
+def _derive_semantic_topology(
+    segments: list[PlanSegment], existing: list[SemanticBoundary]
+) -> list[SemanticBoundary]:
+    result = list(existing)
+    existing_keys = {(item.position, item.kind) for item in existing}
+    for previous, current in zip(segments, segments[1:], strict=False):
+        if previous.paragraph != current.paragraph:
+            kind = "paragraph"
+        elif previous.sentence != current.sentence:
+            kind = "sentence"
+        else:
+            continue
+        key = (previous.spoken_end, kind)
+        if key in existing_keys:
+            continue
+        result.append(SemanticBoundary("", key[0], kind, origin="planner"))
+        existing_keys.add(key)
+    return result
+
+
+def _relink_semantic_pause_events(
+    boundaries: list[BoundaryEvent], id_map: dict[str, str]
+) -> list[BoundaryEvent]:
+    result: list[BoundaryEvent] = []
+    for event in boundaries:
+        semantic_id = event.attrs.get("semantic_boundary_id")
+        if isinstance(semantic_id, str) and semantic_id in id_map:
+            attrs = dict(event.attrs)
+            attrs["semantic_boundary_id"] = id_map[semantic_id]
+            event = replace(event, attrs=attrs)
+        result.append(event)
     return result
 
 

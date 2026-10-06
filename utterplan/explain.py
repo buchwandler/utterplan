@@ -56,6 +56,7 @@ def format_explanation(plan: UtterancePlan, *, details: bool = False) -> str:
     _format_plan_summary(plan, lines, details=details)
     _format_preparation(plan, lines, details=details)
     _format_heading_events(plan, lines)
+    _format_semantic_boundaries(plan, lines, details=details)
     _format_speech_plan(plan, lines, details=details)
     if details:
         _format_language_runs(plan, lines)
@@ -116,6 +117,7 @@ def _format_plan_summary(plan: UtterancePlan, lines: list[str], *, details: bool
             f"  language runs: {len(plan.languages)}",
             f"  annotations: {len(plan.annotations)}",
             f"  boundaries: {len(plan.boundaries)}",
+            f"  semantic boundaries: {len(plan.semantic_boundaries)}",
             f"  tokens: {len(plan.tokens)}",
             f"  markers: {len(plan.markers)}",
             "",
@@ -169,6 +171,24 @@ def _format_heading_events(plan: UtterancePlan, lines: list[str]) -> None:
     for boundary in headings:
         level = boundary.attrs.get("level", "?")
         lines.append(f"  heading level {level} at spoken {boundary.position}")
+    lines.append("")
+
+
+def _format_semantic_boundaries(plan: UtterancePlan, lines: list[str], *, details: bool) -> None:
+    if not plan.semantic_boundaries:
+        return
+    lines.append("Semantic boundaries (spoken coordinates)")
+    for boundary in plan.semantic_boundaries:
+        origin = _ORIGINS.get(boundary.origin, boundary.origin)
+        lines.append(
+            f"  Semantic boundary: {boundary.kind} at spoken offset {boundary.position} ({origin})"
+        )
+        if details:
+            lines.append(f"    id: {boundary.id}")
+            if boundary.language_run_id is not None:
+                lines.append(f"    language run: {boundary.language_run_id}")
+            if boundary.attrs:
+                lines.append(f"    attrs: {_json(boundary.attrs)}")
     lines.append("")
 
 

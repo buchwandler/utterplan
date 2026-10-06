@@ -36,7 +36,7 @@ def test_schema_and_determinism():
 
 def test_unsupported_schema():
     value = plan().to_dict()
-    value["schema_version"] = 4
+    value["schema_version"] = 5
     with pytest.raises(UnsupportedSchemaError):
         UtterancePlan.from_dict(value)
 
@@ -87,5 +87,5 @@ def test_zero_width_media_roundtrip_validates_schema_v3() -> None:
     payload = plan.to_dict()
     jsonschema.validate(payload, schema())
 
-    assert payload["schema_version"] == 3
+    assert payload["schema_version"] == 4
     assert UtterancePlan.from_json(plan.to_json()) == plan

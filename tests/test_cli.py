@@ -29,7 +29,7 @@ def test_compile_literal_text_to_stdout_json(capsys: pytest.CaptureFixture[str])
     assert main(["compile", "Hello world.", "--lang", "en-us"]) == 0
     payload = _payload(capsys)
     assert payload["format"] == "utterplan"
-    assert payload["schema_version"] == 3
+    assert payload["schema_version"] == 4
     assert payload["segments"]
 
 
@@ -292,6 +292,21 @@ def test_inspect_preparation(tmp_path: Path, capsys: pytest.CaptureFixture[str])
     assert "Doctor" in captured.out
 
 
+def test_inspect_semantic_boundaries_are_separate_from_boundary_events(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    output = tmp_path / "plan.utterplan.json"
+    assert main(["compile", "One. Two.", "--lang", "en-us", "-o", str(output)]) == 0
+    capsys.readouterr()
+
+    assert main(["inspect", str(output), "--boundaries", "--semantic-boundaries"]) == 0
+    inspected = capsys.readouterr().out
+    assert "Boundary events" in inspected
+    assert "Semantic boundaries (spoken coordinates)" in inspected
+    assert "semantic-boundary-000000" in inspected
+    assert "sentence" in inspected
+
+
 def test_compile_file_and_positional_text_are_mutually_exclusive(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -346,7 +361,7 @@ def test_migrate_check_current_plan(tmp_path: Path, capsys: pytest.CaptureFixtur
     assert main(["migrate", str(source), "--check"]) == 0
     captured = capsys.readouterr()
     assert "valid migration path" in captured.out
-    assert "source schema: 3" in captured.out
+    assert "source schema: 4" in captured.out
     assert "migration required: no" in captured.out
     assert source.exists()
 
@@ -357,7 +372,7 @@ def test_migrate_stdout_and_output_file(tmp_path: Path, capsys: pytest.CaptureFi
     assert main(["compile", "Hello.", "--lang", "en-us", "-o", str(source)]) == 0
     capsys.readouterr()
     assert main(["migrate", str(source)]) == 0
-    assert json.loads(capsys.readouterr().out)["schema_version"] == 3
+    assert json.loads(capsys.readouterr().out)["schema_version"] == 4
     assert main(["migrate", str(source), "-o", str(destination)]) == 0
     assert "migrated" in capsys.readouterr().err
     assert json.loads(destination.read_text(encoding="utf-8"))["format"] == "utterplan"
@@ -384,8 +399,8 @@ def test_validate_reports_migration_status(
     capsys.readouterr()
     assert main(["validate", str(source)]) == 0
     captured = capsys.readouterr()
-    assert "source schema version: 3" in captured.out
-    assert "current schema version: 3" in captured.out
+    assert "source schema version: 4" in captured.out
+    assert "current schema version: 4" in captured.out
     assert "migration required: no" in captured.out
 
 
