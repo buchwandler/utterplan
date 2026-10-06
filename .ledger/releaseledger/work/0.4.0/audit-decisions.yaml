@@ -1,0 +1,67 @@
+rows:
+  - sha: 69b895601d12508c58c1e7b7a93377c7f5c4efbd
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/architecture.md
+      - docs/changelog.md
+      - docs/consumer-guide.md
+      - docs/format.md
+      - spec/schemas/v4.schema.json
+      - spec/utterplan.schema.json
+      - tests/test_migration_v3_to_v4.py
+      - tests/test_semantic_boundaries.py
+      - utterplan/migrations/v3_to_v4.py
+      - utterplan/model.py
+      - utterplan/planner.py
+      - utterplan/units.py
+      - utterplan/utterplan.schema.json
+      - utterplan/versioning.py
+    observed_behavior: "Introduced schema v4 semantic-boundary records in spoken coordinates, deterministic v3-to-v4 migration, and boundary-aware unit identity while preserving frozen historical schema resources."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: entry-0002
+    notes: "Covered by the schema and migration release entry; the commit also records the releaseledger metadata for the prior release and this planned release."
+    stale: false
+  - sha: fb6e0c70bef1d84d1aef1edd625e230eef2c7aec
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/format.md
+      - docs/python-api.md
+      - tests/migration/test_legacy_json_import.py
+      - tests/test_batch.py
+      - tests/test_cli_batch.py
+      - tests/test_toml_format.py
+      - utterplan/atomic_io.py
+      - utterplan/batch.py
+      - utterplan/cli.py
+      - utterplan/format.py
+      - utterplan/migration.py
+      - utterplan/serialization.py
+      - utterplan/toml_codec.py
+    observed_behavior: "Changed the canonical persisted plan format to deterministic TOML, added explicit legacy JSON import to current TOML, and added incremental compile-many outputs with atomic writes and operational reports."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Requires a new public release entry covering TOML persistence, explicit JSON import, and incremental batch compilation."
+    stale: false
+  - sha: 39c6cc11c7a48fbec615dc62c72ee178499472e3
+    inspected: true
+    inspected_paths:
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+      - README.md
+      - tests/test_public_identity.py
+      - utterplan/toml_codec.py
+    observed_behavior: "Added documentation-build CI coverage, pinned lower-bound test dependencies, and package checks for the v4 schema resource; corrected README code-fence formatting."
+    public_impact: internal
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Release engineering and documentation hygiene only; no separate public changelog entry."
+    stale: false

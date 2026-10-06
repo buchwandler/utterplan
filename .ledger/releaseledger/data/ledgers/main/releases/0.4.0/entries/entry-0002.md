@@ -3,7 +3,7 @@ schema_version: 2
 object_type: release_entry
 versioning:
   schema_version: 1
-  revision: 1
+  revision: 2
 entry_id: entry-0002
 release_version: 0.4.0
 kind: changed
@@ -13,7 +13,8 @@ summary:
 status: accepted
 audience: null
 scopes: []
-source_refs: []
+source_refs:
+  - git:69b895601d12508c58c1e7b7a93377c7f5c4efbd
 paths:
   - utterplan/migrations/v3_to_v4.py
   - utterplan/hashing.py

@@ -2,12 +2,251 @@ schema_version: 1
 object_type: commit_audit_sheet
 versioning:
   schema_version: 1
-  revision: 1
+  revision: 3
 release_version: 0.4.0
 git_base_ref: v0.3.7
 git_base_sha: 29dceaefcb16e38c2ad8c9ae2d513149684554cd
 git_head_ref: HEAD
-git_head_sha: 29dceaefcb16e38c2ad8c9ae2d513149684554cd
-git_range: 29dceaefcb16e38c2ad8c9ae2d513149684554cd..29dceaefcb16e38c2ad8c9ae2d513149684554cd
-commit_count: 0
-rows: []
+git_head_sha: 39c6cc11c7a48fbec615dc62c72ee178499472e3
+git_range: 29dceaefcb16e38c2ad8c9ae2d513149684554cd..39c6cc11c7a48fbec615dc62c72ee178499472e3
+commit_count: 3
+rows:
+  - sha: 69b895601d12508c58c1e7b7a93377c7f5c4efbd
+    source_ref: git:69b895601d12508c58c1e7b7a93377c7f5c4efbd
+    short_sha: 69b8956
+    changed_paths:
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/0.1.2/release.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.1.3/release.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.3.7/audit/commit-audit.yaml
+      - .ledger/releaseledger/data/ledgers/main/releases/0.3.7/entries/entry-0001.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.3.7/release.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.4.0/audit/commit-audit.yaml
+      - .ledger/releaseledger/data/ledgers/main/releases/0.4.0/entries/entry-0001.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.4.0/entries/entry-0002.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.4.0/entries/entry-0003.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.4.0/release.md
+      - README.md
+      - docs/architecture.md
+      - docs/changelog.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/coordinate-spaces.md
+      - docs/format.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/python-api.md
+      - spec/schemas/v4.schema.json
+      - spec/utterplan.schema.json
+      - tests/fixtures/canonical_consumer_contract.expected.json
+      - tests/golden/basic_en.utterplan.json
+      - tests/golden/directives.utterplan.json
+      - tests/golden/markers.utterplan.json
+      - tests/golden/multilingual.utterplan.json
+      - tests/golden/parenthetical.utterplan.json
+      - tests/golden/spokenform_offsets.utterplan.json
+      - tests/golden/ssmd_09_comprehensive.utterplan.json
+      - tests/golden/ssmd_breaks.utterplan.json
+      - tests/schema_history/README.md
+      - tests/schema_history/v3/multilingual.json
+      - tests/schema_history/v3/ssmd_09_comprehensive.json
+      - tests/test_boundaries.py
+      - tests/test_cli.py
+      - tests/test_consumer_contract.py
+      - tests/test_consumer_readiness.py
+      - tests/test_explain.py
+      - tests/test_format.py
+      - tests/test_golden.py
+      - tests/test_identity_units.py
+      - tests/test_linguistics.py
+      - tests/test_migration_framework.py
+      - tests/test_migration_v3_to_v4.py
+      - tests/test_public_identity.py
+      - tests/test_schema_history.py
+      - tests/test_schema_registry.py
+      - tests/test_semantic_boundaries.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/explain.py
+      - utterplan/hashing.py
+      - utterplan/migrations/__init__.py
+      - utterplan/migrations/v1_to_v2.py
+      - utterplan/migrations/v3_to_v4.py
+      - utterplan/model.py
+      - utterplan/planner.py
+      - utterplan/schema_registry.py
+      - utterplan/schemas/v4.schema.json
+      - utterplan/units.py
+      - utterplan/utterplan.schema.json
+      - utterplan/versioning.py
+    stats:
+      files_changed: 64
+      insertions: 4936
+      deletions: 243
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/architecture.md
+      - docs/changelog.md
+      - docs/consumer-guide.md
+      - docs/format.md
+      - spec/schemas/v4.schema.json
+      - spec/utterplan.schema.json
+      - tests/test_migration_v3_to_v4.py
+      - tests/test_semantic_boundaries.py
+      - utterplan/migrations/v3_to_v4.py
+      - utterplan/model.py
+      - utterplan/planner.py
+      - utterplan/units.py
+      - utterplan/utterplan.schema.json
+      - utterplan/versioning.py
+    observed_behavior:
+      Introduced schema v4 semantic-boundary records in spoken coordinates,
+      deterministic v3-to-v4 migration, and boundary-aware unit identity while preserving
+      frozen historical schema resources.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: v4 schema has been introduced"
+    target_entry_id: entry-0002
+    notes:
+      Covered by the schema and migration release entry; the commit also records
+      the releaseledger metadata for the prior release and this planned release.
+  - sha: fb6e0c70bef1d84d1aef1edd625e230eef2c7aec
+    source_ref: git:fb6e0c70bef1d84d1aef1edd625e230eef2c7aec
+    short_sha: fb6e0c7
+    changed_paths:
+      - .github/workflows/tests.yml
+      - .gitignore
+      - MANIFEST.in
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/debugging.md
+      - docs/format.md
+      - docs/getting-started.md
+      - docs/make.bat
+      - docs/python-api.md
+      - examples/basic.py
+      - examples/compile_file.py
+      - examples/inspect_plan.py
+      - examples/ssmd_example.py
+      - pyproject.toml
+      - tests/fixtures/canonical_consumer_contract.expected.json
+      - tests/fixtures/canonical_consumer_contract.expected.toml
+      - tests/golden/basic_en.utterplan.toml
+      - tests/golden/directives.utterplan.toml
+      - tests/golden/markers.utterplan.toml
+      - tests/golden/multilingual.utterplan.toml
+      - tests/golden/parenthetical.utterplan.toml
+      - tests/golden/spokenform_offsets.utterplan.toml
+      - tests/golden/ssmd_09_comprehensive.utterplan.toml
+      - tests/golden/ssmd_breaks.utterplan.toml
+      - tests/migration/cases.py
+      - tests/migration/fixtures/v4/basic_en.utterplan.json
+      - tests/migration/fixtures/v4/directives.utterplan.json
+      - tests/migration/fixtures/v4/markers.utterplan.json
+      - tests/migration/fixtures/v4/multilingual.utterplan.json
+      - tests/migration/fixtures/v4/parenthetical.utterplan.json
+      - tests/migration/fixtures/v4/spokenform_offsets.utterplan.json
+      - tests/migration/fixtures/v4/ssmd_09_comprehensive.utterplan.json
+      - tests/migration/fixtures/v4/ssmd_breaks.utterplan.json
+      - tests/migration/test_legacy_json_import.py
+      - tests/migration/test_semantic_migration_regressions.py
+      - tests/test_atomic_io.py
+      - tests/test_batch.py
+      - tests/test_cli.py
+      - tests/test_cli_batch.py
+      - tests/test_consumer_contract.py
+      - tests/test_consumer_readiness.py
+      - tests/test_directives.py
+      - tests/test_explain.py
+      - tests/test_format.py
+      - tests/test_golden.py
+      - tests/test_linguistics.py
+      - tests/test_migration_framework.py
+      - tests/test_planner.py
+      - tests/test_progress.py
+      - tests/test_renderability.py
+      - tests/test_renderability_repair.py
+      - tests/test_semantic_boundaries.py
+      - tests/test_ssmd_09_parser.py
+      - tests/test_toml_format.py
+      - utterplan/__init__.py
+      - utterplan/atomic_io.py
+      - utterplan/batch.py
+      - utterplan/cli.py
+      - utterplan/config.py
+      - utterplan/exceptions.py
+      - utterplan/format.py
+      - utterplan/migration.py
+      - utterplan/model.py
+      - utterplan/planner.py
+      - utterplan/renderability.py
+      - utterplan/serialization.py
+      - utterplan/toml_codec.py
+    stats:
+      files_changed: 70
+      insertions: 5903
+      deletions: 563
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/format.md
+      - docs/python-api.md
+      - tests/migration/test_legacy_json_import.py
+      - tests/test_batch.py
+      - tests/test_cli_batch.py
+      - tests/test_toml_format.py
+      - utterplan/atomic_io.py
+      - utterplan/batch.py
+      - utterplan/cli.py
+      - utterplan/format.py
+      - utterplan/migration.py
+      - utterplan/serialization.py
+      - utterplan/toml_codec.py
+    observed_behavior:
+      Changed the canonical persisted plan format to deterministic
+      TOML, added explicit legacy JSON import to current TOML, and added incremental
+      compile-many outputs with atomic writes and operational reports.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: migrate to toml"
+    notes:
+      Requires a new public release entry covering TOML persistence, explicit JSON
+      import, and incremental batch compilation.
+  - sha: 39c6cc11c7a48fbec615dc62c72ee178499472e3
+    source_ref: git:39c6cc11c7a48fbec615dc62c72ee178499472e3
+    short_sha: 39c6cc1
+    changed_paths:
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+      - README.md
+      - tests/test_public_identity.py
+      - utterplan/toml_codec.py
+    stats:
+      files_changed: 5
+      insertions: 25
+      deletions: 4
+    inspected: true
+    inspected_paths:
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+      - README.md
+      - tests/test_public_identity.py
+      - utterplan/toml_codec.py
+    observed_behavior:
+      Added documentation-build CI coverage, pinned lower-bound test
+      dependencies, and package checks for the v4 schema resource; corrected README
+      code-fence formatting.
+    public_impact: internal
+    decision: internal
+    stale: false
+    evidence_subject: "feat: prepare fore release"
+    notes:
+      Release engineering and documentation hygiene only; no separate public changelog
+      entry.

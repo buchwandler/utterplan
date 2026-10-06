@@ -4,7 +4,7 @@
 
 ## [Unreleased]
 
-## [0.4.0] - Unreleased
+## [0.4.0] - 2026-10-06
 
 ### Added
 
@@ -13,6 +13,7 @@
 ### Changed
 
 - Changed serialized plans to schema v4 with deterministic v3-to-v4 migration and boundary-sensitive unit identity
+- Changed plan persistence to deterministic TOML with explicit legacy JSON import and incremental batch compilation
 
 ### Documentation
 
