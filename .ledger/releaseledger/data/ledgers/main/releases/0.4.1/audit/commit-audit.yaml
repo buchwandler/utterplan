@@ -1,0 +1,68 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.4.1
+git_base_ref: v0.4.0
+git_base_sha: c73c430179e037bda501a566ee549201a099d293
+git_head_ref: HEAD
+git_head_sha: aa137b96b482b25bcec084d94ba1af96bf9a0447
+git_range: c73c430179e037bda501a566ee549201a099d293..aa137b96b482b25bcec084d94ba1af96bf9a0447
+commit_count: 1
+rows:
+  - sha: aa137b96b482b25bcec084d94ba1af96bf9a0447
+    source_ref: git:aa137b96b482b25bcec084d94ba1af96bf9a0447
+    short_sha: aa137b9
+    changed_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - docs/cli.md
+      - docs/python-api.md
+      - tests/test_cli.py
+      - tests/test_renderability_repair.py
+      - tests/test_ssmd_09_parser.py
+      - utterplan/__init__.py
+      - utterplan/attempt_serialization.py
+      - utterplan/attempts.py
+      - utterplan/cli.py
+      - utterplan/compiler.py
+      - utterplan/model.py
+      - utterplan/parsers.py
+      - utterplan/planner.py
+      - utterplan/toml_codec.py
+    stats:
+      files_changed: 16
+      insertions: 1119
+      deletions: 116
+    inspected: true
+    inspected_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - docs/cli.md
+      - docs/python-api.md
+      - tests/test_cli.py
+      - tests/test_renderability_repair.py
+      - tests/test_ssmd_09_parser.py
+      - utterplan/__init__.py
+      - utterplan/attempt_serialization.py
+      - utterplan/attempts.py
+      - utterplan/cli.py
+      - utterplan/compiler.py
+      - utterplan/model.py
+      - utterplan/parsers.py
+      - utterplan/planner.py
+      - utterplan/toml_codec.py
+    observed_behavior:
+      Added public planning-attempt outcomes that retain blocked structural
+      candidates, expose conservative renderability repair assessments, serialize independently
+      as utterplan.planning-attempt.v1, and provide compile_attempt and inspect-attempt
+      APIs while preserving strict canonical compilation. Normalized legacy standalone
+      scene breaks outside front matter while preserving clean-to-source mapping and
+      escaped or inline rules; expanded documentation, tests, and CI coverage.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: introduce attemp and repair"
+    target_entry_id: entry-0001
+    notes: Reviewed implementation, public API documentation, tests, and CI changes.

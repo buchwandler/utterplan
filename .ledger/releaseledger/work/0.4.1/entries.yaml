@@ -1,0 +1,67 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.4.1
+git_base_ref: c73c430179e037bda501a566ee549201a099d293
+git_base_sha: c73c430179e037bda501a566ee549201a099d293
+git_head_ref: aa137b96b482b25bcec084d94ba1af96bf9a0447
+git_head_sha: aa137b96b482b25bcec084d94ba1af96bf9a0447
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: Added persistable planning attempts with inspectable renderability outcomes and safe repair assessments
+    status: accepted
+    source_refs:
+      - git:aa137b96b482b25bcec084d94ba1af96bf9a0447
+    paths:
+      - utterplan/attempt_serialization.py
+      - utterplan/attempts.py
+      - utterplan/compiler.py
+      - utterplan/planner.py
+      - tests/test_renderability_repair.py
+    sources: []
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: changed
+    summary: Changed planning APIs to expose blocked candidates without weakening canonical plan validation
+    status: accepted
+    sources:
+      - git:aa137b96b482b25bcec084d94ba1af96bf9a0447
+    paths:
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/compiler.py
+      - utterplan/planner.py
+      - tests/test_cli.py
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: fixed
+    summary: Fixed legacy SSMD scene breaks to preserve front-matter boundaries and clean-to-source offsets
+    status: accepted
+    sources:
+      - git:aa137b96b482b25bcec084d94ba1af96bf9a0447
+    paths:
+      - utterplan/parsers.py
+      - tests/test_ssmd_09_parser.py
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: docs
+    summary: Documented planning-attempt artifacts, inspection workflows, and renderability guarantees
+    status: accepted
+    sources:
+      - git:aa137b96b482b25bcec084d94ba1af96bf9a0447
+    paths:
+      - README.md
+      - docs/cli.md
+      - docs/python-api.md
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

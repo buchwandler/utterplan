@@ -1,0 +1,1661 @@
+ .github/workflows/tests.yml        |   2 +
+ README.md                          |   5 +
+ docs/cli.md                        |  19 +++
+ docs/python-api.md                 |  41 +++++++
+ tests/test_cli.py                  |  60 ++++++++-
+ tests/test_renderability_repair.py | 107 ++++++++++++++++
+ tests/test_ssmd_09_parser.py       |  81 ++++++++++++
+ utterplan/__init__.py              |   6 +
+ utterplan/attempt_serialization.py | 245 +++++++++++++++++++++++++++++++++++++
+ utterplan/attempts.py              | 103 ++++++++++++++++
+ utterplan/cli.py                   | 106 +++++++++++++++-
+ utterplan/compiler.py              |  32 +++++
+ utterplan/model.py                 |  17 ++-
+ utterplan/parsers.py               | 239 +++++++++++++++++++++++++++---------
+ utterplan/planner.py               | 147 +++++++++++++++-------
+ utterplan/toml_codec.py            |  25 +++-
+ 16 files changed, 1119 insertions(+), 116 deletions(-)
+
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index b08fe50..ba187dd 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -53,6 +53,8 @@ jobs:
+             "typing_extensions==4.0.0" \
+             "tomlkit==0.13.0"
+           python -m pip install --no-deps -e .
++      - name: Verify SSMD 0.9.3 front-matter scene-break handling
++        run: python -m pytest -q tests/test_ssmd_09_parser.py -k front_matter_scene_break
+       - name: Run lower-bound tests
+         run: python -m pytest -q
+
+diff --git a/README.md b/README.md
+index ac3b06c..a8ec41e 100644
+--- a/README.md
++++ b/README.md
+@@ -50,9 +50,14 @@ utterplan validate chapter.utterplan.toml
+ utterplan inspect chapter.utterplan.toml --segment 0
+ utterplan inspect chapter.utterplan.toml --semantic-boundaries
+ utterplan explain chapter.utterplan.toml
++utterplan inspect-attempt chapter.attempt.toml --issues
+ ```
+
+ `explain` presents the compiled plan as a human-readable speech plan, while `inspect` exposes lower-level diagnostic fields.
++
++`inspect-attempt` reads the separate `utterplan.planning-attempt.v1` TOML artifact,
++not a canonical plan. Use it to review renderability issues and safe repair
++assessments on blocked planning outcomes; such candidates remain inspect-only drafts.
+ Canonical plan output is TOML (`.utterplan.toml`) and is written to stdout when no output file is supplied. Status messages use stderr, and existing output files require `--force`. Safe punctuation repair is the default; use `--renderability strict` to reject every repair opportunity.
+
+ ## SSMD source contract
+diff --git a/docs/cli.md b/docs/cli.md
+index c999eb9..b104132 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -100,6 +100,24 @@ utterplan explain chapter.utterplan.toml --details
+
+ The default output shows prepared wording, render units, ordered segments, languages, resolved pauses, headings, SSMD version/title/document language, effective typed directives, metadata, and warning/error codes with source locations. Add `--details` for IDs, offsets, provenance, hashes, plan identity, and token analysis beneath each segment. Use `inspect --tokens` for a compact token/provenance view.
+
++## Inspect a persisted planning attempt
++
++`inspect` reads canonical plans. Persistable planning outcomes use the separate
++`utterplan.planning-attempt.v1` artifact and are opened with `inspect-attempt`:
++
++```bash
++utterplan inspect-attempt chapter.attempt.toml
++utterplan inspect-attempt chapter.attempt.toml --issues
++utterplan inspect-attempt chapter.attempt.toml --segment seg-000001 --unit unit-000001
++utterplan inspect-attempt chapter.attempt.toml --json
++```
++
++The default view summarizes status, renderability, and candidate size. `--issues`
++shows source context and conservative repair assessments; segment and unit selectors
++accept an ID or zero-based index. `--json` emits the complete artifact as JSON for
++inspection, but the persisted attempt itself remains TOML. A blocked candidate is an
++inspect-only draft, not a canonical plan, and is rejected by `UtterancePlan.load()`.
++
+ ## Planning controls
+
+ - `--unit paragraph|sentence` chooses render-unit grouping.
+@@ -126,6 +144,7 @@ utterplan inspect chapter.utterplan.toml --segment 0
+ utterplan inspect chapter.utterplan.toml --unit 0 --boundaries --tokens
+ utterplan inspect chapter.utterplan.toml --preparation
+ utterplan inspect chapter.utterplan.toml --semantic-boundaries
++utterplan inspect-attempt chapter.attempt.toml --issues
+ ```
+
+ `inspect --preparation` reports the preparation backend and version, structural and spoken text lengths, replacement count, and each replacement's structural and spoken ranges and text. This is the supported human-facing preparation diagnostic; raw coordinate lookup tables are intentionally absent from the persisted TOML plan.
+diff --git a/docs/python-api.md b/docs/python-api.md
+index cae9d5f..090fab0 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -41,6 +41,47 @@ the plan, is not renderer input, and does not change `plan.plan_id`. Its source
+ ranges index SSMD-clean structural text; transformation output ranges index prepared
+ spoken text, using Python string character offsets.
+
++## Persistable planning attempts
++
++`compile_attempt` and `UtterancePlanner.compile_attempt` expose a finalized planning
++outcome without raising solely because a segment is not renderable. They still raise
++for input, configuration, and planning failures. The existing `compile_document`,
++`UtterancePlanner.compile`, and `plan` APIs remain strict and continue raising
++`PlanRenderabilityError` when renderability blocks completion.
++
++Attempts are separate from canonical plans. A blocked attempt retains an inspect-only
++candidate draft; it is not a valid `UtterancePlan` and cannot be loaded by
++`UtterancePlan.load()`. Persist it with `PlanningAttempt.save()` and restore it with
++`PlanningAttempt.load()`; the attempt TOML schema is
++`utterplan.planning-attempt.v1`, independent of canonical plan schema v4.
++
++```python
++from utterplan import PlannerConfig, compile_attempt
++
++attempt = compile_attempt(
++    "Hello.\n\n.\n\nWorld.",
++    input_format="plain",
++    config=PlannerConfig(
++        language="en-us",
++        renderability_mode="strict",
++    ),
++)
++assert attempt.status == "blocked"
++attempt.save("chapter.attempt.toml")
++
++for issue in attempt.renderability.issues:
++    assessment = issue.repair_assessment
++    if assessment is not None:
++        print(issue.segment_id, assessment.safe, assessment.action)
++        print(assessment.blockers)
++```
++
++Repair assessments report the existing conservative options; they do not rewrite
++text speculatively. In repair mode, only the planner's established safe repairs are
++applied. `utterplan inspect-attempt chapter.attempt.toml --issues` shows issues,
++source locations, and repair assessments; `--segment` and `--unit` select candidate
++topology, and `--json` emits the complete attempt as JSON for inspection.
++
+ ## TOML persistence
+
+ Schema v4 remains the semantic contract, while `.utterplan.toml` is the canonical persisted format. `to_toml()` and `from_toml()` round-trip the complete plan; `save()` writes atomically, and `load()` accepts TOML only. Normal loading does not auto-detect or fall back to JSON.
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 21a302e..f5185d1 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -6,7 +6,7 @@ from pathlib import Path
+
+ import pytest
+
+-from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
++from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner, compile_attempt
+ from utterplan.cli import build_parser, main
+
+
+@@ -466,3 +466,61 @@ def test_validate_source_documents_and_preserve_saved_plan_validation(
+     assert "plain input requires --language" in capsys.readouterr().err
+     assert main(["validate", str(plain), "--input-format", "plain", "--language", "en-us"]) == 0
+     assert "valid" in capsys.readouterr().out
++
++
++def _save_blocked_attempt(tmp_path: Path):
++    config = PlannerConfig(
++        language="en-us",
++        document_format="plain",
++        text_preparation="identity",
++        renderability_mode="strict",
++    )
++    attempt = compile_attempt("Hello.\n\n.\n\nWorld.", input_format="plain", config=config)
++    path = tmp_path / "blocked.attempt.toml"
++    attempt.save(path)
++    return attempt, path
++
++
++def test_inspect_attempt_reports_issues_segment_and_unit(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    attempt, path = _save_blocked_attempt(tmp_path)
++    issue_segment = attempt.renderability.issues[0].segment_id
++    unit = attempt.candidate.units[0]
++
++    assert (
++        main(
++            [
++                "inspect-attempt",
++                str(path),
++                "--issues",
++                "--segment",
++                issue_segment,
++                "--unit",
++                unit.id,
++            ]
++        )
++        == 0
++    )
++    output = capsys.readouterr().out
++    assert "status:        blocked" in output
++    assert "renderability: blocked (strict)" in output
++    assert "renderability.punctuation_only" in output
++    assert "safe: true" in output
++    assert f"Segment {issue_segment}" in output
++    assert f"Unit {unit.id}" in output
++
++
++def test_inspect_attempt_json_exposes_separate_artifact_schema(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    attempt, path = _save_blocked_attempt(tmp_path)
++
++    assert main(["inspect-attempt", str(path), "--json"]) == 0
++    output = capsys.readouterr().out
++    payload = json.loads(output)
++    assert payload["schema"] == "utterplan.planning-attempt.v1"
++    assert payload["attempt"]["status"] == "blocked"
++    assert payload["candidate"]["segments"]
++    assert payload["renderability"]["issues"]
++    assert payload["attempt"]["attempt_id"] == attempt.attempt_id
+diff --git a/tests/test_renderability_repair.py b/tests/test_renderability_repair.py
+index f2b8c22..9a0de53 100644
+--- a/tests/test_renderability_repair.py
++++ b/tests/test_renderability_repair.py
+@@ -8,14 +8,17 @@ from utterplan import (
+     AnnotationSpan,
+     BoundaryEvent,
+     EmphasisDirective,
++    PlanFormatError,
+     PlannerConfig,
+     PlanRenderabilityError,
+     PlanSegment,
+     SegmentDirectives,
+     SemanticBoundary,
++    UtterancePlan,
+     UtterancePlanner,
+     assess_renderability_repair,
+     classify_segment,
++    compile_attempt,
+ )
+ from utterplan.config import PauseConfig
+ from utterplan.planner import _repair_renderer_segments
+@@ -327,3 +330,107 @@ def test_symbol_only_content_fails_without_a_guessed_repair() -> None:
+         assert issue.repair_assessment.safe is False
+         assert "will not guess" in str(error.value)
+         assert error.value.mode == mode
++
++
++def test_strict_attempt_retains_blocked_candidate_and_compile_still_raises() -> None:
++    source = "Hello.\n\n.\n\nWorld."
++    config = PlannerConfig(
++        language="en-US",
++        text_preparation="identity",
++        renderability_mode="strict",
++    )
++    planner = UtterancePlanner(config)
++
++    attempt = planner.compile_attempt(source)
++    functional = compile_attempt(source, input_format="plain", config=config)
++    assert functional.status == "blocked"
++
++    assert attempt.status == "blocked"
++    assert not attempt.ok
++    assert attempt.renderability.issues
++    issue = attempt.renderability.issues[0]
++    segment = next(item for item in attempt.candidate.segments if item.id == issue.segment_id)
++    assert segment.text == issue.text == "."
++    assert issue.source_start is not None
++    assert issue.source_end is not None
++    assert source[issue.source_start : issue.source_end] == issue.text
++    assert attempt.candidate.plan_id == ""
++    with pytest.raises(ValueError, match="blocked planning-attempt draft"):
++        attempt.candidate.to_plan()
++
++    with pytest.raises(PlanRenderabilityError) as error:
++        planner.compile(source)
++    assert error.value.mode == "strict"
++    assert error.value.issues == attempt.renderability.issues
++
++
++def test_safe_repair_attempt_returns_a_canonical_plan() -> None:
++    config = PlannerConfig(language="en-US", text_preparation="identity")
++    attempt = UtterancePlanner(config).compile_attempt("Hello.\n\n.\n\nWorld.")
++
++    assert attempt.status == "repaired"
++    assert attempt.ok
++    assert len(attempt.repairs) == 1
++    assert attempt.repairs[0].repair_assessment is not None
++    assert attempt.repairs[0].repair_assessment.safe
++    plan = attempt.candidate.to_plan()
++    plan.validate()
++    assert [segment.text for segment in plan.segments] == ["Hello.", "World."]
++
++
++def test_unsafe_repair_attempt_is_blocked_and_draft_structure_is_checked() -> None:
++    from utterplan.exceptions import PlanValidationError
++    from utterplan.model import validate_plan_structure
++
++    config = PlannerConfig(
++        language="en-US",
++        text_preparation="identity",
++        renderability_mode="repair",
++    )
++    attempt = UtterancePlanner(config).compile_attempt("€")
++
++    assert attempt.status == "blocked"
++    assert attempt.renderability.issues[0].repair_assessment is not None
++    assert not attempt.renderability.issues[0].repair_assessment.safe
++    with pytest.raises(ValueError, match="blocked planning-attempt draft"):
++        attempt.candidate.to_plan()
++
++    malformed = replace(
++        attempt.candidate._plan,
++        segments=(replace(attempt.candidate.segments[0], spoken_end=100),),
++    )
++    with pytest.raises(PlanValidationError, match="segment range"):
++        validate_plan_structure(malformed)
++
++
++@pytest.mark.parametrize(
++    ("source", "mode", "expected_status"),
++    [
++        ("Ready.", "strict", "renderable"),
++        ("Hello.\n\n.\n\nWorld.", "repair", "repaired"),
++        ("€", "strict", "blocked"),
++    ],
++)
++def test_planning_attempt_toml_roundtrips_all_outcomes_and_stays_noncanonical(
++    source: str, mode: str, expected_status: str
++) -> None:
++    config = PlannerConfig(
++        language="en-US",
++        text_preparation="identity",
++        renderability_mode=mode,
++    )
++    attempt = UtterancePlanner(config).compile_attempt(source)
++    repeated = UtterancePlanner(config).compile_attempt(source)
++    serialized = attempt.to_toml()
++    restored = type(attempt).from_toml(serialized)
++
++    assert attempt.status == expected_status
++    assert repeated.attempt_id == attempt.attempt_id
++    assert restored == attempt
++    assert restored.to_toml() == serialized
++    assert restored.to_dict() == attempt.to_dict()
++    assert 'schema = "utterplan.planning-attempt.v1"' in serialized
++    with pytest.raises(PlanFormatError):
++        UtterancePlan.from_toml(serialized)
++    with pytest.raises(PlanFormatError):
++        UtterancePlan.from_dict(attempt.to_dict())
+diff --git a/tests/test_ssmd_09_parser.py b/tests/test_ssmd_09_parser.py
+index 3a9e722..0db0fa0 100644
+--- a/tests/test_ssmd_09_parser.py
++++ b/tests/test_ssmd_09_parser.py
+@@ -39,6 +39,87 @@ def test_legacy_scene_break_is_structural_not_renderer_text() -> None:
+     assert all(segment.text != "---" for segment in plan.segments)
+
+
++@pytest.mark.parametrize(
++    ("body", "scene_break_count"),
++    [
++        ("Before.\n\n---\n\nAfter.", 1),
++        ("Before.\n\n---\n\nMiddle.\n\n---\n\nAfter.", 2),
++        ("Before.\n\n...p\n\nAfter.", 1),
++        ("---\n\nAfter.\n\n---", 2),
++        ("Before --- after.", 0),
++        ("Before.\n\n\\---\n\nAfter.", 0),
++    ],
++)
++def test_front_matter_scene_breaks_are_boundaries_not_renderer_text(
++    body: str, scene_break_count: int
++) -> None:
++    source = f'---\nssmd_version: "0.9"\ntitle: Demo\n---\n{body}'
++    plan = _planner().plan(source)
++
++    scene_breaks = [
++        event
++        for event in plan.boundaries
++        if event.kind == "explicit"
++        and (
++            event.attrs.get("semantic") == "scene_break"
++            or event.attrs.get("legacy_horizontal_rule")
++            or (event.origin == "ssmd" and event.strength == "x-strong")
++        )
++    ]
++    assert len(scene_breaks) == scene_break_count
++    if scene_break_count:
++        assert "---" not in plan.texts.structural or body.startswith("---")
++        assert all(segment.text.strip() != "---" for segment in plan.segments)
++        assert plan.document_metadata["planning"]["renderability"]["guaranteed"] is True
++    elif "Before --- after." in body:
++        assert "Before --- after." in plan.texts.structural
++        assert any("---" in segment.text for segment in plan.segments)
++    elif "\\---" in body:
++        assert "---" in plan.texts.structural
++
++
++def test_legacy_parser_front_matter_scene_break_uses_clean_to_source_mapping(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    import ssmd
++
++    from utterplan.parsers import SSMDDocumentParser, map_structural_span_to_source
++
++    header = '---\nssmd_version: "0.9"\ntitle: Demo\n---\n'
++    body = "Before.\n\n---\n\nAfter."
++    source = header + body
++    legacy_result = SimpleNamespace(
++        clean_text=body,
++        annotations=[],
++        events=[],
++        header={"ssmd_version": "0.9", "title": "Demo"},
++        warnings=[],
++        diagnostics=[],
++        text_spans=[
++            SimpleNamespace(
++                char_start=0,
++                char_end=len(body),
++                source_start=len(header),
++                source_end=len(source),
++            )
++        ],
++    )
++    monkeypatch.setattr(ssmd, "parse_structure", lambda *args, **kwargs: legacy_result)
++
++    parsed = SSMDDocumentParser().parse(source, _planner().config)
++    assert parsed.structural_text == "Before.\n\nAfter."
++    source_after = source.index("After.")
++    assert map_structural_span_to_source(
++        parsed, len("Before.\n\n"), len(parsed.structural_text)
++    ) == (source_after, source_after + len("After."))
++    scene = next(event for event in parsed.boundaries if event.attrs.get("legacy_horizontal_rule"))
++    assert scene.attrs["source_start"] == source.index("---", len(header))
++    assert scene.attrs["source_end"] == source_after
++
++    plan = _planner().plan(source)
++    assert [segment.text for segment in plan.segments] == ["Before.", "After."]
++
++
+ def _planner() -> UtterancePlanner:
+     return UtterancePlanner(
+         PlannerConfig(
+diff --git a/utterplan/__init__.py b/utterplan/__init__.py
+index 60aafb3..5b51e1a 100644
+--- a/utterplan/__init__.py
++++ b/utterplan/__init__.py
+@@ -1,4 +1,5 @@
+ from ._version import __version__
++from .attempts import PlanDraft, PlanningAttempt, PlanningAttemptStatus
+ from .batch import BatchProgressCallback, CompileOutcome, CompileRequest, compile_to_files
+ from .compiler import (
+     CompileResult,
+@@ -6,6 +7,7 @@ from .compiler import (
+     PreparationChange,
+     PreparationTrace,
+     PreparationTraceUnit,
++    compile_attempt,
+     compile_document,
+ )
+ from .config import (
+@@ -89,6 +91,10 @@ __all__ = [
+     "PreparationTrace",
+     "PreparationTraceUnit",
+     "compile_document",
++    "compile_attempt",
++    "PlanningAttempt",
++    "PlanningAttemptStatus",
++    "PlanDraft",
+     "compile_to_files",
+     "PlannerConfig",
+     "PauseConfig",
+diff --git a/utterplan/attempt_serialization.py b/utterplan/attempt_serialization.py
+new file mode 100644
+index 0000000..59b9e9e
+--- /dev/null
++++ b/utterplan/attempt_serialization.py
+@@ -0,0 +1,245 @@
++"""Serialization for the separate planning-attempt v1 artifact."""
++
++from __future__ import annotations
++
++import hashlib
++from collections.abc import Mapping
++from dataclasses import asdict
++from typing import Any
++
++import tomlkit
++from tomlkit.exceptions import ParseError
++
++from ._version import __version__
++from .attempts import PlanDraft, PlanningAttempt, planning_attempt_id
++from .exceptions import PlanFormatError
++from .hashing import semantic_hash
++from .renderability import RenderabilityIssue, RenderabilityRepair, RenderabilityReport
++from .toml_codec import (
++    _from_toml_data_draft,
++    _mapping,
++    _omit_none,
++    _plain_toml,
++    _toml_item,
++    to_toml_data,
++)
++
++ATTEMPT_SCHEMA = "utterplan.planning-attempt.v1"
++
++
++def planning_attempt_to_dict(attempt: PlanningAttempt) -> dict[str, Any]:
++    """Return plain data for an attempt, distinct from the canonical plan mapping."""
++    plan = attempt.candidate._plan
++    return {
++        "schema": ATTEMPT_SCHEMA,
++        "attempt": {
++            "schema": ATTEMPT_SCHEMA,
++            "attempt_id": attempt.attempt_id,
++            "status": attempt.status,
++            "created_by_version": __version__,
++            "renderability_mode": attempt.renderability_mode,
++            "input_sha256": hashlib.sha256(plan.source.text.encode("utf-8")).hexdigest(),
++            "semantic_fingerprint": semantic_hash(plan.semantic_dict()),
++        },
++        "candidate": plan.to_dict(),
++        "renderability": {
++            "checked_segments": attempt.renderability.checked_segments,
++            "guaranteed": attempt.ok,
++            "repair_count": len(attempt.repairs),
++            "issues": [asdict(issue) for issue in attempt.renderability.issues],
++            "assessments": [asdict(issue) for issue in attempt.renderability.repairs],
++            "repairs": [asdict(issue) for issue in attempt.repairs],
++        },
++        "diagnostics": [diagnostic.to_dict() for diagnostic in attempt.diagnostics],
++    }
++
++
++def dumps_planning_attempt(attempt: PlanningAttempt) -> str:
++    """Serialize an attempt as a distinct, deterministic TOML artifact."""
++    plan = attempt.candidate._plan
++    report = {
++        "checked_segments": attempt.renderability.checked_segments,
++        "guaranteed": attempt.ok,
++        "repair_count": len(attempt.repairs),
++        "issues": [_omit_none(asdict(issue)) for issue in attempt.renderability.issues],
++        "assessments": [_omit_none(asdict(issue)) for issue in attempt.renderability.repairs],
++        "repairs": [_omit_none(asdict(issue)) for issue in attempt.repairs],
++    }
++    wire = {
++        "attempt": planning_attempt_to_dict(attempt)["attempt"],
++        "candidate": to_toml_data(plan),
++        "renderability": report,
++    }
++    document = tomlkit.document()
++    for key, value in wire.items():
++        document[key] = _toml_item(value, (key,))
++    return tomlkit.dumps(document)
++
++
++def loads_planning_attempt(value: object) -> PlanningAttempt:
++    """Parse and validate one planning-attempt TOML artifact."""
++    if not isinstance(value, str):
++        raise PlanFormatError("TOML input must be text", code="toml.type")
++    try:
++        parsed = tomlkit.parse(value)
++    except ParseError as exc:
++        line = getattr(exc, "line", None)
++        column = getattr(exc, "col", None)
++        location = f"line {line}, column {column}: " if line is not None else ""
++        raise PlanFormatError(f"{location}{exc}", code="toml.invalid") from exc
++
++    root = _plain_toml(parsed.unwrap())
++    if not isinstance(root, Mapping):
++        raise PlanFormatError("attempt artifact must be a TOML table", code="field.type")
++    unknown = set(root) - {"attempt", "candidate", "renderability"}
++    if unknown:
++        raise PlanFormatError(
++            f"unknown planning-attempt fields: {sorted(unknown)}", code="field.unknown"
++        )
++    try:
++        manifest = _mapping(root["attempt"], "$.attempt")
++        candidate_wire = _mapping(root["candidate"], "$.candidate")
++        report_data = _mapping(root["renderability"], "$.renderability")
++        if manifest.get("schema") != ATTEMPT_SCHEMA:
++            raise PlanFormatError(
++                f"schema must be {ATTEMPT_SCHEMA!r}", code="attempt.schema", path="$.attempt.schema"
++            )
++        status = manifest.get("status")
++        if status not in {"renderable", "repaired", "blocked"}:
++            raise PlanFormatError("invalid planning-attempt status", code="attempt.status")
++        mode = manifest.get("renderability_mode")
++        if mode not in {"strict", "repair"}:
++            raise PlanFormatError("invalid renderability mode", code="attempt.mode")
++        attempt_id = manifest.get("attempt_id")
++        if not isinstance(attempt_id, str):
++            raise PlanFormatError("attempt_id must be text", code="attempt.id")
++        for name in ("created_by_version", "input_sha256", "semantic_fingerprint"):
++            if not isinstance(manifest.get(name), str):
++                raise PlanFormatError(
++                    f"{name} must be text", code="field.type", path=f"$.attempt.{name}"
++                )
++        plan = _from_toml_data_draft(candidate_wire)
++        checked_segments = report_data.get("checked_segments")
++        repair_count = report_data.get("repair_count")
++        guaranteed = report_data.get("guaranteed")
++        if type(checked_segments) is not int or checked_segments < 0:
++            raise PlanFormatError(
++                "checked_segments must be a non-negative integer", code="field.type"
++            )
++        if type(repair_count) is not int or repair_count < 0:
++            raise PlanFormatError("repair_count must be a non-negative integer", code="field.type")
++        if type(guaranteed) is not bool:
++            raise PlanFormatError("guaranteed must be a boolean", code="field.type")
++        issues = tuple(
++            _issue_from_dict(item, "$.renderability.issues")
++            for item in _array(report_data, "issues")
++        )
++        assessments = tuple(
++            _issue_from_dict(item, "$.renderability.assessments")
++            for item in _array(report_data, "assessments")
++        )
++        repairs = tuple(
++            _issue_from_dict(item, "$.renderability.repairs")
++            for item in _array(report_data, "repairs")
++        )
++        report = RenderabilityReport(checked_segments, issues, assessments)
++        if repair_count != len(repairs) or guaranteed != (status in {"renderable", "repaired"}):
++            raise PlanFormatError(
++                "renderability summary does not match status", code="attempt.report"
++            )
++        if status == "blocked" and not issues:
++            raise PlanFormatError(
++                "blocked attempts require renderability issues", code="attempt.report"
++            )
++        if status == "renderable" and (issues or assessments or repairs):
++            raise PlanFormatError(
++                "renderable attempts cannot contain issues or repairs", code="attempt.report"
++            )
++        if status == "repaired" and (issues or not repairs):
++            raise PlanFormatError(
++                "repaired attempts require repairs and no remaining issues", code="attempt.report"
++            )
++        if status == "blocked" and plan.plan_id:
++            raise PlanFormatError(
++                "blocked candidate cannot have a canonical plan_id", code="attempt.identity"
++            )
++        expected_input_hash = hashlib.sha256(plan.source.text.encode("utf-8")).hexdigest()
++        if manifest["input_sha256"] != expected_input_hash:
++            raise PlanFormatError(
++                "input_sha256 does not match candidate source", code="attempt.input_hash"
++            )
++        if manifest["semantic_fingerprint"] != semantic_hash(plan.semantic_dict()):
++            raise PlanFormatError(
++                "semantic fingerprint does not match candidate", code="attempt.fingerprint"
++            )
++        expected_attempt_id = planning_attempt_id(
++            status=status,
++            plan=plan,
++            report=report,
++            renderability_mode=mode,
++        )
++        if attempt_id != expected_attempt_id:
++            raise PlanFormatError(
++                "attempt_id does not match candidate state", code="attempt.identity"
++            )
++        return PlanningAttempt(
++            status=status,
++            candidate=PlanDraft(plan, report),
++            renderability=report,
++            diagnostics=plan.diagnostics,
++            repairs=repairs,
++            attempt_id=attempt_id,
++            renderability_mode=mode,
++        )
++    except KeyError as exc:
++        raise PlanFormatError(
++            f"required planning-attempt field {exc.args[0]!r} is missing", code="field.required"
++        ) from exc
++    except (TypeError, ValueError, IndexError) as exc:
++        if isinstance(exc, PlanFormatError):
++            raise
++        raise PlanFormatError(
++            f"invalid planning-attempt value: {exc}", code="attempt.value"
++        ) from exc
++
++
++def _array(data: Mapping[str, Any], key: str) -> list[Any]:
++    value = data.get(key)
++    if not isinstance(value, list):
++        raise PlanFormatError(
++            "expected a TOML array", code="field.type", path=f"$.renderability.{key}"
++        )
++    return value
++
++
++def _issue_from_dict(value: object, path: str) -> RenderabilityIssue:
++    if not isinstance(value, Mapping):
++        raise PlanFormatError("renderability issue must be a table", code="field.type", path=path)
++    data = dict(value)
++    assessment = data.get("repair_assessment")
++    if assessment is not None:
++        if not isinstance(assessment, Mapping):
++            raise PlanFormatError("repair assessment must be a table", code="field.type", path=path)
++        assessment_data = dict(assessment)
++        if "blockers" in assessment_data:
++            assessment_data["blockers"] = tuple(assessment_data["blockers"])
++        data["repair_assessment"] = RenderabilityRepair(**assessment_data)
++    for key in ("token_pos", "token_ids"):
++        if key in data:
++            data[key] = tuple(data[key])
++    if "source_context" in data:
++        data["source_context"] = tuple(tuple(item) for item in data["source_context"])
++    try:
++        return RenderabilityIssue(**data)
++    except TypeError as exc:
++        raise PlanFormatError(
++            f"invalid renderability issue: {exc}", code="attempt.issue", path=path
++        ) from exc
++
++
++__all__ = [
++    "ATTEMPT_SCHEMA",
++    "dumps_planning_attempt",
++    "loads_planning_attempt",
++    "planning_attempt_to_dict",
++]
+diff --git a/utterplan/attempts.py b/utterplan/attempts.py
+new file mode 100644
+index 0000000..bedc663
+--- /dev/null
++++ b/utterplan/attempts.py
+@@ -0,0 +1,103 @@
++from __future__ import annotations
++
++import hashlib
++import json
++from dataclasses import asdict, dataclass
++from pathlib import Path
++from typing import Any, Literal
++
++from .model import Diagnostic, UtterancePlan
++from .renderability import RenderabilityIssue, RenderabilityReport
++
++PlanningAttemptStatus = Literal["renderable", "repaired", "blocked"]
++
++
++@dataclass(frozen=True, slots=True)
++class PlanDraft:
++    """Inspect-only wrapper around a structurally validated semantic candidate.
++
++    A draft deliberately is not an ``UtterancePlan`` and does not expose canonical
++    save/load/validation methods. Its read-only semantic attributes forward to the
++    contained candidate so inspection code can use ``draft.segments`` and similar
++    accessors without mistaking it for synthesis input.
++    """
++
++    _plan: UtterancePlan
++    renderability: RenderabilityReport
++
++    def __getattr__(self, name: str) -> Any:
++        if name in {"to_dict", "to_toml", "save", "validate", "with_identity", "semantic_dict"}:
++            raise AttributeError(f"{name} is unavailable on an inspect-only PlanDraft")
++        return getattr(object.__getattribute__(self, "_plan"), name)
++
++    def to_plan(self) -> UtterancePlan:
++        """Return canonical synthesis input only when the candidate is renderable."""
++        if not self.renderability.ok:
++            raise ValueError("a blocked planning-attempt draft is not a canonical UtterancePlan")
++        return self._plan
++
++
++@dataclass(frozen=True, slots=True)
++class PlanningAttempt:
++    """Outcome of compiling semantic planning state before synthesis."""
++
++    status: PlanningAttemptStatus
++    candidate: PlanDraft
++    renderability: RenderabilityReport
++    diagnostics: tuple[Diagnostic, ...]
++    repairs: tuple[RenderabilityIssue, ...]
++    attempt_id: str
++    renderability_mode: Literal["strict", "repair"]
++
++    @property
++    def ok(self) -> bool:
++        return self.status in {"renderable", "repaired"}
++
++    def to_dict(self) -> dict[str, Any]:
++        """Return the planning-attempt artifact mapping, not a canonical plan."""
++        from .attempt_serialization import planning_attempt_to_dict
++
++        return planning_attempt_to_dict(self)
++
++    def to_toml(self) -> str:
++        """Serialize this attempt using the separate planning-attempt v1 schema."""
++        from .attempt_serialization import dumps_planning_attempt
++
++        return dumps_planning_attempt(self)
++
++    @classmethod
++    def from_toml(cls, value: object) -> PlanningAttempt:
++        """Load one planning-attempt artifact without using canonical plan loading."""
++        from .attempt_serialization import loads_planning_attempt
++
++        return loads_planning_attempt(value)
++
++    def save(self, path: str | Path) -> None:
++        """Write this attempt artifact as UTF-8 TOML."""
++        from .atomic_io import atomic_write_text
++
++        atomic_write_text(path, self.to_toml(), create_parent=True)
++
++    @classmethod
++    def load(cls, path: str | Path) -> PlanningAttempt:
++        """Load a planning-attempt artifact from a path."""
++        return cls.from_toml(Path(path).read_text(encoding="utf-8"))
++
++
++def planning_attempt_id(
++    *,
++    status: PlanningAttemptStatus,
++    plan: UtterancePlan,
++    report: RenderabilityReport,
++    renderability_mode: Literal["strict", "repair"],
++) -> str:
++    """Build a deterministic identifier from semantic candidate and preflight state."""
++    payload = {
++        "schema": "utterplan.planning-attempt.v1",
++        "status": status,
++        "candidate": plan.semantic_dict(),
++        "renderability": asdict(report),
++        "renderability_mode": renderability_mode,
++    }
++    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
++    return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+diff --git a/utterplan/cli.py b/utterplan/cli.py
+index 2f8ce67..05cec9b 100644
+--- a/utterplan/cli.py
++++ b/utterplan/cli.py
+@@ -5,10 +5,11 @@ import json
+ import sys
+ from contextlib import suppress
+ from pathlib import Path
+-from typing import Literal, cast
++from typing import Any, Literal, cast
+
+ from . import PlannerConfig, UtterancePlan, __version__
+ from .atomic_io import atomic_write_text
++from .attempts import PlanningAttempt
+ from .batch import CompileOutcome, CompileRequest, compile_to_files
+ from .compiler import InputFormat, compile_document
+ from .config import LinguisticsConfig, PauseConfig
+@@ -24,6 +25,7 @@ _EXAMPLES = """examples:
+   utterplan compile-many chapters/*.ssmd --output-dir build/plans
+   utterplan validate chapter.utterplan.toml
+   utterplan inspect chapter.utterplan.toml --segment 0
++  utterplan inspect-attempt attempt.toml --issues
+   utterplan explain chapter.utterplan.toml
+   utterplan migrate old.utterplan.json -o old.utterplan.toml
+ """
+@@ -182,6 +184,17 @@ def build_parser() -> argparse.ArgumentParser:
+         help="show semantic split opportunities in spoken coordinates",
+     )
+     inspect_parser.add_argument("--preparation", action="store_true")
++
++    attempt_inspect_parser = commands.add_parser(
++        "inspect-attempt", help="inspect a persisted planning-attempt artifact"
++    )
++    attempt_inspect_parser.add_argument("input", type=Path)
++    attempt_inspect_parser.add_argument("--issues", action="store_true")
++    attempt_inspect_parser.add_argument("--segment", help="inspect one segment by ID or index")
++    attempt_inspect_parser.add_argument("--unit", help="inspect one unit by ID or index")
++    attempt_inspect_parser.add_argument(
++        "--json", action="store_true", help="emit the full attempt as JSON"
++    )
+     return parser
+
+
+@@ -556,6 +569,9 @@ def main(argv: list[str] | None = None) -> int:
+             return _migrate(args)
+         if args.command == "validate":
+             return _validate(args)
++        if args.command == "inspect-attempt":
++            _inspect_attempt(PlanningAttempt.load(args.input), args)
++            return 0
+         plan = UtterancePlan.load(args.input)
+         if args.command == "explain":
+             print(format_explanation(plan, details=args.details), end="")
+@@ -654,3 +670,91 @@ def _inspect(plan: UtterancePlan, args: argparse.Namespace) -> None:
+         print(f"  pause_before:  {segment.pause_before.seconds}s {segment.pause_before.events}")
+         print(f"  pause_after:   {segment.pause_after.seconds}s {segment.pause_after.events}")
+         print(f"  directives:    {segment.directives.to_dict()}")
++
++
++def _inspect_attempt(attempt: PlanningAttempt, args: argparse.Namespace) -> None:
++    if args.json:
++        print(json.dumps(attempt.to_dict(), ensure_ascii=False, indent=2))
++        return
++
++    print("UtterPlan planning attempt")
++    print(f"  status:        {attempt.status}")
++    print(f"  attempt ID:    {attempt.attempt_id}")
++    print(
++        f"  renderability: {'guaranteed' if attempt.ok else 'blocked'} ({attempt.renderability_mode})"
++    )
++    print(
++        f"  candidate:    {len(attempt.candidate.segments)} segments, {len(attempt.candidate.units)} units"
++    )
++    print(f"  issues:       {len(attempt.renderability.issues)}")
++    print(f"  repairs:      {len(attempt.repairs)}")
++
++    if args.issues:
++        if not attempt.renderability.issues and not attempt.repairs:
++            print("\nIssues and repairs: none")
++        for issue in attempt.renderability.issues:
++            _print_attempt_issue(issue, label="Issue")
++        for issue in attempt.repairs:
++            _print_attempt_issue(issue, label="Repair")
++
++    if args.segment is not None:
++        segment = _attempt_segment(attempt, args.segment)
++        print(f"\nSegment {segment.id}: {segment.spoken_start}:{segment.spoken_end}")
++        print(f"  text:      {segment.text!r}")
++        print(f"  language:  {segment.language}")
++        print(f"  structure: {segment.structural_start}:{segment.structural_end}")
++        unit_ids = [unit.id for unit in attempt.candidate.units if segment.id in unit.segment_ids]
++        print(f"  units:     {', '.join(unit_ids) if unit_ids else '-'}")
++        for issue in (*attempt.renderability.issues, *attempt.repairs):
++            if issue.segment_id == segment.id:
++                _print_attempt_issue(
++                    issue, label="Issue" if issue in attempt.renderability.issues else "Repair"
++                )
++
++    if args.unit is not None:
++        unit = _attempt_unit(attempt, args.unit)
++        print(f"\nUnit {unit.id}: {unit.kind} {unit.spoken_start}:{unit.spoken_end}")
++        for segment_id in unit.segment_ids:
++            segment = next(item for item in attempt.candidate.segments if item.id == segment_id)
++            print(f"  {segment.id}: {segment.text!r}")
++
++
++def _print_attempt_issue(issue: Any, *, label: str) -> None:
++    print(f"\n{label} {issue.segment_id}: {issue.code} — {issue.reason}")
++    print(f"  text: {issue.text!r}")
++    if issue.line is not None:
++        location = f"{issue.line}:{issue.column or 1}"
++    elif issue.source_start is not None:
++        location = f"source {issue.source_start}:{issue.source_end}"
++    else:
++        location = "source location unavailable"
++    print(f"  location: {location}")
++    assessment = issue.repair_assessment
++    if assessment is not None:
++        print(f"  safe: {str(assessment.safe).lower()}")
++        print(f"  action: {assessment.action}")
++        if assessment.blockers:
++            for blocker in assessment.blockers:
++                print(f"  blocker: {blocker}")
++
++
++def _attempt_segment(attempt: PlanningAttempt, selector: str) -> Any:
++    for segment in attempt.candidate.segments:
++        if segment.id == selector:
++            return segment
++    if selector.isdigit():
++        index = int(selector)
++        if 0 <= index < len(attempt.candidate.segments):
++            return attempt.candidate.segments[index]
++    raise _CliUsageError(f"unknown attempt segment {selector!r}")
++
++
++def _attempt_unit(attempt: PlanningAttempt, selector: str) -> Any:
++    for unit in attempt.candidate.units:
++        if unit.id == selector:
++            return unit
++    if selector.isdigit():
++        index = int(selector)
++        if 0 <= index < len(attempt.candidate.units):
++            return attempt.candidate.units[index]
++    raise _CliUsageError(f"unknown attempt unit {selector!r}")
+diff --git a/utterplan/compiler.py b/utterplan/compiler.py
+index 6b1bfbe..c471440 100644
+--- a/utterplan/compiler.py
++++ b/utterplan/compiler.py
+@@ -3,6 +3,7 @@ from __future__ import annotations
+ from dataclasses import dataclass, replace
+ from typing import Literal
+
++from .attempts import PlanningAttempt
+ from .config import PlannerConfig
+ from .exceptions import ConfigurationError
+ from .model import Diagnostic, UtterancePlan
+@@ -101,6 +102,36 @@ def compile_document(
+         planner.close()
+
+
++def compile_attempt(
++    text: str,
++    *,
++    input_format: InputFormat = "ssmd",
++    config: PlannerConfig,
++    fallback_language: str | None = None,
++    on_progress: ProgressCallback | None = None,
++) -> PlanningAttempt:
++    """Return a non-throwing renderability outcome for one input document."""
++    if input_format not in {"ssmd", "plain"}:
++        raise ConfigurationError("input_format must be 'ssmd' or 'plain'")
++    if fallback_language is not None:
++        if not isinstance(fallback_language, str) or not fallback_language.strip():
++            raise ConfigurationError("fallback_language must be a non-empty string")
++        config = replace(config, language=fallback_language)
++    effective_config = replace(config, document_format=input_format)
++
++    from .planner import UtterancePlanner
++
++    planner = UtterancePlanner(effective_config)
++    try:
++        return planner.compile_attempt(
++            text,
++            config=effective_config,
++            on_progress=on_progress,
++        )
++    finally:
++        planner.close()
++
++
+ __all__ = [
+     "CompileResult",
+     "PreparationChange",
+@@ -108,4 +139,5 @@ __all__ = [
+     "PreparationTrace",
+     "PreparationTraceUnit",
+     "compile_document",
++    "compile_attempt",
+ ]
+diff --git a/utterplan/model.py b/utterplan/model.py
+index f0c09a5..7ab8eae 100644
+--- a/utterplan/model.py
++++ b/utterplan/model.py
+@@ -1069,14 +1069,12 @@ def _from_current_dict(data: Mapping[str, Any]) -> UtterancePlan:
+     )
+
+
+-def validate_plan(plan: UtterancePlan) -> None:
++def validate_plan_structure(plan: UtterancePlan) -> None:
+     text = plan.texts.spoken
+     if plan.source.format not in {"plain", "ssmd"}:
+         raise PlanValidationError("unsupported source format", code="source.format")
+     if plan.source.text is None:
+         raise PlanValidationError("source text is required", code="source.text")
+-    if not plan.plan_id:
+-        raise PlanValidationError("plan_id is required", code="plan_id.required")
+     ids: set[str] = set()
+     for collection, _name in (
+         (plan.languages, "language"),
+@@ -1189,9 +1187,6 @@ def validate_plan(plan: UtterancePlan) -> None:
+                     raise PlanValidationError(
+                         f"unknown boundary {event_id}", code="pause.unknown_boundary"
+                     )
+-    from .renderability import assert_renderable
+-
+-    assert_renderable(plan)
+     for event in plan.boundaries:
+         if not (0 <= event.position <= len(text)):
+             raise PlanValidationError(
+@@ -1394,10 +1389,20 @@ def validate_plan(plan: UtterancePlan) -> None:
+         raise PlanValidationError(
+             "every marker must belong to exactly one unit", code="marker.unit_membership"
+         )
++
++
++def validate_plan(plan: UtterancePlan) -> None:
++    """Validate a canonical plan, including its identity and renderability."""
++    validate_plan_structure(plan)
++    if not plan.plan_id:
++        raise PlanValidationError("plan_id is required", code="plan_id.required")
+     if plan.plan_id != semantic_hash(plan.semantic_dict()):
+         raise PlanValidationError(
+             "plan_id does not match semantic contents", code="plan_id.mismatch"
+         )
++    from .renderability import assert_renderable
++
++    assert_renderable(plan)
+
+
+ class _HashUnit:
+diff --git a/utterplan/parsers.py b/utterplan/parsers.py
+index 216f93e..6608bcc 100644
+--- a/utterplan/parsers.py
++++ b/utterplan/parsers.py
+@@ -106,49 +106,70 @@ class SSMDDocumentParser:
+
+         structural = str(parsed.clean_text)
+         raw_events = tuple(parsed.events)
+-        legacy_scene_breaks: tuple[tuple[int, int, int], ...] = ()
+-        legacy_spans: tuple[SourceTextSpan, ...] = ()
+-        if structural == text:
+-            structural, legacy_scene_breaks, legacy_spans = _normalize_legacy_scene_breaks(text)
+-            if legacy_scene_breaks:
++        parser_spans = tuple(
++            SourceTextSpan(
++                structural_start=int(span.char_start),
++                structural_end=int(span.char_end),
++                source_start=int(span.source_start),
++                source_end=int(span.source_end),
++            )
++            for span in getattr(parsed, "text_spans", ())
++            if span is not None
++            and getattr(span, "source_start", None) is not None
++            and getattr(span, "source_end", None) is not None
++        )
++        identity_source = structural == text
++        if not parser_spans and identity_source:
++            parser_spans = (SourceTextSpan(0, len(structural), 0, len(text)),)
++        legacy_scene_breaks: tuple[tuple[int, int, int | None, int | None, int | None], ...] = ()
++        removed_structural_spans: tuple[tuple[int, int], ...] = ()
++        text_spans = parser_spans
++        if _has_legacy_scene_breaks(structural):
++            structural, legacy_scene_breaks, text_spans = _normalize_legacy_scene_breaks(
++                structural,
++                source_spans=parser_spans,
++                identity_source=identity_source,
++                source_text=text,
++            )
++            removed_structural_spans = tuple((item[1], item[2]) for item in legacy_scene_breaks)
++            if removed_structural_spans:
+                 raw_events = tuple(
+                     SimpleNamespace(
+                         kind=event.kind,
+                         pos=_remap_removed_text_position(
+                             int(getattr(event, "pos", getattr(event, "position", 0))),
+-                            legacy_scene_breaks,
++                            removed_structural_spans,
+                         ),
+-                        attrs=event.attrs,
++                        attrs=getattr(event, "attrs", {}),
+                         anchor=getattr(event, "anchor", "after"),
+                         source_start=getattr(event, "source_start", None),
+                         source_end=getattr(event, "source_end", None),
+                     )
+                     for event in raw_events
+                 )
+-        source_spans: list[SourceTextSpan] = list(legacy_spans)
+-        if not legacy_spans:
+-            for span in getattr(parsed, "text_spans", ()):
+-                if span is None:
+-                    continue
+-                source_spans.append(
+-                    SourceTextSpan(
+-                        structural_start=int(span.char_start),
+-                        structural_end=int(span.char_end),
+-                        source_start=int(span.source_start),
+-                        source_end=int(span.source_end),
+-                    )
+-                )
+-        if not source_spans and not legacy_scene_breaks and str(parsed.clean_text) == text:
+-            source_spans.append(SourceTextSpan(0, len(text), 0, len(text)))
+-        text_spans = tuple(source_spans)
+         recovered_audio = _recover_zero_width_audio_annotations(ssmd, text, parsed, config)
++        if removed_structural_spans:
++            recovered_audio = tuple(
++                (
++                    _remap_removed_text_position(position, removed_structural_spans),
++                    kind,
++                    attrs,
++                    source_start,
++                    source_end,
++                )
++                for position, kind, attrs, source_start, source_end in recovered_audio
++            )
+         annotations = tuple(
+             AnnotationSpan(
+                 id=f"annotation-{i:06d}",
+                 kind=str(getattr(item, "kind", "annotation")),
+                 attrs={str(k): _plain_value(v) for k, v in item.attrs.items()},
+-                structural_start=int(item.char_start),
+-                structural_end=int(item.char_end),
++                structural_start=_remap_removed_text_position(
++                    int(item.char_start), removed_structural_spans
++                ),
++                structural_end=_remap_removed_text_position(
++                    int(item.char_end), removed_structural_spans
++                ),
+                 source_start=getattr(item, "source_start", None),
+                 source_end=getattr(item, "source_end", None),
+                 source_node_id=(
+@@ -232,7 +253,7 @@ class SSMDDocumentParser:
+                     )
+                 )
+
+-        for position, source_start, source_end in legacy_scene_breaks:
++        for position, _removed_start, _removed_end, source_start, source_end in legacy_scene_breaks:
+             attrs = {"strength": "x-strong", "legacy_horizontal_rule": True}
+             pause_origin = _duration_origin(attrs, config, parsed.header)
+             if pause_origin == "none":
+@@ -353,58 +374,156 @@ def map_structural_span_to_source(
+     )
+
+
++_LEGACY_SCENE_BREAK = re.compile(r"(?m)^[ \t]*---[ \t]*(?:\r?\n(?:[ \t]*\r?\n)?)?")
++
++
++def _has_legacy_scene_breaks(text: str) -> bool:
++    protected = _front_matter_range(text)
++    return any(
++        protected is None or match.start() >= protected[1] or match.end() <= protected[0]
++        for match in _LEGACY_SCENE_BREAK.finditer(text)
++    )
++
++
++def _front_matter_range(text: str) -> tuple[int, int] | None:
++    """Return the source range of a complete YAML front-matter block, if present."""
++    lines = text.splitlines(keepends=True)
++    if not lines or lines[0].rstrip("\r\n").strip() != "---":
++        return None
++    cursor = len(lines[0])
++    for line in lines[1:]:
++        delimiter = line.rstrip("\r\n").strip()
++        cursor += len(line)
++        if delimiter in {"---", "..."}:
++            return 0, cursor
++    return None
++
++
+ def _normalize_legacy_scene_breaks(
+     text: str,
+-) -> tuple[str, tuple[tuple[int, int, int], ...], tuple[SourceTextSpan, ...]]:
+-    """Normalize standalone legacy horizontal rules when SSMD leaves them as text."""
+-    matches = tuple(re.finditer(r"(?m)^[ \t]*---[ \t]*(?:\r?\n(?:[ \t]*\r?\n)?)?", text))
++    *,
++    source_spans: tuple[SourceTextSpan, ...],
++    identity_source: bool,
++    source_text: str,
++) -> tuple[
++    str,
++    tuple[tuple[int, int, int, int | None, int | None], ...],
++    tuple[SourceTextSpan, ...],
++]:
++    """Remove standalone legacy separators while preserving clean-to-source spans."""
++    protected = _front_matter_range(text)
++    matches = tuple(
++        match
++        for match in _LEGACY_SCENE_BREAK.finditer(text)
++        if (protected is None or match.start() >= protected[1] or match.end() <= protected[0])
++        and not _is_escaped_legacy_scene_break(
++            match, source_spans, source_text, identity_source=identity_source
++        )
++    )
+     if not matches:
+-        return text, (), ()
++        return text, (), source_spans
+
+     pieces: list[str] = []
+     spans: list[SourceTextSpan] = []
+-    breaks: list[tuple[int, int, int]] = []
++    breaks: list[tuple[int, int, int, int | None, int | None]] = []
+     source_cursor = 0
+     structural_cursor = 0
+-    for match in matches:
+-        kept = text[source_cursor : match.start()]
+-        if kept:
+-            pieces.append(kept)
++
++    def append_kept(start: int, end: int) -> None:
++        nonlocal structural_cursor
++        if end <= start:
++            return
++        pieces.append(text[start:end])
++        for span in source_spans:
++            clipped_start = max(start, span.structural_start)
++            clipped_end = min(end, span.structural_end)
++            if clipped_start >= clipped_end:
++                continue
++            source_length = span.source_end - span.source_start
++            source_start = span.source_start + min(
++                clipped_start - span.structural_start, source_length
++            )
++            source_end = span.source_start + min(clipped_end - span.structural_start, source_length)
+             spans.append(
+                 SourceTextSpan(
+-                    structural_start=structural_cursor,
+-                    structural_end=structural_cursor + len(kept),
+-                    source_start=source_cursor,
+-                    source_end=match.start(),
++                    structural_start=structural_cursor + clipped_start - start,
++                    structural_end=structural_cursor + clipped_end - start,
++                    source_start=source_start,
++                    source_end=source_end,
+                 )
+             )
+-            structural_cursor += len(kept)
+-        breaks.append((structural_cursor, match.start(), match.end()))
+-        source_cursor = match.end()
+-    kept = text[source_cursor:]
+-    if kept:
+-        pieces.append(kept)
+-        spans.append(
+-            SourceTextSpan(
+-                structural_start=structural_cursor,
+-                structural_end=structural_cursor + len(kept),
+-                source_start=source_cursor,
+-                source_end=len(text),
+-            )
++        structural_cursor += end - start
++
++    for match in matches:
++        append_kept(source_cursor, match.start())
++        source_start, source_end = _map_input_span_to_source(
++            source_spans,
++            match.start(),
++            match.end(),
++            identity_source=identity_source,
+         )
++        breaks.append((structural_cursor, match.start(), match.end(), source_start, source_end))
++        source_cursor = match.end()
++    append_kept(source_cursor, len(text))
+     return "".join(pieces), tuple(breaks), tuple(spans)
+
+
+-def _remap_removed_text_position(
+-    position: int, removed_spans: tuple[tuple[int, int, int], ...]
+-) -> int:
++def _map_input_span_to_source(
++    source_spans: tuple[SourceTextSpan, ...],
++    start: int,
++    end: int,
++    *,
++    identity_source: bool,
++) -> tuple[int | None, int | None]:
++    source_starts: list[int] = []
++    source_ends: list[int] = []
++    for span in source_spans:
++        clipped_start = max(start, span.structural_start)
++        clipped_end = min(end, span.structural_end)
++        if clipped_start >= clipped_end:
++            continue
++        source_length = span.source_end - span.source_start
++        source_starts.append(
++            span.source_start + min(clipped_start - span.structural_start, source_length)
++        )
++        source_ends.append(
++            span.source_start + min(clipped_end - span.structural_start, source_length)
++        )
++    if source_starts:
++        return min(source_starts), max(source_ends)
++    if identity_source:
++        return start, end
++    return None, None
++
++
++def _is_escaped_legacy_scene_break(
++    match: re.Match[str],
++    source_spans: tuple[SourceTextSpan, ...],
++    source_text: str,
++    *,
++    identity_source: bool,
++) -> bool:
++    source_start, _source_end = _map_input_span_to_source(
++        source_spans,
++        match.start(),
++        match.end(),
++        identity_source=identity_source,
++    )
++    return source_start is not None and (
++        source_start > 0
++        and source_text[source_start - 1] == "\\"
++        or source_text[source_start : source_start + 4] == "\\---"
++    )
++
++
++def _remap_removed_text_position(position: int, removed_spans: tuple[tuple[int, int], ...]) -> int:
+     removed_before = 0
+-    for _structural_position, source_start, source_end in removed_spans:
+-        if position < source_start:
++    for start, end in removed_spans:
++        if position < start:
+             break
+-        if position < source_end:
+-            return source_start - removed_before
+-        removed_before += source_end - source_start
++        if position < end:
++            return start - removed_before
++        removed_before += end - start
+     return position - removed_before
+
+
+diff --git a/utterplan/planner.py b/utterplan/planner.py
+index 615f61c..5145fb0 100644
+--- a/utterplan/planner.py
++++ b/utterplan/planner.py
+@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal
+ if TYPE_CHECKING:
+     from .compiler import CompileResult, PreparationTrace
+
++from .attempts import PlanDraft, PlanningAttempt, PlanningAttemptStatus, planning_attempt_id
+ from .config import PauseConfig, PlannerConfig, parse_duration
+ from .directives import resolve_directives
+ from .exceptions import ConfigurationError, PlanningError, PlanRenderabilityError
+@@ -24,6 +25,7 @@ from .model import (
+     PlanTexts,
+     SemanticBoundary,
+     UtterancePlan,
++    validate_plan_structure,
+ )
+ from .parsers import (
+     PlainDocumentParser,
+@@ -33,7 +35,7 @@ from .parsers import (
+ from .pauses import boundary_is_active, resolve_pauses
+ from .preparation import IdentityTextPreparer, SourceToSpokenMap, SpokenformTextPreparer
+ from .progress import PlannerProgressEvent, ProgressCallback, _notify_progress
+-from .renderability import RenderabilityIssue, preflight_segments
++from .renderability import RenderabilityIssue, RenderabilityReport, preflight_segments
+ from .units import make_units
+
+
+@@ -61,17 +63,37 @@ class UtterancePlanner:
+         """Compile one document, optionally reporting synchronous progress.
+
+         Progress callbacks are operational only, should be lightweight, and may raise
+-        exceptions that propagate to the caller.
++        exceptions that propagate to the caller. Renderability failures retain the
++        historical :class:`PlanRenderabilityError` behavior.
+         """
+         if not isinstance(trace, bool):
+             raise TypeError("trace must be a boolean")
+         from .compiler import CompileResult
+
+-        plan, preparation_trace = self._plan(
++        attempt, preparation_trace = self._plan(
+             text, config=config, unit=unit, trace=trace, on_progress=on_progress
+         )
++        if not attempt.ok:
++            raise PlanRenderabilityError(
++                attempt.renderability.issues, mode=attempt.renderability_mode
++            )
++        plan = attempt.candidate.to_plan()
+         return CompileResult(plan=plan, diagnostics=plan.diagnostics, trace=preparation_trace)
+
++    def compile_attempt(
++        self,
++        text: str,
++        *,
++        config: PlannerConfig | None = None,
++        unit: str | None = None,
++        on_progress: ProgressCallback | None = None,
++    ) -> PlanningAttempt:
++        """Return the finalized semantic outcome without throwing for renderability."""
++        attempt, _preparation_trace = self._plan(
++            text, config=config, unit=unit, trace=False, on_progress=on_progress
++        )
++        return attempt
++
+     def plan(
+         self,
+         text: str,
+@@ -80,7 +102,7 @@ class UtterancePlanner:
+         unit: str | None = None,
+         on_progress: ProgressCallback | None = None,
+     ) -> UtterancePlan:
+-        """Return the semantic plan, optionally reporting synchronous progress.
++        """Return a canonical semantic plan, optionally reporting synchronous progress.
+
+         The callback is operational only and cannot affect the plan. Keep handlers
+         lightweight; callback exceptions propagate to the caller.
+@@ -95,7 +117,7 @@ class UtterancePlanner:
+         unit: str | None = None,
+         trace: bool = False,
+         on_progress: ProgressCallback | None = None,
+-    ) -> tuple[UtterancePlan, PreparationTrace | None]:
++    ) -> tuple[PlanningAttempt, PreparationTrace | None]:
+         if not isinstance(text, str):
+             raise TypeError("text must be a string")
+         effective_config = config if config is not None else self.config
+@@ -307,48 +329,64 @@ class UtterancePlanner:
+             annotations=prepared.annotations,
+             semantic_boundaries=semantic_boundaries,
+         )
++        initial_renderability = preflight_segments(
++            segments,
++            tokens,
++            parsed=parsed,
++            spoken_text=spoken,
++            boundaries=boundaries,
++            pause_config=pause_config,
++            annotations=prepared.annotations,
++            semantic_boundaries=semantic_boundaries,
++        )
+         renderability_repairs: tuple[RenderabilityIssue, ...] = ()
+         checked_segment_count = initial_renderability.checked_segments
++        renderability_report = initial_renderability
++        status: PlanningAttemptStatus = "renderable"
+         if initial_renderability.issues:
+-            if config.renderability_mode == "strict":
+-                raise PlanRenderabilityError(initial_renderability.issues, mode="strict")
+-            if any(
+-                issue.repair_assessment is None or not issue.repair_assessment.safe
++            status = "blocked"
++            if config.renderability_mode == "repair" and all(
++                issue.repair_assessment is not None and issue.repair_assessment.safe
+                 for issue in initial_renderability.issues
+             ):
+-                raise PlanRenderabilityError(initial_renderability.issues, mode="repair")
+-            segments, renderability_repairs = _repair_renderer_segments(
+-                segments,
+-                initial_renderability.issues,
+-                spoken,
+-            )
+-            segments = [
+-                replace(segment, id=f"seg-{index:06d}") for index, segment in enumerate(segments)
+-            ]
+-            segments = _attach_structural_ranges(
+-                segments, prepared.source_map, len(parsed.structural_text)
+-            )
+-            segments = _attach_membership(segments, tokens, prepared.annotations)
+-            segments = [
+-                resolve_directives(
+-                    segment,
+-                    prepared.annotations,
+-                    voice_defaults=parsed.metadata.get("voice_defaults"),
++                segments, renderability_repairs = _repair_renderer_segments(
++                    segments,
++                    initial_renderability.issues,
++                    spoken,
+                 )
+-                for segment in segments
+-            ]
+-            post_repair = preflight_segments(
+-                segments,
+-                tokens,
+-                parsed=parsed,
+-                spoken_text=spoken,
+-                boundaries=boundaries,
+-                pause_config=pause_config,
+-                annotations=prepared.annotations,
+-                semantic_boundaries=semantic_boundaries,
+-            )
+-            if post_repair.issues:
+-                raise PlanRenderabilityError(post_repair.issues, mode="repair")
++                segments = [
++                    replace(segment, id=f"seg-{index:06d}")
++                    for index, segment in enumerate(segments)
++                ]
++                segments = _attach_structural_ranges(
++                    segments, prepared.source_map, len(parsed.structural_text)
++                )
++                segments = _attach_membership(segments, tokens, prepared.annotations)
++                segments = [
++                    resolve_directives(
++                        segment,
++                        prepared.annotations,
++                        voice_defaults=parsed.metadata.get("voice_defaults"),
++                    )
++                    for segment in segments
++                ]
++                post_repair = preflight_segments(
++                    segments,
++                    tokens,
++                    parsed=parsed,
++                    spoken_text=spoken,
++                    boundaries=boundaries,
++                    pause_config=pause_config,
++                    annotations=prepared.annotations,
++                    semantic_boundaries=semantic_boundaries,
++                )
++                renderability_report = RenderabilityReport(
++                    checked_segments=post_repair.checked_segments,
++                    issues=post_repair.issues,
++                    repairs=renderability_repairs,
++                )
++                if not post_repair.issues:
++                    status = "repaired"
+         renderability_checked_segments = checked_segment_count
+         boundaries.extend(_derived_boundaries(segments, boundaries, pause_config))
+         semantic_boundaries = _derive_semantic_topology(segments, semantic_boundaries)
+@@ -383,7 +421,7 @@ class UtterancePlanner:
+                 "mode": config.renderability_mode,
+                 "checked_segments": renderability_checked_segments,
+                 "repair_count": len(renderability_repairs),
+-                "guaranteed": True,
++                "guaranteed": status != "blocked",
+             },
+         }
+         diagnostics = list(parsed.diagnostics)
+@@ -415,8 +453,27 @@ class UtterancePlanner:
+             document_metadata=metadata,
+             warnings=tuple(parsed.warnings) + prepared.info.warnings,
+             diagnostics=tuple(diagnostics),
+-        ).with_identity()
+-        plan.validate()
++        )
++        if status == "blocked":
++            validate_plan_structure(plan)
++        else:
++            plan = plan.with_identity()
++            plan.validate()
++        candidate = PlanDraft(plan, renderability_report)
++        attempt = PlanningAttempt(
++            status=status,
++            candidate=candidate,
++            renderability=renderability_report,
++            diagnostics=tuple(diagnostics),
++            repairs=renderability_repairs,
++            attempt_id=planning_attempt_id(
++                status=status,
++                plan=plan,
++                report=renderability_report,
++                renderability_mode=config.renderability_mode,
++            ),
++            renderability_mode=config.renderability_mode,
++        )
+         preparation_trace = (
+             _make_preparation_trace(parsed, prepared, plan, document_language, fallback_mode)
+             if trace
+@@ -426,7 +483,7 @@ class UtterancePlanner:
+             on_progress,
+             PlannerProgressEvent(kind="phase.completed", phase="finalization"),
+         )
+-        return plan, preparation_trace
++        return attempt, preparation_trace
+
+     def _parse(self, text: str, config: PlannerConfig) -> Any:
+         if config.document_format == "plain":
+diff --git a/utterplan/toml_codec.py b/utterplan/toml_codec.py
+index df1ef29..80b1366 100644
+--- a/utterplan/toml_codec.py
++++ b/utterplan/toml_codec.py
+@@ -115,8 +115,8 @@ def to_toml_data(plan: UtterancePlan) -> dict[str, Any]:
+     return result
+
+
+-def from_toml_data(data: Mapping[str, object]) -> UtterancePlan:
+-    """Decode a TOML wire model into and validate a semantic schema-v4 plan."""
++def _decode_toml_data(data: Mapping[str, object]) -> dict[str, Any]:
++    """Decode a TOML wire model into its plain semantic schema-v4 mapping."""
+     plain = _plain_toml(data)
+     _check_toml_values(plain, "$")
+     root = _mapping(plain, "$")
+@@ -198,13 +198,32 @@ def from_toml_data(data: Mapping[str, object]) -> UtterancePlan:
+             segments.extend(unit_segments)
+         semantic["units"] = units
+         semantic["segments"] = segments
+-        return UtterancePlan.from_dict(semantic)
++        return semantic
+     except KeyError as exc:
+         raise PlanFormatError(
+             f"required TOML field {exc.args[0]!r} is missing", code="field.required"
+         ) from exc
+
+
++def from_toml_data(data: Mapping[str, object]) -> UtterancePlan:
++    """Decode a TOML wire model into and validate a canonical schema-v4 plan."""
++    return UtterancePlan.from_dict(_decode_toml_data(data))
++
++
++def _from_toml_data_draft(data: Mapping[str, object]) -> UtterancePlan:
++    """Decode a candidate while enforcing topology but not renderability or identity."""
++    from .model import _check_shape, _from_current_dict, validate_plan_structure
++
++    semantic = _decode_toml_data(data)
++    try:
++        _check_shape(semantic)
++        plan = _from_current_dict(semantic)
++    except (KeyError, TypeError, ValueError, IndexError) as exc:
++        raise PlanFormatError(f"invalid draft candidate: {exc}", code="plan.value") from exc
++    validate_plan_structure(plan)
++    return plan
++
++
+ def dumps_toml(plan: UtterancePlan) -> str:
+     """Serialize a plan to deterministic, human-readable TOML text."""
+     wire = to_toml_data(plan)

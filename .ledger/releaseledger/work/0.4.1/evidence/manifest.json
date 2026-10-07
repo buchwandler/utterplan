@@ -1,0 +1,40 @@
+{
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "additions": 1119,
+      "deletions": 116,
+      "patch_file": "aa137b9.patch",
+      "patch_sha256": "8a6179857e06670f75b0d241d0f9d3ea35a54ac5d6f3fedb2c4191fd5ff485c7",
+      "paths": [
+        ".github/workflows/tests.yml",
+        "README.md",
+        "docs/cli.md",
+        "docs/python-api.md",
+        "tests/test_cli.py",
+        "tests/test_renderability_repair.py",
+        "tests/test_ssmd_09_parser.py",
+        "utterplan/__init__.py",
+        "utterplan/attempt_serialization.py",
+        "utterplan/attempts.py",
+        "utterplan/cli.py",
+        "utterplan/compiler.py",
+        "utterplan/model.py",
+        "utterplan/parsers.py",
+        "utterplan/planner.py",
+        "utterplan/toml_codec.py"
+      ],
+      "sha": "aa137b96b482b25bcec084d94ba1af96bf9a0447",
+      "short_sha": "aa137b9",
+      "source_ref": "git:aa137b96b482b25bcec084d94ba1af96bf9a0447"
+    }
+  ],
+  "git_base_ref": "c73c430179e037bda501a566ee549201a099d293",
+  "git_base_sha": "c73c430179e037bda501a566ee549201a099d293",
+  "git_head_ref": "aa137b96b482b25bcec084d94ba1af96bf9a0447",
+  "git_head_sha": "aa137b96b482b25bcec084d94ba1af96bf9a0447",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.4.1",
+  "schema_version": 1
+}
