@@ -1,4 +1,5 @@
 from ._version import __version__
+from .attempts import PlanDraft, PlanningAttempt, PlanningAttemptStatus
 from .batch import BatchProgressCallback, CompileOutcome, CompileRequest, compile_to_files
 from .compiler import (
     CompileResult,
@@ -6,6 +7,7 @@ from .compiler import (
     PreparationChange,
     PreparationTrace,
     PreparationTraceUnit,
+    compile_attempt,
     compile_document,
 )
 from .config import (
@@ -89,6 +91,10 @@ __all__ = [
     "PreparationTrace",
     "PreparationTraceUnit",
     "compile_document",
+    "compile_attempt",
+    "PlanningAttempt",
+    "PlanningAttemptStatus",
+    "PlanDraft",
     "compile_to_files",
     "PlannerConfig",
     "PauseConfig",

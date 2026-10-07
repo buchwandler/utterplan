@@ -1069,14 +1069,12 @@ def _from_current_dict(data: Mapping[str, Any]) -> UtterancePlan:
     )
 
 
-def validate_plan(plan: UtterancePlan) -> None:
+def validate_plan_structure(plan: UtterancePlan) -> None:
     text = plan.texts.spoken
     if plan.source.format not in {"plain", "ssmd"}:
         raise PlanValidationError("unsupported source format", code="source.format")
     if plan.source.text is None:
         raise PlanValidationError("source text is required", code="source.text")
-    if not plan.plan_id:
-        raise PlanValidationError("plan_id is required", code="plan_id.required")
     ids: set[str] = set()
     for collection, _name in (
         (plan.languages, "language"),
@@ -1189,9 +1187,6 @@ def validate_plan(plan: UtterancePlan) -> None:
                     raise PlanValidationError(
                         f"unknown boundary {event_id}", code="pause.unknown_boundary"
                     )
-    from .renderability import assert_renderable
-
-    assert_renderable(plan)
     for event in plan.boundaries:
         if not (0 <= event.position <= len(text)):
             raise PlanValidationError(
@@ -1394,10 +1389,20 @@ def validate_plan(plan: UtterancePlan) -> None:
         raise PlanValidationError(
             "every marker must belong to exactly one unit", code="marker.unit_membership"
         )
+
+
+def validate_plan(plan: UtterancePlan) -> None:
+    """Validate a canonical plan, including its identity and renderability."""
+    validate_plan_structure(plan)
+    if not plan.plan_id:
+        raise PlanValidationError("plan_id is required", code="plan_id.required")
     if plan.plan_id != semantic_hash(plan.semantic_dict()):
         raise PlanValidationError(
             "plan_id does not match semantic contents", code="plan_id.mismatch"
         )
+    from .renderability import assert_renderable
+
+    assert_renderable(plan)
 
 
 class _HashUnit:

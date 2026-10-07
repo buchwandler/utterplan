@@ -100,6 +100,24 @@ utterplan explain chapter.utterplan.toml --details
 
 The default output shows prepared wording, render units, ordered segments, languages, resolved pauses, headings, SSMD version/title/document language, effective typed directives, metadata, and warning/error codes with source locations. Add `--details` for IDs, offsets, provenance, hashes, plan identity, and token analysis beneath each segment. Use `inspect --tokens` for a compact token/provenance view.
 
+## Inspect a persisted planning attempt
+
+`inspect` reads canonical plans. Persistable planning outcomes use the separate
+`utterplan.planning-attempt.v1` artifact and are opened with `inspect-attempt`:
+
+```bash
+utterplan inspect-attempt chapter.attempt.toml
+utterplan inspect-attempt chapter.attempt.toml --issues
+utterplan inspect-attempt chapter.attempt.toml --segment seg-000001 --unit unit-000001
+utterplan inspect-attempt chapter.attempt.toml --json
+```
+
+The default view summarizes status, renderability, and candidate size. `--issues`
+shows source context and conservative repair assessments; segment and unit selectors
+accept an ID or zero-based index. `--json` emits the complete artifact as JSON for
+inspection, but the persisted attempt itself remains TOML. A blocked candidate is an
+inspect-only draft, not a canonical plan, and is rejected by `UtterancePlan.load()`.
+
 ## Planning controls
 
 - `--unit paragraph|sentence` chooses render-unit grouping.
@@ -126,6 +144,7 @@ utterplan inspect chapter.utterplan.toml --segment 0
 utterplan inspect chapter.utterplan.toml --unit 0 --boundaries --tokens
 utterplan inspect chapter.utterplan.toml --preparation
 utterplan inspect chapter.utterplan.toml --semantic-boundaries
+utterplan inspect-attempt chapter.attempt.toml --issues
 ```
 
 `inspect --preparation` reports the preparation backend and version, structural and spoken text lengths, replacement count, and each replacement's structural and spoken ranges and text. This is the supported human-facing preparation diagnostic; raw coordinate lookup tables are intentionally absent from the persisted TOML plan.

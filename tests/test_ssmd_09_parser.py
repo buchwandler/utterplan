@@ -39,6 +39,87 @@ def test_legacy_scene_break_is_structural_not_renderer_text() -> None:
     assert all(segment.text != "---" for segment in plan.segments)
 
 
+@pytest.mark.parametrize(
+    ("body", "scene_break_count"),
+    [
+        ("Before.\n\n---\n\nAfter.", 1),
+        ("Before.\n\n---\n\nMiddle.\n\n---\n\nAfter.", 2),
+        ("Before.\n\n...p\n\nAfter.", 1),
+        ("---\n\nAfter.\n\n---", 2),
+        ("Before --- after.", 0),
+        ("Before.\n\n\\---\n\nAfter.", 0),
+    ],
+)
+def test_front_matter_scene_breaks_are_boundaries_not_renderer_text(
+    body: str, scene_break_count: int
+) -> None:
+    source = f'---\nssmd_version: "0.9"\ntitle: Demo\n---\n{body}'
+    plan = _planner().plan(source)
+
+    scene_breaks = [
+        event
+        for event in plan.boundaries
+        if event.kind == "explicit"
+        and (
+            event.attrs.get("semantic") == "scene_break"
+            or event.attrs.get("legacy_horizontal_rule")
+            or (event.origin == "ssmd" and event.strength == "x-strong")
+        )
+    ]
+    assert len(scene_breaks) == scene_break_count
+    if scene_break_count:
+        assert "---" not in plan.texts.structural or body.startswith("---")
+        assert all(segment.text.strip() != "---" for segment in plan.segments)
+        assert plan.document_metadata["planning"]["renderability"]["guaranteed"] is True
+    elif "Before --- after." in body:
+        assert "Before --- after." in plan.texts.structural
+        assert any("---" in segment.text for segment in plan.segments)
+    elif "\\---" in body:
+        assert "---" in plan.texts.structural
+
+
+def test_legacy_parser_front_matter_scene_break_uses_clean_to_source_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ssmd
+
+    from utterplan.parsers import SSMDDocumentParser, map_structural_span_to_source
+
+    header = '---\nssmd_version: "0.9"\ntitle: Demo\n---\n'
+    body = "Before.\n\n---\n\nAfter."
+    source = header + body
+    legacy_result = SimpleNamespace(
+        clean_text=body,
+        annotations=[],
+        events=[],
+        header={"ssmd_version": "0.9", "title": "Demo"},
+        warnings=[],
+        diagnostics=[],
+        text_spans=[
+            SimpleNamespace(
+                char_start=0,
+                char_end=len(body),
+                source_start=len(header),
+                source_end=len(source),
+            )
+        ],
+    )
+    monkeypatch.setattr(ssmd, "parse_structure", lambda *args, **kwargs: legacy_result)
+
+    parsed = SSMDDocumentParser().parse(source, _planner().config)
+    assert parsed.structural_text == "Before.\n\nAfter."
+    source_after = source.index("After.")
+    assert map_structural_span_to_source(
+        parsed, len("Before.\n\n"), len(parsed.structural_text)
+    ) == (source_after, source_after + len("After."))
+    scene = next(event for event in parsed.boundaries if event.attrs.get("legacy_horizontal_rule"))
+    assert scene.attrs["source_start"] == source.index("---", len(header))
+    assert scene.attrs["source_end"] == source_after
+
+    plan = _planner().plan(source)
+    assert [segment.text for segment in plan.segments] == ["Before.", "After."]
+
+
 def _planner() -> UtterancePlanner:
     return UtterancePlanner(
         PlannerConfig(

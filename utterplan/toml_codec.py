@@ -115,8 +115,8 @@ def to_toml_data(plan: UtterancePlan) -> dict[str, Any]:
     return result
 
 
-def from_toml_data(data: Mapping[str, object]) -> UtterancePlan:
-    """Decode a TOML wire model into and validate a semantic schema-v4 plan."""
+def _decode_toml_data(data: Mapping[str, object]) -> dict[str, Any]:
+    """Decode a TOML wire model into its plain semantic schema-v4 mapping."""
     plain = _plain_toml(data)
     _check_toml_values(plain, "$")
     root = _mapping(plain, "$")
@@ -198,11 +198,30 @@ def from_toml_data(data: Mapping[str, object]) -> UtterancePlan:
             segments.extend(unit_segments)
         semantic["units"] = units
         semantic["segments"] = segments
-        return UtterancePlan.from_dict(semantic)
+        return semantic
     except KeyError as exc:
         raise PlanFormatError(
             f"required TOML field {exc.args[0]!r} is missing", code="field.required"
         ) from exc
+
+
+def from_toml_data(data: Mapping[str, object]) -> UtterancePlan:
+    """Decode a TOML wire model into and validate a canonical schema-v4 plan."""
+    return UtterancePlan.from_dict(_decode_toml_data(data))
+
+
+def _from_toml_data_draft(data: Mapping[str, object]) -> UtterancePlan:
+    """Decode a candidate while enforcing topology but not renderability or identity."""
+    from .model import _check_shape, _from_current_dict, validate_plan_structure
+
+    semantic = _decode_toml_data(data)
+    try:
+        _check_shape(semantic)
+        plan = _from_current_dict(semantic)
+    except (KeyError, TypeError, ValueError, IndexError) as exc:
+        raise PlanFormatError(f"invalid draft candidate: {exc}", code="plan.value") from exc
+    validate_plan_structure(plan)
+    return plan
 
 
 def dumps_toml(plan: UtterancePlan) -> str:

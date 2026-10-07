@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Literal
 
+from .attempts import PlanningAttempt
 from .config import PlannerConfig
 from .exceptions import ConfigurationError
 from .model import Diagnostic, UtterancePlan
@@ -101,6 +102,36 @@ def compile_document(
         planner.close()
 
 
+def compile_attempt(
+    text: str,
+    *,
+    input_format: InputFormat = "ssmd",
+    config: PlannerConfig,
+    fallback_language: str | None = None,
+    on_progress: ProgressCallback | None = None,
+) -> PlanningAttempt:
+    """Return a non-throwing renderability outcome for one input document."""
+    if input_format not in {"ssmd", "plain"}:
+        raise ConfigurationError("input_format must be 'ssmd' or 'plain'")
+    if fallback_language is not None:
+        if not isinstance(fallback_language, str) or not fallback_language.strip():
+            raise ConfigurationError("fallback_language must be a non-empty string")
+        config = replace(config, language=fallback_language)
+    effective_config = replace(config, document_format=input_format)
+
+    from .planner import UtterancePlanner
+
+    planner = UtterancePlanner(effective_config)
+    try:
+        return planner.compile_attempt(
+            text,
+            config=effective_config,
+            on_progress=on_progress,
+        )
+    finally:
+        planner.close()
+
+
 __all__ = [
     "CompileResult",
     "PreparationChange",
@@ -108,4 +139,5 @@ __all__ = [
     "PreparationTrace",
     "PreparationTraceUnit",
     "compile_document",
+    "compile_attempt",
 ]

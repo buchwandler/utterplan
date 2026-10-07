@@ -8,14 +8,17 @@ from utterplan import (
     AnnotationSpan,
     BoundaryEvent,
     EmphasisDirective,
+    PlanFormatError,
     PlannerConfig,
     PlanRenderabilityError,
     PlanSegment,
     SegmentDirectives,
     SemanticBoundary,
+    UtterancePlan,
     UtterancePlanner,
     assess_renderability_repair,
     classify_segment,
+    compile_attempt,
 )
 from utterplan.config import PauseConfig
 from utterplan.planner import _repair_renderer_segments
@@ -327,3 +330,107 @@ def test_symbol_only_content_fails_without_a_guessed_repair() -> None:
         assert issue.repair_assessment.safe is False
         assert "will not guess" in str(error.value)
         assert error.value.mode == mode
+
+
+def test_strict_attempt_retains_blocked_candidate_and_compile_still_raises() -> None:
+    source = "Hello.\n\n.\n\nWorld."
+    config = PlannerConfig(
+        language="en-US",
+        text_preparation="identity",
+        renderability_mode="strict",
+    )
+    planner = UtterancePlanner(config)
+
+    attempt = planner.compile_attempt(source)
+    functional = compile_attempt(source, input_format="plain", config=config)
+    assert functional.status == "blocked"
+
+    assert attempt.status == "blocked"
+    assert not attempt.ok
+    assert attempt.renderability.issues
+    issue = attempt.renderability.issues[0]
+    segment = next(item for item in attempt.candidate.segments if item.id == issue.segment_id)
+    assert segment.text == issue.text == "."
+    assert issue.source_start is not None
+    assert issue.source_end is not None
+    assert source[issue.source_start : issue.source_end] == issue.text
+    assert attempt.candidate.plan_id == ""
+    with pytest.raises(ValueError, match="blocked planning-attempt draft"):
+        attempt.candidate.to_plan()
+
+    with pytest.raises(PlanRenderabilityError) as error:
+        planner.compile(source)
+    assert error.value.mode == "strict"
+    assert error.value.issues == attempt.renderability.issues
+
+
+def test_safe_repair_attempt_returns_a_canonical_plan() -> None:
+    config = PlannerConfig(language="en-US", text_preparation="identity")
+    attempt = UtterancePlanner(config).compile_attempt("Hello.\n\n.\n\nWorld.")
+
+    assert attempt.status == "repaired"
+    assert attempt.ok
+    assert len(attempt.repairs) == 1
+    assert attempt.repairs[0].repair_assessment is not None
+    assert attempt.repairs[0].repair_assessment.safe
+    plan = attempt.candidate.to_plan()
+    plan.validate()
+    assert [segment.text for segment in plan.segments] == ["Hello.", "World."]
+
+
+def test_unsafe_repair_attempt_is_blocked_and_draft_structure_is_checked() -> None:
+    from utterplan.exceptions import PlanValidationError
+    from utterplan.model import validate_plan_structure
+
+    config = PlannerConfig(
+        language="en-US",
+        text_preparation="identity",
+        renderability_mode="repair",
+    )
+    attempt = UtterancePlanner(config).compile_attempt("€")
+
+    assert attempt.status == "blocked"
+    assert attempt.renderability.issues[0].repair_assessment is not None
+    assert not attempt.renderability.issues[0].repair_assessment.safe
+    with pytest.raises(ValueError, match="blocked planning-attempt draft"):
+        attempt.candidate.to_plan()
+
+    malformed = replace(
+        attempt.candidate._plan,
+        segments=(replace(attempt.candidate.segments[0], spoken_end=100),),
+    )
+    with pytest.raises(PlanValidationError, match="segment range"):
+        validate_plan_structure(malformed)
+
+
+@pytest.mark.parametrize(
+    ("source", "mode", "expected_status"),
+    [
+        ("Ready.", "strict", "renderable"),
+        ("Hello.\n\n.\n\nWorld.", "repair", "repaired"),
+        ("€", "strict", "blocked"),
+    ],
+)
+def test_planning_attempt_toml_roundtrips_all_outcomes_and_stays_noncanonical(
+    source: str, mode: str, expected_status: str
+) -> None:
+    config = PlannerConfig(
+        language="en-US",
+        text_preparation="identity",
+        renderability_mode=mode,
+    )
+    attempt = UtterancePlanner(config).compile_attempt(source)
+    repeated = UtterancePlanner(config).compile_attempt(source)
+    serialized = attempt.to_toml()
+    restored = type(attempt).from_toml(serialized)
+
+    assert attempt.status == expected_status
+    assert repeated.attempt_id == attempt.attempt_id
+    assert restored == attempt
+    assert restored.to_toml() == serialized
+    assert restored.to_dict() == attempt.to_dict()
+    assert 'schema = "utterplan.planning-attempt.v1"' in serialized
+    with pytest.raises(PlanFormatError):
+        UtterancePlan.from_toml(serialized)
+    with pytest.raises(PlanFormatError):
+        UtterancePlan.from_dict(attempt.to_dict())

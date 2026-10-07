@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal
 if TYPE_CHECKING:
     from .compiler import CompileResult, PreparationTrace
 
+from .attempts import PlanDraft, PlanningAttempt, PlanningAttemptStatus, planning_attempt_id
 from .config import PauseConfig, PlannerConfig, parse_duration
 from .directives import resolve_directives
 from .exceptions import ConfigurationError, PlanningError, PlanRenderabilityError
@@ -24,6 +25,7 @@ from .model import (
     PlanTexts,
     SemanticBoundary,
     UtterancePlan,
+    validate_plan_structure,
 )
 from .parsers import (
     PlainDocumentParser,
@@ -33,7 +35,7 @@ from .parsers import (
 from .pauses import boundary_is_active, resolve_pauses
 from .preparation import IdentityTextPreparer, SourceToSpokenMap, SpokenformTextPreparer
 from .progress import PlannerProgressEvent, ProgressCallback, _notify_progress
-from .renderability import RenderabilityIssue, preflight_segments
+from .renderability import RenderabilityIssue, RenderabilityReport, preflight_segments
 from .units import make_units
 
 
@@ -61,16 +63,36 @@ class UtterancePlanner:
         """Compile one document, optionally reporting synchronous progress.
 
         Progress callbacks are operational only, should be lightweight, and may raise
-        exceptions that propagate to the caller.
+        exceptions that propagate to the caller. Renderability failures retain the
+        historical :class:`PlanRenderabilityError` behavior.
         """
         if not isinstance(trace, bool):
             raise TypeError("trace must be a boolean")
         from .compiler import CompileResult
 
-        plan, preparation_trace = self._plan(
+        attempt, preparation_trace = self._plan(
             text, config=config, unit=unit, trace=trace, on_progress=on_progress
         )
+        if not attempt.ok:
+            raise PlanRenderabilityError(
+                attempt.renderability.issues, mode=attempt.renderability_mode
+            )
+        plan = attempt.candidate.to_plan()
         return CompileResult(plan=plan, diagnostics=plan.diagnostics, trace=preparation_trace)
+
+    def compile_attempt(
+        self,
+        text: str,
+        *,
+        config: PlannerConfig | None = None,
+        unit: str | None = None,
+        on_progress: ProgressCallback | None = None,
+    ) -> PlanningAttempt:
+        """Return the finalized semantic outcome without throwing for renderability."""
+        attempt, _preparation_trace = self._plan(
+            text, config=config, unit=unit, trace=False, on_progress=on_progress
+        )
+        return attempt
 
     def plan(
         self,
@@ -80,7 +102,7 @@ class UtterancePlanner:
         unit: str | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> UtterancePlan:
-        """Return the semantic plan, optionally reporting synchronous progress.
+        """Return a canonical semantic plan, optionally reporting synchronous progress.
 
         The callback is operational only and cannot affect the plan. Keep handlers
         lightweight; callback exceptions propagate to the caller.
@@ -95,7 +117,7 @@ class UtterancePlanner:
         unit: str | None = None,
         trace: bool = False,
         on_progress: ProgressCallback | None = None,
-    ) -> tuple[UtterancePlan, PreparationTrace | None]:
+    ) -> tuple[PlanningAttempt, PreparationTrace | None]:
         if not isinstance(text, str):
             raise TypeError("text must be a string")
         effective_config = config if config is not None else self.config
@@ -307,48 +329,64 @@ class UtterancePlanner:
             annotations=prepared.annotations,
             semantic_boundaries=semantic_boundaries,
         )
+        initial_renderability = preflight_segments(
+            segments,
+            tokens,
+            parsed=parsed,
+            spoken_text=spoken,
+            boundaries=boundaries,
+            pause_config=pause_config,
+            annotations=prepared.annotations,
+            semantic_boundaries=semantic_boundaries,
+        )
         renderability_repairs: tuple[RenderabilityIssue, ...] = ()
         checked_segment_count = initial_renderability.checked_segments
+        renderability_report = initial_renderability
+        status: PlanningAttemptStatus = "renderable"
         if initial_renderability.issues:
-            if config.renderability_mode == "strict":
-                raise PlanRenderabilityError(initial_renderability.issues, mode="strict")
-            if any(
-                issue.repair_assessment is None or not issue.repair_assessment.safe
+            status = "blocked"
+            if config.renderability_mode == "repair" and all(
+                issue.repair_assessment is not None and issue.repair_assessment.safe
                 for issue in initial_renderability.issues
             ):
-                raise PlanRenderabilityError(initial_renderability.issues, mode="repair")
-            segments, renderability_repairs = _repair_renderer_segments(
-                segments,
-                initial_renderability.issues,
-                spoken,
-            )
-            segments = [
-                replace(segment, id=f"seg-{index:06d}") for index, segment in enumerate(segments)
-            ]
-            segments = _attach_structural_ranges(
-                segments, prepared.source_map, len(parsed.structural_text)
-            )
-            segments = _attach_membership(segments, tokens, prepared.annotations)
-            segments = [
-                resolve_directives(
-                    segment,
-                    prepared.annotations,
-                    voice_defaults=parsed.metadata.get("voice_defaults"),
+                segments, renderability_repairs = _repair_renderer_segments(
+                    segments,
+                    initial_renderability.issues,
+                    spoken,
                 )
-                for segment in segments
-            ]
-            post_repair = preflight_segments(
-                segments,
-                tokens,
-                parsed=parsed,
-                spoken_text=spoken,
-                boundaries=boundaries,
-                pause_config=pause_config,
-                annotations=prepared.annotations,
-                semantic_boundaries=semantic_boundaries,
-            )
-            if post_repair.issues:
-                raise PlanRenderabilityError(post_repair.issues, mode="repair")
+                segments = [
+                    replace(segment, id=f"seg-{index:06d}")
+                    for index, segment in enumerate(segments)
+                ]
+                segments = _attach_structural_ranges(
+                    segments, prepared.source_map, len(parsed.structural_text)
+                )
+                segments = _attach_membership(segments, tokens, prepared.annotations)
+                segments = [
+                    resolve_directives(
+                        segment,
+                        prepared.annotations,
+                        voice_defaults=parsed.metadata.get("voice_defaults"),
+                    )
+                    for segment in segments
+                ]
+                post_repair = preflight_segments(
+                    segments,
+                    tokens,
+                    parsed=parsed,
+                    spoken_text=spoken,
+                    boundaries=boundaries,
+                    pause_config=pause_config,
+                    annotations=prepared.annotations,
+                    semantic_boundaries=semantic_boundaries,
+                )
+                renderability_report = RenderabilityReport(
+                    checked_segments=post_repair.checked_segments,
+                    issues=post_repair.issues,
+                    repairs=renderability_repairs,
+                )
+                if not post_repair.issues:
+                    status = "repaired"
         renderability_checked_segments = checked_segment_count
         boundaries.extend(_derived_boundaries(segments, boundaries, pause_config))
         semantic_boundaries = _derive_semantic_topology(segments, semantic_boundaries)
@@ -383,7 +421,7 @@ class UtterancePlanner:
                 "mode": config.renderability_mode,
                 "checked_segments": renderability_checked_segments,
                 "repair_count": len(renderability_repairs),
-                "guaranteed": True,
+                "guaranteed": status != "blocked",
             },
         }
         diagnostics = list(parsed.diagnostics)
@@ -415,8 +453,27 @@ class UtterancePlanner:
             document_metadata=metadata,
             warnings=tuple(parsed.warnings) + prepared.info.warnings,
             diagnostics=tuple(diagnostics),
-        ).with_identity()
-        plan.validate()
+        )
+        if status == "blocked":
+            validate_plan_structure(plan)
+        else:
+            plan = plan.with_identity()
+            plan.validate()
+        candidate = PlanDraft(plan, renderability_report)
+        attempt = PlanningAttempt(
+            status=status,
+            candidate=candidate,
+            renderability=renderability_report,
+            diagnostics=tuple(diagnostics),
+            repairs=renderability_repairs,
+            attempt_id=planning_attempt_id(
+                status=status,
+                plan=plan,
+                report=renderability_report,
+                renderability_mode=config.renderability_mode,
+            ),
+            renderability_mode=config.renderability_mode,
+        )
         preparation_trace = (
             _make_preparation_trace(parsed, prepared, plan, document_language, fallback_mode)
             if trace
@@ -426,7 +483,7 @@ class UtterancePlanner:
             on_progress,
             PlannerProgressEvent(kind="phase.completed", phase="finalization"),
         )
-        return plan, preparation_trace
+        return attempt, preparation_trace
 
     def _parse(self, text: str, config: PlannerConfig) -> Any:
         if config.document_format == "plain":

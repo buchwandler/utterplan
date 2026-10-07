@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
+from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner, compile_attempt
 from utterplan.cli import build_parser, main
 
 
@@ -466,3 +466,61 @@ def test_validate_source_documents_and_preserve_saved_plan_validation(
     assert "plain input requires --language" in capsys.readouterr().err
     assert main(["validate", str(plain), "--input-format", "plain", "--language", "en-us"]) == 0
     assert "valid" in capsys.readouterr().out
+
+
+def _save_blocked_attempt(tmp_path: Path):
+    config = PlannerConfig(
+        language="en-us",
+        document_format="plain",
+        text_preparation="identity",
+        renderability_mode="strict",
+    )
+    attempt = compile_attempt("Hello.\n\n.\n\nWorld.", input_format="plain", config=config)
+    path = tmp_path / "blocked.attempt.toml"
+    attempt.save(path)
+    return attempt, path
+
+
+def test_inspect_attempt_reports_issues_segment_and_unit(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    attempt, path = _save_blocked_attempt(tmp_path)
+    issue_segment = attempt.renderability.issues[0].segment_id
+    unit = attempt.candidate.units[0]
+
+    assert (
+        main(
+            [
+                "inspect-attempt",
+                str(path),
+                "--issues",
+                "--segment",
+                issue_segment,
+                "--unit",
+                unit.id,
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "status:        blocked" in output
+    assert "renderability: blocked (strict)" in output
+    assert "renderability.punctuation_only" in output
+    assert "safe: true" in output
+    assert f"Segment {issue_segment}" in output
+    assert f"Unit {unit.id}" in output
+
+
+def test_inspect_attempt_json_exposes_separate_artifact_schema(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    attempt, path = _save_blocked_attempt(tmp_path)
+
+    assert main(["inspect-attempt", str(path), "--json"]) == 0
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert payload["schema"] == "utterplan.planning-attempt.v1"
+    assert payload["attempt"]["status"] == "blocked"
+    assert payload["candidate"]["segments"]
+    assert payload["renderability"]["issues"]
+    assert payload["attempt"]["attempt_id"] == attempt.attempt_id

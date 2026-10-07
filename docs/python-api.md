@@ -41,6 +41,47 @@ the plan, is not renderer input, and does not change `plan.plan_id`. Its source
 ranges index SSMD-clean structural text; transformation output ranges index prepared
 spoken text, using Python string character offsets.
 
+## Persistable planning attempts
+
+`compile_attempt` and `UtterancePlanner.compile_attempt` expose a finalized planning
+outcome without raising solely because a segment is not renderable. They still raise
+for input, configuration, and planning failures. The existing `compile_document`,
+`UtterancePlanner.compile`, and `plan` APIs remain strict and continue raising
+`PlanRenderabilityError` when renderability blocks completion.
+
+Attempts are separate from canonical plans. A blocked attempt retains an inspect-only
+candidate draft; it is not a valid `UtterancePlan` and cannot be loaded by
+`UtterancePlan.load()`. Persist it with `PlanningAttempt.save()` and restore it with
+`PlanningAttempt.load()`; the attempt TOML schema is
+`utterplan.planning-attempt.v1`, independent of canonical plan schema v4.
+
+```python
+from utterplan import PlannerConfig, compile_attempt
+
+attempt = compile_attempt(
+    "Hello.\n\n.\n\nWorld.",
+    input_format="plain",
+    config=PlannerConfig(
+        language="en-us",
+        renderability_mode="strict",
+    ),
+)
+assert attempt.status == "blocked"
+attempt.save("chapter.attempt.toml")
+
+for issue in attempt.renderability.issues:
+    assessment = issue.repair_assessment
+    if assessment is not None:
+        print(issue.segment_id, assessment.safe, assessment.action)
+        print(assessment.blockers)
+```
+
+Repair assessments report the existing conservative options; they do not rewrite
+text speculatively. In repair mode, only the planner's established safe repairs are
+applied. `utterplan inspect-attempt chapter.attempt.toml --issues` shows issues,
+source locations, and repair assessments; `--segment` and `--unit` select candidate
+topology, and `--json` emits the complete attempt as JSON for inspection.
+
 ## TOML persistence
 
 Schema v4 remains the semantic contract, while `.utterplan.toml` is the canonical persisted format. `to_toml()` and `from_toml()` round-trip the complete plan; `save()` writes atomically, and `load()` accepts TOML only. Normal loading does not auto-detect or fall back to JSON.

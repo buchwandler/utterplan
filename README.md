@@ -50,9 +50,14 @@ utterplan validate chapter.utterplan.toml
 utterplan inspect chapter.utterplan.toml --segment 0
 utterplan inspect chapter.utterplan.toml --semantic-boundaries
 utterplan explain chapter.utterplan.toml
+utterplan inspect-attempt chapter.attempt.toml --issues
 ```
 
 `explain` presents the compiled plan as a human-readable speech plan, while `inspect` exposes lower-level diagnostic fields.
+
+`inspect-attempt` reads the separate `utterplan.planning-attempt.v1` TOML artifact,
+not a canonical plan. Use it to review renderability issues and safe repair
+assessments on blocked planning outcomes; such candidates remain inspect-only drafts.
 Canonical plan output is TOML (`.utterplan.toml`) and is written to stdout when no output file is supplied. Status messages use stderr, and existing output files require `--force`. Safe punctuation repair is the default; use `--renderability strict` to reject every repair opportunity.
 
 ## SSMD source contract

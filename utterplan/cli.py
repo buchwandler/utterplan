@@ -5,10 +5,11 @@ import json
 import sys
 from contextlib import suppress
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from . import PlannerConfig, UtterancePlan, __version__
 from .atomic_io import atomic_write_text
+from .attempts import PlanningAttempt
 from .batch import CompileOutcome, CompileRequest, compile_to_files
 from .compiler import InputFormat, compile_document
 from .config import LinguisticsConfig, PauseConfig
@@ -24,6 +25,7 @@ _EXAMPLES = """examples:
   utterplan compile-many chapters/*.ssmd --output-dir build/plans
   utterplan validate chapter.utterplan.toml
   utterplan inspect chapter.utterplan.toml --segment 0
+  utterplan inspect-attempt attempt.toml --issues
   utterplan explain chapter.utterplan.toml
   utterplan migrate old.utterplan.json -o old.utterplan.toml
 """
@@ -182,6 +184,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="show semantic split opportunities in spoken coordinates",
     )
     inspect_parser.add_argument("--preparation", action="store_true")
+
+    attempt_inspect_parser = commands.add_parser(
+        "inspect-attempt", help="inspect a persisted planning-attempt artifact"
+    )
+    attempt_inspect_parser.add_argument("input", type=Path)
+    attempt_inspect_parser.add_argument("--issues", action="store_true")
+    attempt_inspect_parser.add_argument("--segment", help="inspect one segment by ID or index")
+    attempt_inspect_parser.add_argument("--unit", help="inspect one unit by ID or index")
+    attempt_inspect_parser.add_argument(
+        "--json", action="store_true", help="emit the full attempt as JSON"
+    )
     return parser
 
 
@@ -556,6 +569,9 @@ def main(argv: list[str] | None = None) -> int:
             return _migrate(args)
         if args.command == "validate":
             return _validate(args)
+        if args.command == "inspect-attempt":
+            _inspect_attempt(PlanningAttempt.load(args.input), args)
+            return 0
         plan = UtterancePlan.load(args.input)
         if args.command == "explain":
             print(format_explanation(plan, details=args.details), end="")
@@ -654,3 +670,91 @@ def _inspect(plan: UtterancePlan, args: argparse.Namespace) -> None:
         print(f"  pause_before:  {segment.pause_before.seconds}s {segment.pause_before.events}")
         print(f"  pause_after:   {segment.pause_after.seconds}s {segment.pause_after.events}")
         print(f"  directives:    {segment.directives.to_dict()}")
+
+
+def _inspect_attempt(attempt: PlanningAttempt, args: argparse.Namespace) -> None:
+    if args.json:
+        print(json.dumps(attempt.to_dict(), ensure_ascii=False, indent=2))
+        return
+
+    print("UtterPlan planning attempt")
+    print(f"  status:        {attempt.status}")
+    print(f"  attempt ID:    {attempt.attempt_id}")
+    print(
+        f"  renderability: {'guaranteed' if attempt.ok else 'blocked'} ({attempt.renderability_mode})"
+    )
+    print(
+        f"  candidate:    {len(attempt.candidate.segments)} segments, {len(attempt.candidate.units)} units"
+    )
+    print(f"  issues:       {len(attempt.renderability.issues)}")
+    print(f"  repairs:      {len(attempt.repairs)}")
+
+    if args.issues:
+        if not attempt.renderability.issues and not attempt.repairs:
+            print("\nIssues and repairs: none")
+        for issue in attempt.renderability.issues:
+            _print_attempt_issue(issue, label="Issue")
+        for issue in attempt.repairs:
+            _print_attempt_issue(issue, label="Repair")
+
+    if args.segment is not None:
+        segment = _attempt_segment(attempt, args.segment)
+        print(f"\nSegment {segment.id}: {segment.spoken_start}:{segment.spoken_end}")
+        print(f"  text:      {segment.text!r}")
+        print(f"  language:  {segment.language}")
+        print(f"  structure: {segment.structural_start}:{segment.structural_end}")
+        unit_ids = [unit.id for unit in attempt.candidate.units if segment.id in unit.segment_ids]
+        print(f"  units:     {', '.join(unit_ids) if unit_ids else '-'}")
+        for issue in (*attempt.renderability.issues, *attempt.repairs):
+            if issue.segment_id == segment.id:
+                _print_attempt_issue(
+                    issue, label="Issue" if issue in attempt.renderability.issues else "Repair"
+                )
+
+    if args.unit is not None:
+        unit = _attempt_unit(attempt, args.unit)
+        print(f"\nUnit {unit.id}: {unit.kind} {unit.spoken_start}:{unit.spoken_end}")
+        for segment_id in unit.segment_ids:
+            segment = next(item for item in attempt.candidate.segments if item.id == segment_id)
+            print(f"  {segment.id}: {segment.text!r}")
+
+
+def _print_attempt_issue(issue: Any, *, label: str) -> None:
+    print(f"\n{label} {issue.segment_id}: {issue.code} — {issue.reason}")
+    print(f"  text: {issue.text!r}")
+    if issue.line is not None:
+        location = f"{issue.line}:{issue.column or 1}"
+    elif issue.source_start is not None:
+        location = f"source {issue.source_start}:{issue.source_end}"
+    else:
+        location = "source location unavailable"
+    print(f"  location: {location}")
+    assessment = issue.repair_assessment
+    if assessment is not None:
+        print(f"  safe: {str(assessment.safe).lower()}")
+        print(f"  action: {assessment.action}")
+        if assessment.blockers:
+            for blocker in assessment.blockers:
+                print(f"  blocker: {blocker}")
+
+
+def _attempt_segment(attempt: PlanningAttempt, selector: str) -> Any:
+    for segment in attempt.candidate.segments:
+        if segment.id == selector:
+            return segment
+    if selector.isdigit():
+        index = int(selector)
+        if 0 <= index < len(attempt.candidate.segments):
+            return attempt.candidate.segments[index]
+    raise _CliUsageError(f"unknown attempt segment {selector!r}")
+
+
+def _attempt_unit(attempt: PlanningAttempt, selector: str) -> Any:
+    for unit in attempt.candidate.units:
+        if unit.id == selector:
+            return unit
+    if selector.isdigit():
+        index = int(selector)
+        if 0 <= index < len(attempt.candidate.units):
+            return attempt.candidate.units[index]
+    raise _CliUsageError(f"unknown attempt unit {selector!r}")
