@@ -21,6 +21,12 @@ from .explain import format_explanation
 from .migration import MigrationResult, migrate_plan_data
 from .model import FlowPlan
 from .renderability import format_renderability_error
+from .ssmdbook import (
+    SSMDBookError,
+    load_ssmdbook_index,
+    select_ssmdbook_chapters,
+    selected_chapter_path,
+)
 from .trace_codec import loads_trace
 
 _EXAMPLES = """examples:
@@ -28,6 +34,7 @@ _EXAMPLES = """examples:
   utterplan compile chapter.ssmd.md -o plans/chapter.utterplan.toml
   utterplan compile plain.txt --input-format plain --language de-DE --stdout
   utterplan compile-many chapters/*.ssmd --output-dir build/plans
+  utterplan compile-book chapters --chapters 5-17
   utterplan validate chapter.utterplan.toml
   utterplan inspect chapter.utterplan.toml --segment 0
   utterplan inspect-attempt attempt.toml --issues
@@ -145,6 +152,54 @@ def build_parser() -> argparse.ArgumentParser:
     )
     batch_parser.add_argument("--report", type=Path, help="TOML operational report path")
 
+    book_parser = commands.add_parser(
+        "compile-book",
+        help="compile selected chapters from an ssmdbook workspace",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  utterplan compile-book novel.ssmdbook\n"
+            "  utterplan compile-book novel.ssmdbook --chapters 5-17\n"
+            "  utterplan compile-book novel.ssmdbook/chapters --chapters 1,3-5\n"
+            "  utterplan compile-book chapters --chapters 5-17\n"
+            "  utterplan compile-book chapters --chapters 5-17 --output-dir build/plans"
+        ),
+    )
+    book_parser.add_argument(
+        "input", type=Path, help=".ssmdbook directory or its canonical chapters/ directory"
+    )
+    book_parser.add_argument(
+        "--chapters",
+        default="all",
+        metavar="SELECTOR",
+        help="source chapter selection: all, N, N-M, or comma-separated combinations such as 1,3-5 (default: all)",
+    )
+    book_parser.add_argument(
+        "--output-dir", type=Path, help="plan output directory (default: <ssmdbook>/utterplan)"
+    )
+    book_parser.add_argument("--language", "--lang", dest="language")
+    book_parser.add_argument("--unit", choices=("paragraph", "sentence"), default="paragraph")
+    book_parser.add_argument(
+        "--text-preparation", choices=("spokenform", "identity"), default="spokenform"
+    )
+    book_parser.add_argument("--pause-mode", choices=("tts", "manual", "auto"), default="tts")
+    book_parser.add_argument(
+        "--renderability",
+        choices=("strict", "repair"),
+        default="repair",
+        help="safely repair isolated punctuation by default; strict rejects every repair opportunity",
+    )
+    book_parser.add_argument(
+        "--spacy",
+        choices=("auto", "off", "sm", "md", "lg", "trf"),
+        default="off",
+        help="linguistic-resource policy; default is the deterministic fallback",
+    )
+    book_parser.add_argument("--force", action="store_true", help="replace existing plan files")
+    book_parser.add_argument(
+        "--fail-fast", action="store_true", help="skip remaining chapters after the first failure"
+    )
+    book_parser.add_argument("--report", type=Path, help="TOML operational report path")
     validate_parser = commands.add_parser(
         "validate", help="validate a source document or saved semantic plan"
     )
@@ -329,23 +384,8 @@ def _batch_output_name(source: Path) -> str:
     return source.stem + ".utterplan.toml"
 
 
-def _compile_many(args: argparse.Namespace) -> int:
-    sources: list[Path] = args.inputs
-    outputs = [args.output_dir / _batch_output_name(source) for source in sources]
-    owners: dict[Path, Path] = {}
-    for source, output in zip(sources, outputs, strict=True):
-        key = output.resolve()
-        if key in owners:
-            raise _CliUsageError(
-                f"inputs {owners[key]} and {source} map to the same output {output}"
-            )
-        owners[key] = source
-
-    report_path = args.report or (args.output_dir / "compile-report.toml")
-    if report_path.resolve() in owners:
-        raise _CliUsageError(f"batch report path collides with plan output: {report_path}")
-
-    config = PlannerConfig(
+def _planner_config_from_batch_args(args: argparse.Namespace) -> PlannerConfig:
+    return PlannerConfig(
         language=args.language or "en-US",
         document_format="plain",
         text_preparation=args.text_preparation,
@@ -354,32 +394,33 @@ def _compile_many(args: argparse.Namespace) -> int:
         linguistics=_linguistics_config(args.spacy),
         renderability_mode=args.renderability,
     )
-    requests = [
-        CompileRequest(
-            id=f"item-{index:06d}",
-            source=source,
-            output=output,
-            input_format=cast(Literal["auto", "plain", "ssmd"], args.input_format),
-            fallback_language=args.language,
-            source_label=str(source),
-            require_language=args.language is None,
-        )
-        for index, (source, output) in enumerate(zip(sources, outputs, strict=True), start=1)
-    ]
+
+
+def _run_compile_requests(
+    requests: list[CompileRequest],
+    *,
+    config: PlannerConfig,
+    fail_fast: bool,
+    force: bool,
+    report_path: Path,
+    include_ids: bool = False,
+) -> int:
     outcomes: list[CompileOutcome] = []
     iterator = iter(
         compile_to_files(
             requests,
             config=config,
-            fail_fast=args.fail_fast,
-            force=args.force,
+            fail_fast=fail_fast,
+            force=force,
             report_path=report_path,
         )
     )
     total = len(requests)
     written = 0
     for index, request in enumerate(requests, start=1):
-        print(f"[{index}/{total}] {request.source_label}", file=sys.stderr)
+        source_label = request.source_label or str(request.source)
+        progress_label = f"{request.id}  {source_label}" if include_ids else source_label
+        print(f"[{index}/{total}] {progress_label}", file=sys.stderr)
         outcome = next(iterator)
         outcomes.append(outcome)
         if outcome.status == "written":
@@ -397,8 +438,9 @@ def _compile_many(args: argparse.Namespace) -> int:
             if outcome.error_message:
                 for line in outcome.error_message.splitlines():
                     print(f"       {line}", file=sys.stderr)
-            if not args.fail_fast and index < total:
-                next_label = requests[index].source_label or requests[index].id
+            if not fail_fast and index < total:
+                next_request = requests[index]
+                next_label = next_request.source_label or next_request.id
                 print(
                     f"       continuing with {next_label}; {written} plans are already saved",
                     file=sys.stderr,
@@ -433,6 +475,119 @@ def _compile_many(args: argparse.Namespace) -> int:
         if written:
             print(f"\n{written} valid plan files were preserved.", file=sys.stderr)
     return 1 if failed else 0
+
+
+def _compile_many(args: argparse.Namespace) -> int:
+    sources: list[Path] = args.inputs
+    outputs = [args.output_dir / _batch_output_name(source) for source in sources]
+    owners: dict[Path, Path] = {}
+    for source, output in zip(sources, outputs, strict=True):
+        key = output.resolve()
+        if key in owners:
+            raise _CliUsageError(
+                f"inputs {owners[key]} and {source} map to the same output {output}"
+            )
+        owners[key] = source
+
+    report_path = args.report or (args.output_dir / "compile-report.toml")
+    if report_path.resolve() in owners:
+        raise _CliUsageError(f"batch report path collides with plan output: {report_path}")
+
+    requests = [
+        CompileRequest(
+            id=f"item-{index:06d}",
+            source=source,
+            output=output,
+            input_format=cast(Literal["auto", "plain", "ssmd"], args.input_format),
+            fallback_language=args.language,
+            source_label=str(source),
+            require_language=args.language is None,
+        )
+        for index, (source, output) in enumerate(zip(sources, outputs, strict=True), start=1)
+    ]
+    return _run_compile_requests(
+        requests,
+        config=_planner_config_from_batch_args(args),
+        fail_fast=args.fail_fast,
+        force=args.force,
+        report_path=report_path,
+    )
+
+
+def _path_is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _compile_book(args: argparse.Namespace) -> int:
+    try:
+        book = load_ssmdbook_index(args.input)
+        chapters = select_ssmdbook_chapters(book, args.chapters)
+        sources = [selected_chapter_path(book, chapter) for chapter in chapters]
+    except SSMDBookError as exc:
+        raise _CliUsageError(str(exc)) from exc
+
+    output_dir = args.output_dir or (book.root / "utterplan")
+    chapters_dir = (book.root / "chapters").resolve()
+    resolved_output_dir = output_dir.resolve()
+    if _path_is_within(resolved_output_dir, chapters_dir):
+        raise _CliUsageError("book plan output must not be inside the source chapters/ directory")
+
+    outputs = [output_dir / _batch_output_name(source) for source in sources]
+    owners: dict[Path, Path] = {}
+    for source, output in zip(sources, outputs, strict=True):
+        key = output.resolve()
+        if _path_is_within(key, chapters_dir) or key == book.manifest_path.resolve():
+            raise _CliUsageError(
+                f"book plan output would overwrite source workspace content: {output}"
+            )
+        if key in owners:
+            raise _CliUsageError(
+                f"selected chapters {owners[key]} and {source} map to the same output {output}"
+            )
+        owners[key] = source
+
+    report_path = args.report or (output_dir / "compile-report.toml")
+    resolved_report = report_path.resolve()
+    if resolved_report in owners:
+        raise _CliUsageError(f"book report path collides with plan output: {report_path}")
+    if (
+        _path_is_within(resolved_report, chapters_dir)
+        or resolved_report == book.manifest_path.resolve()
+    ):
+        raise _CliUsageError(
+            f"book report path would overwrite source workspace content: {report_path}"
+        )
+
+    requests = [
+        CompileRequest(
+            id=chapter.id,
+            source=source,
+            output=output,
+            input_format="ssmd",
+            fallback_language=args.language,
+            source_label=str(source),
+            require_language=args.language is None,
+        )
+        for chapter, source, output in zip(chapters, sources, outputs, strict=True)
+    ]
+
+    print("UtterPlan book compile", file=sys.stderr)
+    print(f"  workspace: {book.root}", file=sys.stderr)
+    print(f"  chapters:  {args.chapters}", file=sys.stderr)
+    print(f"  selected:  {len(requests)}", file=sys.stderr)
+    print(f"  output:    {output_dir}", file=sys.stderr)
+    return _run_compile_requests(
+        requests,
+        config=_planner_config_from_batch_args(args),
+        fail_fast=args.fail_fast,
+        force=args.force,
+        report_path=report_path,
+        include_ids=True,
+    )
 
 
 def _compile(args: argparse.Namespace) -> int:
@@ -641,6 +796,8 @@ def main(argv: list[str] | None = None) -> int:
             return _compile(args)
         if args.command == "compile-many":
             return _compile_many(args)
+        if args.command == "compile-book":
+            return _compile_book(args)
         if args.command == "migrate":
             return _migrate(args)
         if args.command == "validate":

@@ -71,6 +71,28 @@ utterplan compile-many chapters/*.ssmd --output-dir build/plans
 
 Each output name is derived from its source (`chapter.ssmd` becomes `chapter.utterplan.toml`). The command atomically refreshes `build/plans/compile-report.toml`; use `--report PATH` to choose another location, `--fail-fast` to skip later inputs after a failure, and `--force` to replace existing plans. Duplicate output names and report/output collisions are rejected before writing.
 
+## Compile chapters from an SSMDBook
+
+For an editable `.ssmdbook` directory, compile a source-number range without expanding filenames in the shell:
+
+```bash
+cd "Platform Decay - Martha Wells.ssmdbook"
+
+utterplan compile-book chapters --chapters 5-17
+```
+
+This writes one independent canonical v5 plan per selected chapter and a TOML report by default:
+
+```text
+utterplan/
+├── compile-report.toml
+├── chapter-0005.utterplan.toml
+├── chapter-0006.utterplan.toml
+├── ...
+└── chapter-0017.utterplan.toml
+```
+
+Omit `--chapters` to compile all manifest chapters. Select non-contiguous chapters with a comma-separated selector, for example `utterplan compile-book chapters --chapters 1,3-5`. You can also pass the `.ssmdbook` root instead of `chapters/`, and override the destination with `--output-dir build/plans`. UtterPlan reads the manifest and current selected chapter content but does not modify the book or refresh stale chapter hashes. See the [SSMDBook guide](ssmdbook.md) for selection rules and safety details.
 Safe punctuation repair is enabled by default for both `compile` and `compile-many`. Use `--renderability strict` to reject repair opportunities and inspect their explanation without modifying the plan.
 
 ## Inspect and validate

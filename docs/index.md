@@ -9,6 +9,7 @@ speech plans. It stops before G2P and synthesis.
 
 getting-started
 cli
+ssmdbook
 consumer-guide
 format
 coordinate-spaces

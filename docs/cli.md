@@ -91,6 +91,31 @@ Source names determine output names: `chapter.ssmd`, `chapter.ssmd.md`, and `cha
 
 Shared planning options include `--language`, `--input-format auto|plain|ssmd`, `--unit`, `--text-preparation`, `--pause-mode`, `--spacy`, and `--renderability`. Progress, repair notices, actionable errors, and the final counts are written to stderr. Exit status is 0 if every input succeeds, 1 if any input fails, and 2 for usage errors such as output collisions. `--fail-fast` skips later requests after the first failure but preserves all completed outputs and updates the report.
 
+## Compile chapters from an SSMDBook workspace
+
+`compile-book` discovers selected SSMD chapters from an editable `.ssmdbook` manifest and compiles each chapter independently through the batch compiler. Pass either the book directory or its canonical `chapters/` directory:
+
+```bash
+utterplan compile-book novel.ssmdbook --chapters 5-17
+utterplan compile-book novel.ssmdbook/chapters --chapters 1,3-5
+```
+
+The workflow used from inside the workspace is:
+
+```bash
+cd "Platform Decay - Martha Wells.ssmdbook"
+
+utterplan compile-book chapters --chapters 5-17
+```
+
+`--chapters` selects manifest `source_number` values, not filenames or manifest indexes. It accepts `all` (the default), one number, inclusive ranges, or comma-separated combinations such as `1,3-5,9`. Duplicate selections do not duplicate work, and selected chapters always follow manifest array order. A selected missing source number or malformed selector is rejected before compilation.
+
+By default, plans and the operational report are written to `<book-root>/utterplan/`. Use `--output-dir PATH` to override the destination. One canonical v5 `.utterplan.toml` plan is written per selected chapter, plus `compile-report.toml`. Existing plans are protected unless `--force` is given; `--fail-fast` skips later chapters after the first failure. `--report PATH` overrides the report location. Duplicate output names, report/plan collisions, and writes into the source `chapters/` directory or over `manifest.json` are rejected before writing.
+
+Shared planning options are `--language`/`--lang`, `--unit`, `--text-preparation`, `--pause-mode`, `--renderability`, and `--spacy`. Chapter documents are SSMD 0.9 by contract, so `compile-book` does not accept `--input-format`. The manifest is read-only: edited chapter content is compiled as it currently exists even if its recorded digest is stale, and UtterPlan never refreshes the manifest or chapter hashes. Only selected chapter files are opened, so an unrelated broken chapter outside the selection does not block the request.
+
+For the full editable-workspace behavior and examples, see the [SSMDBook guide](ssmdbook.md).
+
 ## Explain a plan
 
 Explain an existing compiled plan as a human-readable speech narrative:

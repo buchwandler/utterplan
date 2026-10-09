@@ -9,8 +9,7 @@ UtterPlan is the canonical, engine-independent semantic compiler from one SSMD
 document (or explicitly selected plain-text document) to an executable speech
 plan. It produces deterministic prepared text, ordered flow units, segment-local
 semantics, pause intents, portable document metadata, and typed directives for
-independent consumers such as ttsready and Readio. It does not manage books or
-consumer workspaces, and stops before G2P, synthesis, and audio.
+independent consumers such as ttsready and Readio. It does not manage or modify book workspaces; `compile-book` reads an SSMDBook manifest only to discover selected source chapters. It stops before G2P, synthesis, and audio.
 
 ## CLI
 
@@ -42,6 +41,26 @@ utterplan compile-many examples/*.ssmd --output-dir build/plans
 
 This writes one `.utterplan.toml` per source plus an atomically refreshed `compile-report.toml`. Use `--fail-fast` to skip later inputs after a failure, `--force` to replace existing plans, or `--report PATH` to choose another report location.
 
+Compile a selected chapter range directly from an editable SSMDBook workspace:
+
+```bash
+cd "Platform Decay - Martha Wells.ssmdbook"
+
+utterplan compile-book chapters --chapters 5-17
+```
+
+The command reads the workspace manifest to discover chapters and writes independent v5 plans and a report under `utterplan/`:
+
+```text
+utterplan/
+├── compile-report.toml
+├── chapter-0005.utterplan.toml
+├── chapter-0006.utterplan.toml
+├── ...
+└── chapter-0017.utterplan.toml
+```
+
+Omit `--chapters` to compile all manifest chapters. Use comma-separated source-number selections for non-contiguous ranges, for example `utterplan compile-book chapters --chapters 1,3-5`. The book root itself is also accepted as input; see the [SSMDBook guide](docs/ssmdbook.md).
 The CLI also provides:
 
 ```bash
@@ -153,6 +172,7 @@ renderer repository rather than UtterPlan's test suite.
 
 - [Getting started](docs/getting-started.md)
 - [CLI](docs/cli.md)
+- [SSMDBook workflows](docs/ssmdbook.md)
 - [Format and schema](docs/format.md)
 - [Consumer guide](docs/consumer-guide.md)
 - [Architecture](docs/architecture.md)
