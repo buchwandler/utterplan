@@ -1,0 +1,1502 @@
+ README.md                  |  24 ++-
+ docs/cli.md                |  25 +++
+ docs/getting-started.md    |  22 +++
+ docs/index.md              |   1 +
+ docs/ssmdbook.md           |  72 ++++++++
+ tests/test_cli_ssmdbook.py | 431 +++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_ssmdbook.py     | 279 +++++++++++++++++++++++++++++
+ utterplan/cli.py           | 225 +++++++++++++++++++----
+ utterplan/ssmdbook.py      | 259 +++++++++++++++++++++++++++
+ 9 files changed, 1302 insertions(+), 36 deletions(-)
+
+diff --git a/README.md b/README.md
+index 1ed0817..6c2e2d2 100644
+--- a/README.md
++++ b/README.md
+@@ -9,8 +9,7 @@ UtterPlan is the canonical, engine-independent semantic compiler from one SSMD
+ document (or explicitly selected plain-text document) to an executable speech
+ plan. It produces deterministic prepared text, ordered flow units, segment-local
+ semantics, pause intents, portable document metadata, and typed directives for
+-independent consumers such as ttsready and Readio. It does not manage books or
+-consumer workspaces, and stops before G2P, synthesis, and audio.
++independent consumers such as ttsready and Readio. It does not manage or modify book workspaces; `compile-book` reads an SSMDBook manifest only to discover selected source chapters. It stops before G2P, synthesis, and audio.
+
+ ## CLI
+
+@@ -42,6 +41,26 @@ utterplan compile-many examples/*.ssmd --output-dir build/plans
+
+ This writes one `.utterplan.toml` per source plus an atomically refreshed `compile-report.toml`. Use `--fail-fast` to skip later inputs after a failure, `--force` to replace existing plans, or `--report PATH` to choose another report location.
+
++Compile a selected chapter range directly from an editable SSMDBook workspace:
++
++```bash
++cd "Platform Decay - Martha Wells.ssmdbook"
++
++utterplan compile-book chapters --chapters 5-17
++```
++
++The command reads the workspace manifest to discover chapters and writes independent v5 plans and a report under `utterplan/`:
++
++```text
++utterplan/
++├── compile-report.toml
++├── chapter-0005.utterplan.toml
++├── chapter-0006.utterplan.toml
++├── ...
++└── chapter-0017.utterplan.toml
++```
++
++Omit `--chapters` to compile all manifest chapters. Use comma-separated source-number selections for non-contiguous ranges, for example `utterplan compile-book chapters --chapters 1,3-5`. The book root itself is also accepted as input; see the [SSMDBook guide](docs/ssmdbook.md).
+ The CLI also provides:
+
+ ```bash
+@@ -153,6 +172,7 @@ renderer repository rather than UtterPlan's test suite.
+
+ - [Getting started](docs/getting-started.md)
+ - [CLI](docs/cli.md)
++- [SSMDBook workflows](docs/ssmdbook.md)
+ - [Format and schema](docs/format.md)
+ - [Consumer guide](docs/consumer-guide.md)
+ - [Architecture](docs/architecture.md)
+diff --git a/docs/cli.md b/docs/cli.md
+index 3a671a8..77a2b03 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -91,6 +91,31 @@ Source names determine output names: `chapter.ssmd`, `chapter.ssmd.md`, and `cha
+
+ Shared planning options include `--language`, `--input-format auto|plain|ssmd`, `--unit`, `--text-preparation`, `--pause-mode`, `--spacy`, and `--renderability`. Progress, repair notices, actionable errors, and the final counts are written to stderr. Exit status is 0 if every input succeeds, 1 if any input fails, and 2 for usage errors such as output collisions. `--fail-fast` skips later requests after the first failure but preserves all completed outputs and updates the report.
+
++## Compile chapters from an SSMDBook workspace
++
++`compile-book` discovers selected SSMD chapters from an editable `.ssmdbook` manifest and compiles each chapter independently through the batch compiler. Pass either the book directory or its canonical `chapters/` directory:
++
++```bash
++utterplan compile-book novel.ssmdbook --chapters 5-17
++utterplan compile-book novel.ssmdbook/chapters --chapters 1,3-5
++```
++
++The workflow used from inside the workspace is:
++
++```bash
++cd "Platform Decay - Martha Wells.ssmdbook"
++
++utterplan compile-book chapters --chapters 5-17
++```
++
++`--chapters` selects manifest `source_number` values, not filenames or manifest indexes. It accepts `all` (the default), one number, inclusive ranges, or comma-separated combinations such as `1,3-5,9`. Duplicate selections do not duplicate work, and selected chapters always follow manifest array order. A selected missing source number or malformed selector is rejected before compilation.
++
++By default, plans and the operational report are written to `<book-root>/utterplan/`. Use `--output-dir PATH` to override the destination. One canonical v5 `.utterplan.toml` plan is written per selected chapter, plus `compile-report.toml`. Existing plans are protected unless `--force` is given; `--fail-fast` skips later chapters after the first failure. `--report PATH` overrides the report location. Duplicate output names, report/plan collisions, and writes into the source `chapters/` directory or over `manifest.json` are rejected before writing.
++
++Shared planning options are `--language`/`--lang`, `--unit`, `--text-preparation`, `--pause-mode`, `--renderability`, and `--spacy`. Chapter documents are SSMD 0.9 by contract, so `compile-book` does not accept `--input-format`. The manifest is read-only: edited chapter content is compiled as it currently exists even if its recorded digest is stale, and UtterPlan never refreshes the manifest or chapter hashes. Only selected chapter files are opened, so an unrelated broken chapter outside the selection does not block the request.
++
++For the full editable-workspace behavior and examples, see the [SSMDBook guide](ssmdbook.md).
++
+ ## Explain a plan
+
+ Explain an existing compiled plan as a human-readable speech narrative:
+diff --git a/docs/getting-started.md b/docs/getting-started.md
+index ec2be50..4535766 100644
+--- a/docs/getting-started.md
++++ b/docs/getting-started.md
+@@ -71,6 +71,28 @@ utterplan compile-many chapters/*.ssmd --output-dir build/plans
+
+ Each output name is derived from its source (`chapter.ssmd` becomes `chapter.utterplan.toml`). The command atomically refreshes `build/plans/compile-report.toml`; use `--report PATH` to choose another location, `--fail-fast` to skip later inputs after a failure, and `--force` to replace existing plans. Duplicate output names and report/output collisions are rejected before writing.
+
++## Compile chapters from an SSMDBook
++
++For an editable `.ssmdbook` directory, compile a source-number range without expanding filenames in the shell:
++
++```bash
++cd "Platform Decay - Martha Wells.ssmdbook"
++
++utterplan compile-book chapters --chapters 5-17
++```
++
++This writes one independent canonical v5 plan per selected chapter and a TOML report by default:
++
++```text
++utterplan/
++├── compile-report.toml
++├── chapter-0005.utterplan.toml
++├── chapter-0006.utterplan.toml
++├── ...
++└── chapter-0017.utterplan.toml
++```
++
++Omit `--chapters` to compile all manifest chapters. Select non-contiguous chapters with a comma-separated selector, for example `utterplan compile-book chapters --chapters 1,3-5`. You can also pass the `.ssmdbook` root instead of `chapters/`, and override the destination with `--output-dir build/plans`. UtterPlan reads the manifest and current selected chapter content but does not modify the book or refresh stale chapter hashes. See the [SSMDBook guide](ssmdbook.md) for selection rules and safety details.
+ Safe punctuation repair is enabled by default for both `compile` and `compile-many`. Use `--renderability strict` to reject repair opportunities and inspect their explanation without modifying the plan.
+
+ ## Inspect and validate
+diff --git a/docs/index.md b/docs/index.md
+index 2712d8a..31a29f2 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -9,6 +9,7 @@ speech plans. It stops before G2P and synthesis.
+
+ getting-started
+ cli
++ssmdbook
+ consumer-guide
+ format
+ coordinate-spaces
+diff --git a/docs/ssmdbook.md b/docs/ssmdbook.md
+new file mode 100644
+index 0000000..1195186
+--- /dev/null
++++ b/docs/ssmdbook.md
+@@ -0,0 +1,72 @@
++# Compiling chapters from an SSMDBook
++
++UtterPlan's `compile-book` command accepts an editable `.ssmdbook` workspace as a collection of independent SSMD 0.9 chapter sources. It reads the workspace manifest to discover chapter paths and source numbers, then delegates the selected documents to the existing incremental batch compiler. Each successful chapter becomes its own canonical UtterPlan v5 plan; UtterPlan does not create a combined book plan or modify the source workspace.
++
++## Quick start
++
++From the book root, select an inclusive source chapter range:
++
++```bash
++cd "Platform Decay - Martha Wells.ssmdbook"
++
++utterplan compile-book chapters --chapters 5-17
++```
++
++The output defaults to `<book-root>/utterplan/`:
++
++```text
++utterplan/
++├── compile-report.toml
++├── chapter-0005.utterplan.toml
++├── chapter-0006.utterplan.toml
++├── ...
++└── chapter-0017.utterplan.toml
++```
++
++The equivalent explicit-root form is:
++
++```bash
++utterplan compile-book "Platform Decay - Martha Wells.ssmdbook" --chapters 5-17
++```
++
++You may also run `utterplan compile-book chapters` to compile every chapter in the manifest, or select a non-contiguous set:
++
++```bash
++utterplan compile-book chapters --chapters 1,3-5
++```
++
++Use `--output-dir PATH` to choose another plan directory. The output directory and report path are preflighted for collisions. Plans are protected if they already exist unless `--force` is supplied. The normal batch behavior continues after a chapter failure; use `--fail-fast` to skip later chapters after the first failure. The TOML `compile-report.toml` records each selected item and its outcome; it is operational metadata, not a FlowPlan.
++
++## Workspace discovery and selection
++
++`INPUT` must be either:
++
++- an SSMDBook root containing `manifest.json`; or
++- its canonical `chapters/` directory, whose parent contains `manifest.json`.
++
++The manifest is the format authority; the root directory does not need a `.ssmdbook` suffix. UtterPlan accepts the SSMDBook v1 contract (`format: "ssmdconvert.book"`, `schema_version: 1`, `ssmd_version: "0.9"`). Chapter selection uses each entry's `source_number`, not the filename or position in the manifest. Supported selectors are:
++
++- `all` (default)
++- `5`
++- `5-17`
++- `1,3-5,9`
++
++Ranges are inclusive. Numbers must be positive and present in the manifest. Reversed or malformed ranges and missing source numbers are usage errors. Duplicate selected numbers are compiled once. Results follow authoritative manifest array order; they are not sorted by filename or number.
++
++Only selected chapter source files are opened by the compiler. A malformed or missing unselected chapter does not block a subset compilation. Selected source read, SSMD validation, planning, and write errors are handled as batch item failures, preserving successful outputs and the report.
++
++## Editable workspace behavior and safety
++
++An SSMDBook directory is an editable workspace. If a selected chapter was edited after the manifest was written, UtterPlan compiles the current file content even when its recorded `sha256` is stale. It never refreshes digests or edits `manifest.json` or chapter files. Chapter paths are checked as normalized relative POSIX paths below `chapters/`; absolute paths, drive prefixes, traversal, unsafe symlink escapes, and non-regular selected targets are rejected. Plans and reports may not be written into the source `chapters/` directory or over the manifest.
++
++`compile-book` shares these planning options with `compile-many`:
++
++- `--language` / `--lang`
++- `--unit paragraph|sentence`
++- `--text-preparation spokenform|identity`
++- `--pause-mode tts|manual|auto`
++- `--renderability strict|repair`
++- `--spacy auto|off|sm|md|lg|trf`
++- `--force`, `--fail-fast`, and `--report PATH`
++
++Chapter input is SSMD by contract, so `compile-book` deliberately has no `--input-format` option. When no `--language` is supplied, a selected chapter must declare its language in SSMD metadata.
+diff --git a/tests/test_cli_ssmdbook.py b/tests/test_cli_ssmdbook.py
+new file mode 100644
+index 0000000..b1f889b
+--- /dev/null
++++ b/tests/test_cli_ssmdbook.py
+@@ -0,0 +1,431 @@
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++import pytest
++import tomlkit
++
++from utterplan import FlowPlan
++from utterplan.cli import build_parser, main
++
++
++def _ssmd(text: str) -> str:
++    return f'---\nssmd_version: "0.9"\nlanguage: en-US\n---\n{text}\n'
++
++
++def _write_book(
++    root: Path,
++    numbers: tuple[int, ...],
++    *,
++    contents: dict[int, str] | None = None,
++    paths: dict[int, str] | None = None,
++) -> tuple[Path, list[dict[str, object]]]:
++    (root / "chapters").mkdir(parents=True, exist_ok=True)
++    entries: list[dict[str, object]] = []
++    contents = contents or {}
++    paths = paths or {}
++    for number in numbers:
++        relative_path = paths.get(number, f"chapters/chapter-{number:04d}.ssmd.md")
++        source_path = root / relative_path
++        if number in contents:
++            source_path.parent.mkdir(parents=True, exist_ok=True)
++            source_path.write_text(contents[number], encoding="utf-8")
++        entries.append(
++            {
++                "id": f"chapter-{number:04d}",
++                "source_number": number,
++                "path": relative_path,
++                "title": f"Chapter {number}",
++                "sha256": "0" * 64,
++            }
++        )
++    manifest = {
++        "format": "ssmdconvert.book",
++        "schema_version": 1,
++        "ssmd_version": "0.9",
++        "chapters": entries,
++    }
++    (root / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
++    return root, entries
++
++
++def _report(path: Path) -> dict[str, object]:
++    return dict(tomlkit.parse(path.read_text(encoding="utf-8")))
++
++
++def _plan_text(path: Path) -> str:
++    plan = FlowPlan.load(path)
++    assert plan.schema_version == 5
++    return " ".join(segment.text for unit in plan.flow for segment in unit.segments)
++
++
++def test_compile_book_root_range_defaults_to_utterplan_and_writes_v5_plans(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = tmp_path / "Platform Decay - Martha Wells.ssmdbook"
++    contents = {number: _ssmd(f"Chapter {number} content.") for number in range(1, 24)}
++    _write_book(root, tuple(range(1, 24)), contents=contents)
++    manifest_before = (root / "manifest.json").read_bytes()
++
++    result = main(
++        ["compile-book", str(root), "--chapters", "5-17", "--text-preparation", "identity"]
++    )
++
++    captured = capsys.readouterr()
++    output_dir = root / "utterplan"
++    assert result == 0
++    assert captured.out == ""
++    assert "selected:  13" in captured.err
++    assert "chapter-0005" in captured.err and "chapter-0017" in captured.err
++    assert sorted(path.name for path in output_dir.glob("*.utterplan.toml")) == [
++        f"chapter-{number:04d}.utterplan.toml" for number in range(5, 18)
++    ]
++    assert _plan_text(output_dir / "chapter-0005.utterplan.toml") == "Chapter 5 content."
++    report = _report(output_dir / "compile-report.toml")
++    assert report["requested"] == 13
++    assert report["written"] == 13
++    assert report["failed"] == 0
++    assert [item["id"] for item in report["item"]] == [
++        f"chapter-{number:04d}" for number in range(5, 18)
++    ]
++    assert (root / "manifest.json").read_bytes() == manifest_before
++
++
++def test_compile_book_accepts_chapters_directory_and_preserves_manifest_order(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = tmp_path / "book.ssmdbook"
++    contents = {number: _ssmd(f"Chapter {number}.") for number in (5, 7, 6)}
++    _write_book(root, (5, 7, 6), contents=contents)
++
++    result = main(
++        [
++            "compile-book",
++            str(root / "chapters"),
++            "--chapters",
++            "5-7",
++            "--text-preparation",
++            "identity",
++        ]
++    )
++
++    captured = capsys.readouterr()
++    assert result == 0
++    assert "[1/3] chapter-0005" in captured.err
++    assert "[2/3] chapter-0007" in captured.err
++    assert "[3/3] chapter-0006" in captured.err
++    report = _report(root / "utterplan/compile-report.toml")
++    assert [item["id"] for item in report["item"]] == [
++        "chapter-0005",
++        "chapter-0007",
++        "chapter-0006",
++    ]
++
++
++def test_compile_book_compiles_dirty_current_content_without_mutating_manifest(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = tmp_path / "editable.ssmdbook"
++    _write_book(root, (5,), contents={5: _ssmd("Original content.")})
++    manifest = root / "manifest.json"
++    manifest_before = manifest.read_bytes()
++    source = root / "chapters/chapter-0005.ssmd.md"
++    source.write_text(_ssmd("Edited workspace content."), encoding="utf-8")
++
++    result = main(["compile-book", str(root), "--chapters", "5", "--text-preparation", "identity"])
++
++    capsys.readouterr()
++    assert result == 0
++    assert _plan_text(root / "utterplan/chapter-0005.utterplan.toml") == "Edited workspace content."
++    assert manifest.read_bytes() == manifest_before
++
++
++def test_unselected_missing_or_malformed_chapter_does_not_block_selected_range(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = tmp_path / "subset.ssmdbook"
++    _write_book(
++        root,
++        (5, 6, 20),
++        contents={5: _ssmd("Five."), 6: _ssmd("Six."), 20: "not valid SSMD"},
++    )
++    (root / "chapters/chapter-0020.ssmd.md").unlink()
++
++    result = main(
++        ["compile-book", str(root), "--chapters", "5-6", "--text-preparation", "identity"]
++    )
++
++    capsys.readouterr()
++    assert result == 0
++    assert (root / "utterplan/chapter-0005.utterplan.toml").exists()
++    assert (root / "utterplan/chapter-0006.utterplan.toml").exists()
++    assert not (root / "utterplan/chapter-0020.utterplan.toml").exists()
++
++
++@pytest.mark.parametrize("selector", ["5-7", "17-5", "5,,7", "0"])
++def test_selector_usage_errors_preflight_before_creating_output(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str], selector: str
++) -> None:
++    root = tmp_path / "invalid-selection.ssmdbook"
++    _write_book(root, (5, 7), contents={5: _ssmd("Five."), 7: _ssmd("Seven.")})
++    output_dir = tmp_path / "outside-plans"
++
++    result = main(
++        ["compile-book", str(root), "--chapters", selector, "--output-dir", str(output_dir)]
++    )
++
++    captured = capsys.readouterr()
++    assert result == 2
++    assert captured.out == ""
++    assert not output_dir.exists()
++
++
++def test_unrecognized_workspace_is_a_usage_error_without_output_writes(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    output_dir = tmp_path / "plans"
++
++    result = main(["compile-book", str(tmp_path / "not-a-book"), "--output-dir", str(output_dir)])
++
++    captured = capsys.readouterr()
++    assert result == 2
++    assert "expected manifest.json" in captured.err
++    assert not output_dir.exists()
++
++
++def test_selected_invalid_ssmd_is_reported_and_later_chapters_continue(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = tmp_path / "partial.ssmdbook"
++    _write_book(
++        root,
++        (5, 6, 7),
++        contents={5: _ssmd("Five."), 6: _ssmd("€"), 7: _ssmd("Seven.")},
++    )
++
++    result = main(
++        ["compile-book", str(root), "--chapters", "5-7", "--text-preparation", "identity"]
++    )
++
++    captured = capsys.readouterr()
++    assert result == 1
++    assert (root / "utterplan/chapter-0005.utterplan.toml").exists()
++    assert not (root / "utterplan/chapter-0006.utterplan.toml").exists()
++    assert (root / "utterplan/chapter-0007.utterplan.toml").exists()
++    report = _report(root / "utterplan/compile-report.toml")
++    assert [item["status"] for item in report["item"]] == ["written", "failed", "written"]
++    assert report["item"][1]["stage"] == "renderability"
++    assert "continuing with" in captured.err
++
++
++def test_fail_fast_skips_remaining_book_chapters(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = tmp_path / "fail-fast.ssmdbook"
++    _write_book(
++        root,
++        (5, 6, 7),
++        contents={5: _ssmd("Five."), 6: _ssmd("€"), 7: _ssmd("Seven.")},
++    )
++
++    result = main(
++        [
++            "compile-book",
++            str(root),
++            "--chapters",
++            "5-7",
++            "--text-preparation",
++            "identity",
++            "--fail-fast",
++        ]
++    )
++
++    capsys.readouterr()
++    assert result == 1
++    report = _report(root / "utterplan/compile-report.toml")
++    assert [item["status"] for item in report["item"]] == ["written", "failed", "skipped"]
++    assert not (root / "utterplan/chapter-0007.utterplan.toml").exists()
++
++
++def test_existing_plan_is_protected_unless_force_is_used(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = tmp_path / "force.ssmdbook"
++    _write_book(root, (5,), contents={5: _ssmd("Replacement content.")})
++    output = root / "utterplan/chapter-0005.utterplan.toml"
++    output.parent.mkdir(parents=True)
++    output.write_text("keep this", encoding="utf-8")
++    args = [
++        "compile-book",
++        str(root),
++        "--language",
++        "en-US",
++        "--text-preparation",
++        "identity",
++    ]
++
++    protected = main(args)
++    capsys.readouterr()
++    assert protected == 1
++    assert output.read_text(encoding="utf-8") == "keep this"
++
++    forced = main([*args, "--force"])
++    capsys.readouterr()
++    assert forced == 0
++    assert _plan_text(output) == "Replacement content."
++
++
++def test_missing_selected_source_is_a_reported_item_failure(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = tmp_path / "missing.ssmdbook"
++    _write_book(root, (5,))
++
++    result = main(["compile-book", str(root), "--chapters", "5"])
++
++    capsys.readouterr()
++    assert result == 1
++    report = _report(root / "utterplan/compile-report.toml")
++    assert report["item"][0]["status"] == "failed"
++    assert report["item"][0]["stage"] == "read"
++
++
++def test_unsafe_path_and_symlink_escape_are_usage_errors_before_writes(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = tmp_path / "unsafe.ssmdbook"
++    _write_book(root, (5,), paths={5: "chapters/../outside.ssmd.md"})
++    result = main(["compile-book", str(root)])
++    first = capsys.readouterr()
++    assert result == 2
++    assert not (root / "utterplan").exists()
++    assert "chapters" in first.err
++
++    safe_root = tmp_path / "symlink.ssmdbook"
++    _write_book(safe_root, (5,))
++    outside = tmp_path / "outside.ssmd.md"
++    outside.write_text(_ssmd("Outside."), encoding="utf-8")
++    link = safe_root / "chapters/chapter-0005.ssmd.md"
++    try:
++        link.symlink_to(outside)
++    except (OSError, NotImplementedError) as exc:
++        pytest.skip(f"symlinks unavailable: {exc}")
++    result = main(["compile-book", str(safe_root)])
++    second = capsys.readouterr()
++    assert result == 2
++    assert "escapes workspace" in second.err
++    assert not (safe_root / "utterplan").exists()
++
++
++def test_preflights_duplicate_output_and_report_source_collisions(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = tmp_path / "collisions.ssmdbook"
++    _write_book(
++        root,
++        (1, 2),
++        contents={1: _ssmd("One."), 2: _ssmd("Two.")},
++        paths={1: "chapters/part-a/chapter.ssmd.md", 2: "chapters/part-b/chapter.ssmd.md"},
++    )
++    result = main(["compile-book", str(root)])
++    captured = capsys.readouterr()
++    assert result == 2
++    assert "map to the same output" in captured.err
++    assert not (root / "utterplan").exists()
++
++    root2 = tmp_path / "report-collision.ssmdbook"
++    _write_book(root2, (5,), contents={5: _ssmd("Five.")})
++    result = main(["compile-book", str(root2), "--report", str(root2 / "manifest.json")])
++    captured = capsys.readouterr()
++    assert result == 2
++    assert "source workspace content" in captured.err
++    assert not (root2 / "utterplan").exists()
++    assert (
++        json.loads((root2 / "manifest.json").read_text(encoding="utf-8"))["format"]
++        == "ssmdconvert.book"
++    )
++
++
++def test_output_and_report_cannot_be_written_into_chapters_directory(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = tmp_path / "readonly-source.ssmdbook"
++    _write_book(root, (5,), contents={5: _ssmd("Five.")})
++    result = main(
++        [
++            "compile-book",
++            str(root),
++            "--output-dir",
++            str(root / "chapters" / "plans"),
++        ]
++    )
++    captured = capsys.readouterr()
++    assert result == 2
++    assert "must not be inside" in captured.err
++    assert not (root / "chapters/plans").exists()
++
++
++def test_compile_book_parser_exposes_shared_options_but_no_input_format() -> None:
++    args = build_parser().parse_args(
++        ["compile-book", "book.ssmdbook", "--chapters", "1,3-5", "--language", "en-US"]
++    )
++    assert args.chapters == "1,3-5"
++    assert args.language == "en-US"
++    assert args.output_dir is None
++    with pytest.raises(SystemExit):
++        build_parser().parse_args(["compile-book", "book.ssmdbook", "--input-format", "ssmd"])
++
++
++def test_default_all_selection_and_explicit_output_directory(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = tmp_path / "all-chapters.ssmdbook"
++    _write_book(
++        root,
++        (1, 3, 4, 5, 9),
++        contents={number: _ssmd(f"Chapter {number}.") for number in (1, 3, 4, 5, 9)},
++    )
++    output_dir = tmp_path / "build" / "plans"
++
++    result = main(
++        [
++            "compile-book",
++            str(root),
++            "--output-dir",
++            str(output_dir),
++            "--text-preparation",
++            "identity",
++        ]
++    )
++
++    captured = capsys.readouterr()
++    assert result == 0
++    assert "chapters:  all" in captured.err
++    assert len(list(output_dir.glob("*.utterplan.toml"))) == 5
++    assert _report(output_dir / "compile-report.toml")["requested"] == 5
++    assert not (root / "utterplan").exists()
++
++
++def test_report_path_collision_with_plan_output_is_preflighted(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = tmp_path / "report-plan-collision.ssmdbook"
++    _write_book(root, (5,), contents={5: _ssmd("Five.")})
++    output_dir = tmp_path / "plans"
++
++    result = main(
++        [
++            "compile-book",
++            str(root),
++            "--output-dir",
++            str(output_dir),
++            "--report",
++            str(output_dir / "chapter-0005.utterplan.toml"),
++        ]
++    )
++
++    captured = capsys.readouterr()
++    assert result == 2
++    assert "report path collides with plan output" in captured.err
++    assert not output_dir.exists()
+diff --git a/tests/test_ssmdbook.py b/tests/test_ssmdbook.py
+new file mode 100644
+index 0000000..386bc3f
+--- /dev/null
++++ b/tests/test_ssmdbook.py
+@@ -0,0 +1,279 @@
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++import pytest
++
++from utterplan.ssmdbook import (
++    SSMDBookError,
++    load_ssmdbook_index,
++    resolve_ssmdbook_root,
++    select_ssmdbook_chapters,
++    selected_chapter_path,
++)
++
++
++def _entry(
++    number: int, *, chapter_id: str | None = None, path: str | None = None
++) -> dict[str, object]:
++    return {
++        "id": chapter_id or f"chapter-{number:04d}",
++        "source_number": number,
++        "path": path or f"chapters/chapter-{number:04d}.ssmd.md",
++        "title": f"Chapter {number}",
++        "sha256": f"{number:064x}",
++    }
++
++
++def _manifest(chapters: list[object]) -> dict[str, object]:
++    return {
++        "format": "ssmdconvert.book",
++        "schema_version": 1,
++        "ssmd_version": "0.9",
++        "chapters": chapters,
++    }
++
++
++def _write_manifest(root: Path, value: object) -> Path:
++    root.mkdir(parents=True, exist_ok=True)
++    path = root / "manifest.json"
++    path.write_text(json.dumps(value), encoding="utf-8")
++    return path
++
++
++def _book(tmp_path: Path, numbers: tuple[int, ...] = (5, 7, 6)) -> Path:
++    root = tmp_path / "Example.ssmdbook"
++    (root / "chapters").mkdir(parents=True)
++    _write_manifest(root, _manifest([_entry(number) for number in numbers]))
++    return root
++
++
++def test_resolves_manifest_root_and_canonical_chapters_directory(tmp_path: Path) -> None:
++    root = _book(tmp_path)
++
++    assert resolve_ssmdbook_root(root) == root.resolve()
++    assert resolve_ssmdbook_root(root / "chapters") == root.resolve()
++    assert load_ssmdbook_index(root / "chapters").root == root.resolve()
++
++
++def test_root_detection_uses_manifest_not_suffix(tmp_path: Path) -> None:
++    root = tmp_path / "book-without-extension"
++    (root / "chapters").mkdir(parents=True)
++    _write_manifest(root, _manifest([]))
++
++    assert resolve_ssmdbook_root(root) == root.resolve()
++
++
++def test_unrecognized_input_reports_expected_manifest_location(tmp_path: Path) -> None:
++    with pytest.raises(SSMDBookError, match="expected manifest.json"):
++        resolve_ssmdbook_root(tmp_path / "chapters")
++
++
++def test_index_preserves_manifest_order_and_digest_without_reading_chapters(tmp_path: Path) -> None:
++    root = _book(tmp_path, (5, 7, 6))
++    # Chapter sources may be missing or malformed until selected for compilation.
++    index = load_ssmdbook_index(root)
++
++    assert [chapter.source_number for chapter in index.chapters] == [5, 7, 6]
++    assert index.chapters[0].expected_sha256 == f"{5:064x}"
++    assert selected_chapter_path(index, index.chapters[0]) == root / "chapters/chapter-0005.ssmd.md"
++
++
++def test_selector_all_and_none_select_every_chapter_in_manifest_order(tmp_path: Path) -> None:
++    index = load_ssmdbook_index(_book(tmp_path))
++
++    assert select_ssmdbook_chapters(index, None) == index.chapters
++    assert select_ssmdbook_chapters(index, "all") == index.chapters
++
++
++def test_selector_ranges_use_source_numbers_and_preserve_manifest_order(tmp_path: Path) -> None:
++    index = load_ssmdbook_index(_book(tmp_path, (5, 7, 6, 1, 3, 4, 9)))
++
++    assert [chapter.source_number for chapter in select_ssmdbook_chapters(index, "5-7")] == [
++        5,
++        7,
++        6,
++    ]
++    assert [chapter.source_number for chapter in select_ssmdbook_chapters(index, "1, 3-5, 9")] == [
++        5,
++        1,
++        3,
++        4,
++        9,
++    ]
++
++
++def test_duplicate_selector_numbers_do_not_duplicate_work(tmp_path: Path) -> None:
++    index = load_ssmdbook_index(_book(tmp_path, (5, 6, 7)))
++
++    assert [chapter.source_number for chapter in select_ssmdbook_chapters(index, "5,5,5-7")] == [
++        5,
++        6,
++        7,
++    ]
++
++
++@pytest.mark.parametrize(
++    "selector",
++    ["", "  ", "5-", "-5", "5--7", "1,,2", "0", "-1", "1,abc", "17-5"],
++)
++def test_rejects_empty_malformed_nonpositive_and_reversed_selectors(
++    tmp_path: Path, selector: str
++) -> None:
++    index = load_ssmdbook_index(_book(tmp_path, (1, 2, 5, 17)))
++
++    with pytest.raises(SSMDBookError):
++        select_ssmdbook_chapters(index, selector)
++
++
++def test_selector_rejects_missing_source_numbers(tmp_path: Path) -> None:
++    index = load_ssmdbook_index(_book(tmp_path, (5, 7)))
++
++    with pytest.raises(SSMDBookError, match="missing source number.*6"):
++        select_ssmdbook_chapters(index, "5-7")
++
++
++def test_large_missing_range_is_rejected_without_expanding_every_number(tmp_path: Path) -> None:
++    index = load_ssmdbook_index(_book(tmp_path, (1, 2)))
++
++    with pytest.raises(SSMDBookError, match="missing source number.*3"):
++        select_ssmdbook_chapters(index, "1-999999999999999999999999999999999999999")
++
++
++def test_extremely_long_selector_integer_is_a_usage_error(tmp_path: Path) -> None:
++    index = load_ssmdbook_index(_book(tmp_path, (1,)))
++
++    with pytest.raises(SSMDBookError, match="malformed chapter selector"):
++        select_ssmdbook_chapters(index, "9" * 5000)
++
++
++@pytest.mark.parametrize(
++    ("field", "value", "message"),
++    [
++        ("format", "future.book", "unsupported ssmdbook format"),
++        ("schema_version", 2, "unsupported ssmdbook schema_version"),
++        ("schema_version", True, "unsupported ssmdbook schema_version"),
++        ("ssmd_version", "1.0", "unsupported ssmdbook ssmd_version"),
++        ("chapters", {}, "chapters must be an array"),
++    ],
++)
++def test_rejects_unsupported_manifest_header(
++    tmp_path: Path, field: str, value: object, message: str
++) -> None:
++    root = tmp_path / "book.ssmdbook"
++    data = _manifest([])
++    data[field] = value
++    _write_manifest(root, data)
++
++    with pytest.raises(SSMDBookError, match=message):
++        load_ssmdbook_index(root)
++
++
++def test_rejects_non_object_root_and_nonstandard_json_constants(tmp_path: Path) -> None:
++    root = tmp_path / "book.ssmdbook"
++    manifest = _write_manifest(root, [])
++    with pytest.raises(SSMDBookError, match="root must be a JSON object"):
++        load_ssmdbook_index(root)
++
++    manifest.write_text('{"value": NaN}', encoding="utf-8")
++    with pytest.raises(SSMDBookError, match="non-standard JSON constant"):
++        load_ssmdbook_index(root)
++
++
++def test_rejects_invalid_utf8_and_malformed_json(tmp_path: Path) -> None:
++    root = tmp_path / "book.ssmdbook"
++    manifest = _write_manifest(root, _manifest([]))
++    manifest.write_bytes(b"\xff")
++    with pytest.raises(SSMDBookError, match="invalid ssmdbook manifest"):
++        load_ssmdbook_index(root)
++
++    manifest.write_text("{", encoding="utf-8")
++    with pytest.raises(SSMDBookError, match="invalid ssmdbook manifest"):
++        load_ssmdbook_index(root)
++
++
++def test_manifest_size_is_limited_before_json_parsing(tmp_path: Path) -> None:
++    root = tmp_path / "book.ssmdbook"
++    manifest = _write_manifest(root, _manifest([]))
++    manifest.write_bytes(b" " * (2 * 1024 * 1024 + 1))
++
++    with pytest.raises(SSMDBookError, match="2 MiB size limit"):
++        load_ssmdbook_index(root)
++
++
++@pytest.mark.parametrize(
++    "unsafe_path",
++    [
++        "/chapters/chapter.ssmd.md",
++        "C:/chapters/chapter.ssmd.md",
++        "C:chapter.ssmd.md",
++        "chapters\\chapter.ssmd.md",
++        "chapters/../outside.ssmd.md",
++        "chapters/./chapter.ssmd.md",
++        "chapters//chapter.ssmd.md",
++        "chapters/chapter.ssmd.md/",
++        "outside/chapter.ssmd.md",
++        "chapters/chapter\x00.ssmd.md",
++    ],
++)
++def test_rejects_unsafe_or_non_normalized_manifest_paths(tmp_path: Path, unsafe_path: str) -> None:
++    root = tmp_path / "book.ssmdbook"
++    _write_manifest(root, _manifest([_entry(1, path=unsafe_path)]))
++
++    with pytest.raises(SSMDBookError):
++        load_ssmdbook_index(root)
++
++
++@pytest.mark.parametrize(
++    "entries",
++    [
++        [_entry(1), _entry(2, chapter_id="chapter-0001")],
++        [_entry(1), _entry(1, chapter_id="other")],
++        [_entry(1), _entry(2, path="chapters/chapter-0001.ssmd.md")],
++        [{**_entry(1), "source_number": True}],
++        [{**_entry(1), "id": " "}],
++        [{**_entry(1), "title": 42}],
++    ],
++)
++def test_rejects_invalid_entries_and_duplicate_identity_fields(
++    tmp_path: Path, entries: list[object]
++) -> None:
++    root = tmp_path / "book.ssmdbook"
++    _write_manifest(root, _manifest(entries))
++
++    with pytest.raises(SSMDBookError):
++        load_ssmdbook_index(root)
++
++
++def test_selected_missing_file_remains_a_batch_item_read_failure(tmp_path: Path) -> None:
++    index = load_ssmdbook_index(_book(tmp_path, (5,)))
++
++    assert selected_chapter_path(index, index.chapters[0]) == (
++        index.root / "chapters/chapter-0005.ssmd.md"
++    )
++
++
++def test_rejects_selected_symlink_that_escapes_workspace(tmp_path: Path) -> None:
++    root = _book(tmp_path, (5,))
++    outside = tmp_path / "outside.ssmd.md"
++    outside.write_text("outside", encoding="utf-8")
++    link = root / "chapters/chapter-0005.ssmd.md"
++    try:
++        link.symlink_to(outside)
++    except (OSError, NotImplementedError) as exc:
++        pytest.skip(f"symlinks unavailable: {exc}")
++    index = load_ssmdbook_index(root)
++
++    with pytest.raises(SSMDBookError, match="escapes workspace"):
++        selected_chapter_path(index, index.chapters[0])
++
++
++def test_rejects_selected_existing_non_file(tmp_path: Path) -> None:
++    root = _book(tmp_path, (5,))
++    source = root / "chapters/chapter-0005.ssmd.md"
++    source.mkdir()
++    index = load_ssmdbook_index(root)
++
++    with pytest.raises(SSMDBookError, match="not a regular file"):
++        selected_chapter_path(index, index.chapters[0])
+diff --git a/utterplan/cli.py b/utterplan/cli.py
+index 0f09bf8..62f4a1e 100644
+--- a/utterplan/cli.py
++++ b/utterplan/cli.py
+@@ -21,6 +21,12 @@ from .explain import format_explanation
+ from .migration import MigrationResult, migrate_plan_data
+ from .model import FlowPlan
+ from .renderability import format_renderability_error
++from .ssmdbook import (
++    SSMDBookError,
++    load_ssmdbook_index,
++    select_ssmdbook_chapters,
++    selected_chapter_path,
++)
+ from .trace_codec import loads_trace
+
+ _EXAMPLES = """examples:
+@@ -28,6 +34,7 @@ _EXAMPLES = """examples:
+   utterplan compile chapter.ssmd.md -o plans/chapter.utterplan.toml
+   utterplan compile plain.txt --input-format plain --language de-DE --stdout
+   utterplan compile-many chapters/*.ssmd --output-dir build/plans
++  utterplan compile-book chapters --chapters 5-17
+   utterplan validate chapter.utterplan.toml
+   utterplan inspect chapter.utterplan.toml --segment 0
+   utterplan inspect-attempt attempt.toml --issues
+@@ -145,6 +152,54 @@ def build_parser() -> argparse.ArgumentParser:
+     )
+     batch_parser.add_argument("--report", type=Path, help="TOML operational report path")
+
++    book_parser = commands.add_parser(
++        "compile-book",
++        help="compile selected chapters from an ssmdbook workspace",
++        formatter_class=argparse.RawDescriptionHelpFormatter,
++        epilog=(
++            "examples:\n"
++            "  utterplan compile-book novel.ssmdbook\n"
++            "  utterplan compile-book novel.ssmdbook --chapters 5-17\n"
++            "  utterplan compile-book novel.ssmdbook/chapters --chapters 1,3-5\n"
++            "  utterplan compile-book chapters --chapters 5-17\n"
++            "  utterplan compile-book chapters --chapters 5-17 --output-dir build/plans"
++        ),
++    )
++    book_parser.add_argument(
++        "input", type=Path, help=".ssmdbook directory or its canonical chapters/ directory"
++    )
++    book_parser.add_argument(
++        "--chapters",
++        default="all",
++        metavar="SELECTOR",
++        help="source chapter selection: all, N, N-M, or comma-separated combinations such as 1,3-5 (default: all)",
++    )
++    book_parser.add_argument(
++        "--output-dir", type=Path, help="plan output directory (default: <ssmdbook>/utterplan)"
++    )
++    book_parser.add_argument("--language", "--lang", dest="language")
++    book_parser.add_argument("--unit", choices=("paragraph", "sentence"), default="paragraph")
++    book_parser.add_argument(
++        "--text-preparation", choices=("spokenform", "identity"), default="spokenform"
++    )
++    book_parser.add_argument("--pause-mode", choices=("tts", "manual", "auto"), default="tts")
++    book_parser.add_argument(
++        "--renderability",
++        choices=("strict", "repair"),
++        default="repair",
++        help="safely repair isolated punctuation by default; strict rejects every repair opportunity",
++    )
++    book_parser.add_argument(
++        "--spacy",
++        choices=("auto", "off", "sm", "md", "lg", "trf"),
++        default="off",
++        help="linguistic-resource policy; default is the deterministic fallback",
++    )
++    book_parser.add_argument("--force", action="store_true", help="replace existing plan files")
++    book_parser.add_argument(
++        "--fail-fast", action="store_true", help="skip remaining chapters after the first failure"
++    )
++    book_parser.add_argument("--report", type=Path, help="TOML operational report path")
+     validate_parser = commands.add_parser(
+         "validate", help="validate a source document or saved semantic plan"
+     )
+@@ -329,23 +384,8 @@ def _batch_output_name(source: Path) -> str:
+     return source.stem + ".utterplan.toml"
+
+
+-def _compile_many(args: argparse.Namespace) -> int:
+-    sources: list[Path] = args.inputs
+-    outputs = [args.output_dir / _batch_output_name(source) for source in sources]
+-    owners: dict[Path, Path] = {}
+-    for source, output in zip(sources, outputs, strict=True):
+-        key = output.resolve()
+-        if key in owners:
+-            raise _CliUsageError(
+-                f"inputs {owners[key]} and {source} map to the same output {output}"
+-            )
+-        owners[key] = source
+-
+-    report_path = args.report or (args.output_dir / "compile-report.toml")
+-    if report_path.resolve() in owners:
+-        raise _CliUsageError(f"batch report path collides with plan output: {report_path}")
+-
+-    config = PlannerConfig(
++def _planner_config_from_batch_args(args: argparse.Namespace) -> PlannerConfig:
++    return PlannerConfig(
+         language=args.language or "en-US",
+         document_format="plain",
+         text_preparation=args.text_preparation,
+@@ -354,32 +394,33 @@ def _compile_many(args: argparse.Namespace) -> int:
+         linguistics=_linguistics_config(args.spacy),
+         renderability_mode=args.renderability,
+     )
+-    requests = [
+-        CompileRequest(
+-            id=f"item-{index:06d}",
+-            source=source,
+-            output=output,
+-            input_format=cast(Literal["auto", "plain", "ssmd"], args.input_format),
+-            fallback_language=args.language,
+-            source_label=str(source),
+-            require_language=args.language is None,
+-        )
+-        for index, (source, output) in enumerate(zip(sources, outputs, strict=True), start=1)
+-    ]
++
++
++def _run_compile_requests(
++    requests: list[CompileRequest],
++    *,
++    config: PlannerConfig,
++    fail_fast: bool,
++    force: bool,
++    report_path: Path,
++    include_ids: bool = False,
++) -> int:
+     outcomes: list[CompileOutcome] = []
+     iterator = iter(
+         compile_to_files(
+             requests,
+             config=config,
+-            fail_fast=args.fail_fast,
+-            force=args.force,
++            fail_fast=fail_fast,
++            force=force,
+             report_path=report_path,
+         )
+     )
+     total = len(requests)
+     written = 0
+     for index, request in enumerate(requests, start=1):
+-        print(f"[{index}/{total}] {request.source_label}", file=sys.stderr)
++        source_label = request.source_label or str(request.source)
++        progress_label = f"{request.id}  {source_label}" if include_ids else source_label
++        print(f"[{index}/{total}] {progress_label}", file=sys.stderr)
+         outcome = next(iterator)
+         outcomes.append(outcome)
+         if outcome.status == "written":
+@@ -397,8 +438,9 @@ def _compile_many(args: argparse.Namespace) -> int:
+             if outcome.error_message:
+                 for line in outcome.error_message.splitlines():
+                     print(f"       {line}", file=sys.stderr)
+-            if not args.fail_fast and index < total:
+-                next_label = requests[index].source_label or requests[index].id
++            if not fail_fast and index < total:
++                next_request = requests[index]
++                next_label = next_request.source_label or next_request.id
+                 print(
+                     f"       continuing with {next_label}; {written} plans are already saved",
+                     file=sys.stderr,
+@@ -435,6 +477,119 @@ def _compile_many(args: argparse.Namespace) -> int:
+     return 1 if failed else 0
+
+
++def _compile_many(args: argparse.Namespace) -> int:
++    sources: list[Path] = args.inputs
++    outputs = [args.output_dir / _batch_output_name(source) for source in sources]
++    owners: dict[Path, Path] = {}
++    for source, output in zip(sources, outputs, strict=True):
++        key = output.resolve()
++        if key in owners:
++            raise _CliUsageError(
++                f"inputs {owners[key]} and {source} map to the same output {output}"
++            )
++        owners[key] = source
++
++    report_path = args.report or (args.output_dir / "compile-report.toml")
++    if report_path.resolve() in owners:
++        raise _CliUsageError(f"batch report path collides with plan output: {report_path}")
++
++    requests = [
++        CompileRequest(
++            id=f"item-{index:06d}",
++            source=source,
++            output=output,
++            input_format=cast(Literal["auto", "plain", "ssmd"], args.input_format),
++            fallback_language=args.language,
++            source_label=str(source),
++            require_language=args.language is None,
++        )
++        for index, (source, output) in enumerate(zip(sources, outputs, strict=True), start=1)
++    ]
++    return _run_compile_requests(
++        requests,
++        config=_planner_config_from_batch_args(args),
++        fail_fast=args.fail_fast,
++        force=args.force,
++        report_path=report_path,
++    )
++
++
++def _path_is_within(path: Path, parent: Path) -> bool:
++    try:
++        path.relative_to(parent)
++        return True
++    except ValueError:
++        return False
++
++
++def _compile_book(args: argparse.Namespace) -> int:
++    try:
++        book = load_ssmdbook_index(args.input)
++        chapters = select_ssmdbook_chapters(book, args.chapters)
++        sources = [selected_chapter_path(book, chapter) for chapter in chapters]
++    except SSMDBookError as exc:
++        raise _CliUsageError(str(exc)) from exc
++
++    output_dir = args.output_dir or (book.root / "utterplan")
++    chapters_dir = (book.root / "chapters").resolve()
++    resolved_output_dir = output_dir.resolve()
++    if _path_is_within(resolved_output_dir, chapters_dir):
++        raise _CliUsageError("book plan output must not be inside the source chapters/ directory")
++
++    outputs = [output_dir / _batch_output_name(source) for source in sources]
++    owners: dict[Path, Path] = {}
++    for source, output in zip(sources, outputs, strict=True):
++        key = output.resolve()
++        if _path_is_within(key, chapters_dir) or key == book.manifest_path.resolve():
++            raise _CliUsageError(
++                f"book plan output would overwrite source workspace content: {output}"
++            )
++        if key in owners:
++            raise _CliUsageError(
++                f"selected chapters {owners[key]} and {source} map to the same output {output}"
++            )
++        owners[key] = source
++
++    report_path = args.report or (output_dir / "compile-report.toml")
++    resolved_report = report_path.resolve()
++    if resolved_report in owners:
++        raise _CliUsageError(f"book report path collides with plan output: {report_path}")
++    if (
++        _path_is_within(resolved_report, chapters_dir)
++        or resolved_report == book.manifest_path.resolve()
++    ):
++        raise _CliUsageError(
++            f"book report path would overwrite source workspace content: {report_path}"
++        )
++
++    requests = [
++        CompileRequest(
++            id=chapter.id,
++            source=source,
++            output=output,
++            input_format="ssmd",
++            fallback_language=args.language,
++            source_label=str(source),
++            require_language=args.language is None,
++        )
++        for chapter, source, output in zip(chapters, sources, outputs, strict=True)
++    ]
++
++    print("UtterPlan book compile", file=sys.stderr)
++    print(f"  workspace: {book.root}", file=sys.stderr)
++    print(f"  chapters:  {args.chapters}", file=sys.stderr)
++    print(f"  selected:  {len(requests)}", file=sys.stderr)
++    print(f"  output:    {output_dir}", file=sys.stderr)
++    return _run_compile_requests(
++        requests,
++        config=_planner_config_from_batch_args(args),
++        fail_fast=args.fail_fast,
++        force=args.force,
++        report_path=report_path,
++        include_ids=True,
++    )
++
++
+ def _compile(args: argparse.Namespace) -> int:
+     source, input_format = _read_compile_input(args)
+     trace_path: Path | None = args.trace
+@@ -641,6 +796,8 @@ def main(argv: list[str] | None = None) -> int:
+             return _compile(args)
+         if args.command == "compile-many":
+             return _compile_many(args)
++        if args.command == "compile-book":
++            return _compile_book(args)
+         if args.command == "migrate":
+             return _migrate(args)
+         if args.command == "validate":
+diff --git a/utterplan/ssmdbook.py b/utterplan/ssmdbook.py
+new file mode 100644
+index 0000000..1435561
+--- /dev/null
++++ b/utterplan/ssmdbook.py
+@@ -0,0 +1,259 @@
++"""Read-only discovery and selection for editable SSMDBook v1 workspaces."""
++
++from __future__ import annotations
++
++import json
++from dataclasses import dataclass
++from pathlib import Path, PurePosixPath, PureWindowsPath
++from typing import Any
++
++_MAX_MANIFEST_BYTES = 2 * 1024 * 1024
++
++
++class SSMDBookError(ValueError):
++    """An SSMDBook workspace or chapter selection is invalid."""
++
++
++@dataclass(frozen=True, slots=True)
++class SSMDBookChapter:
++    id: str
++    source_number: int
++    title: str
++    relative_path: str
++    expected_sha256: str | None = None
++
++
++@dataclass(frozen=True, slots=True)
++class SSMDBookIndex:
++    root: Path
++    manifest_path: Path
++    chapters: tuple[SSMDBookChapter, ...]
++
++
++def resolve_ssmdbook_root(path: str | Path) -> Path:
++    """Resolve a book root or its canonical ``chapters/`` directory."""
++    input_path = Path(path).expanduser()
++    try:
++        if input_path.is_dir() and (input_path / "manifest.json").is_file():
++            return input_path.resolve(strict=True)
++        if (
++            input_path.name == "chapters"
++            and input_path.is_dir()
++            and (input_path.parent / "manifest.json").is_file()
++        ):
++            return input_path.parent.resolve(strict=True)
++    except OSError as exc:
++        raise SSMDBookError(f"cannot inspect ssmdbook input {input_path}: {exc}") from exc
++
++    raise SSMDBookError(
++        f"not an ssmdbook workspace: {path}\n"
++        "expected manifest.json in the input directory or its parent"
++    )
++
++
++def load_ssmdbook_index(path: str | Path) -> SSMDBookIndex:
++    """Read and validate the public SSMDBook v1 manifest without loading chapters."""
++    root = resolve_ssmdbook_root(path)
++    manifest_path = root / "manifest.json"
++    try:
++        if manifest_path.stat().st_size > _MAX_MANIFEST_BYTES:
++            raise SSMDBookError("ssmdbook manifest.json exceeds the 2 MiB size limit")
++        with manifest_path.open("rb") as stream:
++            raw = stream.read(_MAX_MANIFEST_BYTES + 1)
++    except SSMDBookError:
++        raise
++    except OSError as exc:
++        raise SSMDBookError(f"cannot read ssmdbook manifest {manifest_path}: {exc}") from exc
++
++    if len(raw) > _MAX_MANIFEST_BYTES:
++        raise SSMDBookError("ssmdbook manifest.json exceeds the 2 MiB size limit")
++    try:
++        text = raw.decode("utf-8")
++        data = json.loads(text, parse_constant=_reject_json_constant)
++    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
++        raise SSMDBookError(f"invalid ssmdbook manifest.json: {exc}") from exc
++    if not isinstance(data, dict):
++        raise SSMDBookError("ssmdbook manifest root must be a JSON object")
++    if data.get("format") != "ssmdconvert.book":
++        raise SSMDBookError("unsupported ssmdbook format; expected 'ssmdconvert.book'")
++    if type(data.get("schema_version")) is not int or data["schema_version"] != 1:
++        raise SSMDBookError("unsupported ssmdbook schema_version; expected 1")
++    if data.get("ssmd_version") != "0.9":
++        raise SSMDBookError("unsupported ssmdbook ssmd_version; expected '0.9'")
++
++    entries = data.get("chapters")
++    if not isinstance(entries, list):
++        raise SSMDBookError("ssmdbook manifest chapters must be an array")
++
++    chapters: list[SSMDBookChapter] = []
++    seen_ids: set[str] = set()
++    seen_numbers: set[int] = set()
++    seen_paths: set[str] = set()
++    for index, entry in enumerate(entries):
++        label = f"chapters[{index}]"
++        if not isinstance(entry, dict):
++            raise SSMDBookError(f"{label} must be an object")
++        chapter_id = entry.get("id")
++        source_number = entry.get("source_number")
++        relative_path = entry.get("path")
++        title = entry.get("title")
++        digest = entry.get("sha256")
++
++        if not isinstance(chapter_id, str) or not chapter_id.strip():
++            raise SSMDBookError(f"{label}.id must be a non-empty string")
++        if type(source_number) is not int or source_number <= 0:
++            raise SSMDBookError(f"{label}.source_number must be a positive integer")
++        if not isinstance(relative_path, str) or not relative_path:
++            raise SSMDBookError(f"{label}.path must be a non-empty normalized relative POSIX path")
++        _validate_relative_chapter_path(relative_path, label=f"{label}.path")
++        if not isinstance(title, str):
++            raise SSMDBookError(f"{label}.title must be a string")
++        if digest is not None and not isinstance(digest, str):
++            raise SSMDBookError(f"{label}.sha256 must be a string when present")
++        if chapter_id in seen_ids:
++            raise SSMDBookError(f"duplicate ssmdbook chapter id: {chapter_id}")
++        if source_number in seen_numbers:
++            raise SSMDBookError(f"duplicate ssmdbook source_number: {source_number}")
++        if relative_path in seen_paths:
++            raise SSMDBookError(f"duplicate ssmdbook chapter path: {relative_path}")
++
++        seen_ids.add(chapter_id)
++        seen_numbers.add(source_number)
++        seen_paths.add(relative_path)
++        chapters.append(
++            SSMDBookChapter(
++                id=chapter_id,
++                source_number=source_number,
++                title=title,
++                relative_path=relative_path,
++                expected_sha256=digest,
++            )
++        )
++
++    return SSMDBookIndex(root=root, manifest_path=manifest_path, chapters=tuple(chapters))
++
++
++def select_ssmdbook_chapters(
++    book: SSMDBookIndex,
++    selector: str | None,
++) -> tuple[SSMDBookChapter, ...]:
++    """Select by source chapter number while preserving manifest order."""
++    if selector is None:
++        selector = "all"
++    selector = selector.strip()
++    if not selector:
++        raise SSMDBookError("chapter selector must not be empty")
++    if selector == "all":
++        return book.chapters
++
++    intervals: list[tuple[int, int]] = []
++    for token in selector.split(","):
++        token = token.strip()
++        if not token:
++            raise SSMDBookError(f"malformed chapter selector: {selector!r}")
++        if "-" in token:
++            if token.count("-") != 1:
++                raise SSMDBookError(f"malformed chapter range: {token!r}")
++            first_text, last_text = (part.strip() for part in token.split("-", 1))
++            first = _parse_positive_number(first_text, selector)
++            last = _parse_positive_number(last_text, selector)
++            if first > last:
++                raise SSMDBookError(f"reversed chapter range: {token!r}")
++            intervals.append((first, last))
++        else:
++            number = _parse_positive_number(token, selector)
++            intervals.append((number, number))
++
++    merged: list[tuple[int, int]] = []
++    for first, last in sorted(intervals):
++        if merged and first <= merged[-1][1] + 1:
++            merged[-1] = (merged[-1][0], max(merged[-1][1], last))
++        else:
++            merged.append((first, last))
++
++    available_numbers = sorted(chapter.source_number for chapter in book.chapters)
++    selected_numbers: set[int] = set()
++    for first, last in merged:
++        next_expected = first
++        for number in available_numbers:
++            if number < first:
++                continue
++            if number > last:
++                break
++            if number > next_expected:
++                raise SSMDBookError(
++                    f"chapter selector references missing source number(s): {next_expected}"
++                )
++            selected_numbers.add(number)
++            next_expected = number + 1
++        if next_expected <= last:
++            raise SSMDBookError(
++                f"chapter selector references missing source number(s): {next_expected}"
++            )
++    return tuple(chapter for chapter in book.chapters if chapter.source_number in selected_numbers)
++
++
++def selected_chapter_path(book: SSMDBookIndex, chapter: SSMDBookChapter) -> Path:
++    """Return a selected chapter path after checking containment and symlinks."""
++    _validate_relative_chapter_path(chapter.relative_path, label=f"chapter {chapter.id!r} path")
++    source = book.root.joinpath(*PurePosixPath(chapter.relative_path).parts)
++    try:
++        resolved = source.resolve(strict=False)
++        resolved.relative_to(book.root)
++    except (OSError, RuntimeError, ValueError) as exc:
++        raise SSMDBookError(
++            f"ssmdbook chapter path escapes workspace root: {chapter.relative_path}"
++        ) from exc
++
++    # Missing files remain per-item read failures in the existing batch compiler.
++    # Existing targets must be regular files; resolve() also detects symlink escapes.
++    try:
++        exists_or_link = source.exists() or source.is_symlink()
++        if exists_or_link and not resolved.is_file():
++            raise SSMDBookError(f"ssmdbook chapter is not a regular file: {chapter.relative_path}")
++    except OSError as exc:
++        raise SSMDBookError(
++            f"cannot inspect ssmdbook chapter {chapter.relative_path}: {exc}"
++        ) from exc
++    return source
++
++
++def _parse_positive_number(value: str, selector: str) -> int:
++    if not value.isascii() or not value.isdecimal():
++        raise SSMDBookError(f"malformed chapter selector: {selector!r}")
++    try:
++        number = int(value)
++    except ValueError as exc:
++        raise SSMDBookError(f"malformed chapter selector: {selector!r}") from exc
++    if number <= 0:
++        raise SSMDBookError("chapter numbers in selector must be positive integers")
++    return number
++
++
++def _validate_relative_chapter_path(value: str, *, label: str) -> None:
++    if "\x00" in value:
++        raise SSMDBookError(f"{label} must not contain NUL")
++    if "\\" in value:
++        raise SSMDBookError(f"{label} must use normalized POSIX separators")
++    path = PurePosixPath(value)
++    if path.is_absolute() or PureWindowsPath(value).drive:
++        raise SSMDBookError(f"{label} must be a relative POSIX path")
++    if any(part in {".", ".."} for part in path.parts):
++        raise SSMDBookError(f"{label} must not contain '.' or '..' path components")
++    if path.as_posix() != value or not value.startswith("chapters/") or len(path.parts) < 2:
++        raise SSMDBookError(f"{label} must be a normalized path below 'chapters/'")
++
++
++def _reject_json_constant(value: str) -> Any:
++    raise ValueError(f"non-standard JSON constant {value!r}")
++
++
++__all__ = [
++    "SSMDBookChapter",
++    "SSMDBookError",
++    "SSMDBookIndex",
++    "load_ssmdbook_index",
++    "resolve_ssmdbook_root",
++    "selected_chapter_path",
++    "select_ssmdbook_chapters",
++]
