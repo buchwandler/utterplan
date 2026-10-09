@@ -1,4 +1,5 @@
-from utterplan import PlannerConfig, UtterancePlanner
+from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+from utterplan import PlannerConfig
 
 
 def test_spokenform_mapping_keeps_structural_and_spoken_ranges_distinct():

@@ -2,10 +2,10 @@
 
 The canonical public entry point is `compile_document`, which compiles one SSMD
 document or explicitly configured plain-text document and returns a `CompileResult`.
-Its `plan` is the immutable, round-trippable renderer-independent `UtterancePlan`;
-its `diagnostics` explain compilation, and an optional `PreparationTrace` is
-separate diagnostic output. `UtterancePlanner.plan` remains supported for
-compatibility and returns only the plan.
+Its `plan` is the immutable, round-trippable renderer-facing `FlowPlan`; its
+diagnostics describe compilation, and an optional `PreparationTrace` holds compiler
+provenance separately. `UtterancePlanner.plan` is also supported and returns the
+same current `FlowPlan` directly.
 
 The Python defaults are deliberately spaCy-free and repair-first: `PlannerConfig` uses `spokenform` text preparation and `renderability_mode="repair"`, while `PauseConfig().mode` is `"tts"`. The CLI additionally defaults to the `spacy off` linguistic-resource policy, which uses deterministic fallback tokenization and analysis without requiring an installed spaCy model.
 
@@ -31,7 +31,7 @@ result = compile_document(
     trace=True,
 )
 plan = result.plan
-assert result.diagnostics == plan.diagnostics
+assert result.plan is plan
 assert result.trace is not None
 ```
 
@@ -50,10 +50,10 @@ for input, configuration, and planning failures. The existing `compile_document`
 `PlanRenderabilityError` when renderability blocks completion.
 
 Attempts are separate from canonical plans. A blocked attempt retains an inspect-only
-candidate draft; it is not a valid `UtterancePlan` and cannot be loaded by
-`UtterancePlan.load()`. Persist it with `PlanningAttempt.save()` and restore it with
+candidate draft; it is not a valid `FlowPlan` and cannot be loaded by
+`FlowPlan.load()`. Persist it with `PlanningAttempt.save()` and restore it with
 `PlanningAttempt.load()`; the attempt TOML schema is
-`utterplan.planning-attempt.v1`, independent of canonical plan schema v4.
+`utterplan.planning-attempt.v1`, independent of canonical plan schema v5.
 
 ```python
 from utterplan import PlannerConfig, compile_attempt
@@ -84,19 +84,19 @@ topology, and `--json` emits the complete attempt as JSON for inspection.
 
 ## TOML persistence
 
-Schema v4 remains the semantic contract, while `.utterplan.toml` is the canonical persisted format. `to_toml()` and `from_toml()` round-trip the complete plan; `save()` writes atomically, and `load()` accepts TOML only. Normal loading does not auto-detect or fall back to JSON.
+Schema v5 is the semantic contract, while `.utterplan.toml` is the canonical persisted format. `FlowPlan.to_toml()` and `FlowPlan.from_toml()` round-trip the executable plan; `save()` writes atomically, and `load()` accepts TOML only. Historical v4 TOML is migrated to v5 by the codec; historical JSON plans require the explicit migration command.
 
 ```python
-from utterplan import UtterancePlan
+from utterplan import FlowPlan
 
 toml_text = plan.to_toml()
-restored = UtterancePlan.from_toml(toml_text)
+restored = FlowPlan.from_toml(toml_text)
 assert restored == plan
 plan.save("chapter.utterplan.toml")
-assert UtterancePlan.load("chapter.utterplan.toml") == plan
+assert FlowPlan.load("chapter.utterplan.toml") == plan
 ```
 
-`to_dict()` and `from_dict()` remain semantic mapping APIs. For a legacy JSON file, use the explicit `utterplan migrate old.utterplan.json -o current.utterplan.toml` command; SSMD source migration is a separate operation.
+`FlowPlan.to_dict()` and `FlowPlan.from_dict()` expose the v5 executable mapping. For a legacy JSON file, use `utterplan migrate old.utterplan.json -o current.utterplan.toml`; SSMD source migration is a separate operation.
 
 ## Incremental batch compilation
 
@@ -129,7 +129,7 @@ for outcome in compile_to_files(
     print(outcome.status, outcome.source_label, outcome.output)
 ```
 
-The report is operational data, not a semantic plan, and must not be passed to `UtterancePlan.load()`. Unexpected programming and progress-callback errors propagate rather than being converted to document failures.
+The report is operational data, not a semantic plan, and must not be passed to `FlowPlan.load()`. Unexpected programming and progress-callback errors propagate rather than being converted to document failures.
 
 ## Planner progress callbacks
 
@@ -160,14 +160,12 @@ Callbacks should be lightweight. An exception raised by a callback propagates to
 
 ## SSMD input and semantic plan
 
-The SSMD parser accepts dialect 0.9 only. Select SSMD explicitly for unversioned canonical fragments with `PlannerConfig(document_format="ssmd")`. Older SSMD source must be migrated with `ssmd migrate FILE --to 0.9`; `migrate_plan_data` operates on serialized plan mappings, while `utterplan migrate` explicitly imports legacy JSON plan files into canonical TOML, not source documents.
+The SSMD parser accepts dialect 0.9 only. Select SSMD explicitly for unversioned canonical fragments with `PlannerConfig(document_format="ssmd")`. Older SSMD source must be migrated with `ssmd migrate FILE --to 0.9`; `migrate_plan_data` operates on serialized plan mappings, while `utterplan migrate` imports legacy plans, not source documents.
 
-`PlannerConfig.document_format` defaults to `"plain"`, so SSMD syntax is never inferred for an ordinary Python string. Set `document_format="ssmd"` for SSMD documents or fragments.
-
-`SSMDConfig.parse_yaml_header` controls front-matter parsing. The ineffective `strict_header` and `unknown_header` options were removed because SSMD 0.9 owns header validation. Application pause settings use `SSMDConfig.pause_overrides`; this is distinct from the portable source-header key `pause_defaults`. At a shared boundary, an explicit SSMD break takes precedence, followed by the application override, document defaults, and planner defaults.
+`PlannerConfig.document_format` defaults to `"plain"`, so SSMD syntax is never inferred for an ordinary Python string. Set it to `"ssmd"` for SSMD documents or fragments. Application `PauseConfig.mode` controls semantic pause activation; authored SSMD breaks and strengths are represented as pause intent, not assigned engine-specific durations.
 
 ```python
-from utterplan import PlannerConfig, UtterancePlanner
+from utterplan import PlannerConfig, compile_document
 
 ssmd_source = """---
 ssmd_version: "0.9"
@@ -176,40 +174,34 @@ language: en-us
 ---
 Hello [world]{emphasis="strong"}.
 """
-
-planner = UtterancePlanner(
-    PlannerConfig(language="en-us", document_format="ssmd")
+result = compile_document(
+    ssmd_source,
+    input_format="ssmd",
+    config=PlannerConfig(language="en-us"),
+    trace=True,
 )
-plan = planner.plan(ssmd_source)
-
-assert plan.document_metadata["ssmd_version"] == "0.9"
-annotation = plan.annotations[0]
-print(annotation.source_start, annotation.source_end, annotation.source_node_id)
-directives = plan.segments[0].directives
-print(directives.voice, directives.prosody, directives.say_as)
+plan = result.plan
+segment = plan.flow[0].segments[0]
+assert plan.document.ssmd_version == "0.9"
+assert result.trace is not None  # source spans/diagnostics are sidecar data
+print(segment.directives.emphasis)
 ```
 
-SSMD annotations preserve declared source spans. Segment directives hold effective typed semantics after scope and voice-default resolution. `document_metadata` preserves portable header data and the SSMD version; `plan.boundaries` preserves heading events. Audio references and extension names are not executed by UtterPlan. See the [coordinate-space contract](coordinate-spaces) for source offset units and the [consumer guide](consumer-guide) for renderer responsibilities.
+The `document` record retains compact portable document information. Effective directives and pause intents live on their owning flow segments. Compiler-only source spans and preparation coordinate maps remain in the optional trace. See the [coordinate-space contract](coordinate-spaces) and [consumer guide](consumer-guide) for renderer responsibilities.
 
-## Semantic boundaries
+## Flow segments and local tokens
 
-`SemanticBoundary` is an immutable, engine-neutral split opportunity. Its
-`position` is always in `plan.texts.spoken`, and its `kind` distinguishes clause,
-parenthetical, sentence, and paragraph structure. It is intentionally separate
-from `BoundaryEvent`: semantic boundaries do not carry pause duration or depend
-on whether a pause policy activates an event.
+A `FlowPlan` stores ordered `FlowUnit` objects. Each unit owns its ordered segments, so consumers do not join plan-global IDs. Token offsets use Python-character coordinates local to `segment.text`:
 
 ```python
-from utterplan import SemanticBoundary
-
-for boundary in plan.semantic_boundaries_for_segment(segment, kinds={"clause"}):
-    offset = boundary.position - segment.spoken_start
-    left, right = segment.text[:offset], segment.text[offset:]
+for unit in plan.flow:
+    for segment in unit.segments:
+        for token in segment.tokens:
+            surface = segment.text[token.start : token.end]
+            print(segment.language, surface, token.lemma, token.pos)
 ```
 
-Use `semantic_boundaries_in_range(start, end)` when lowering a plan into a
-request-local renderer capacity. Do not import parser/provider documents or
-recompute clause analysis in the consumer.
+Semantic pause intent is likewise local to the segment edge. It may be `none`, a semantic strength, or an exact authored timed pause; the consumer chooses any renderer-specific realization. Heading levels and marker names are already localized to the segments and units that own them.
 
 ## Audio/media segments
 
@@ -217,7 +209,7 @@ recompute clause analysis in the consumer.
 `src` is an opaque renderer input, and `segment.text` is optional spoken fallback:
 
 ```python
-segment = plan.segments[0]
+segment = plan.flow[0].segments[0]
 audio = segment.directives.audio
 if audio is not None:
     print(audio.src)  # Resolve externally; do not parse SFX URI syntax here.
@@ -275,20 +267,42 @@ consumers do not need to inspect raw SSMD annotations to find media.
 :show-inheritance:
 ```
 
-```{autoclass} utterplan.UtterancePlan
+```{autoclass} utterplan.FlowPlan
 :members:
 :show-inheritance:
 ```
 
-```{autoclass} utterplan.PlanSegment
+```{autoclass} utterplan.FlowUnit
 :members:
 :show-inheritance:
 ```
 
-```{autoclass} utterplan.PlanUnit
+```{autoclass} utterplan.FlowSegment
 :members:
 :show-inheritance:
 ```
+
+```{autoclass} utterplan.PauseIntent
+:members:
+:show-inheritance:
+```
+
+```{autoclass} utterplan.TokenView
+:members:
+:show-inheritance:
+```
+
+```{autoclass} utterplan.DocumentInfo
+:members:
+:show-inheritance:
+```
+
+```{autoclass} utterplan.LinguisticProvenance
+:members:
+:show-inheritance:
+```
+
+`UtterancePlan`, `PlanSegment`, and `PlanUnit` remain legacy compiler/migration models. Fresh compilation returns `FlowPlan`; renderers should use only the v5 flow contract.
 
 ## Renderer-neutral SSMD directives
 
@@ -337,13 +351,9 @@ consumers do not need to inspect raw SSMD annotations to find media.
 :show-inheritance:
 ```
 
-The public model also exposes `languages`, `annotations`, `boundaries`,
-`tokens`, `markers`, `document_metadata`, and resolved segment pauses. See the
-[consumer guide](consumer-guide) for how a renderer uses these fields.
+The v5 public model exposes `FlowPlan.flow`, compact `document` and `linguistics` records, and local segment fields for text, language, directives, pause intent, markers, headings, and tokens. `FlowSegment.directives` contains typed semantics after scope and voice-default resolution. `TokenView` offsets address only its owning segment's text; provider documents are not retained. See the [consumer guide](consumer-guide) for renderer responsibilities.
 
-`TokenAnnotation` contains `text`, `language`, `lemma`, `pos`, `tag`, and `morph`. Token text and offsets address `texts.spoken`; `morph` is a compact provider string such as `Tense=Pres|VerbForm=Fin`. `LinguisticRun` records whether those facts came from spaCy, fallback tokenization, or unknown legacy provenance.
-
-`TextPreparationInfo` exposes serializable provenance only. Exact source-to-spoken mapping is transient planner state and is not part of `UtterancePlan` or its TOML contract.
+`TokenView` carries optional lemma, POS, tag, and morph facts. `LinguisticProvenance` identifies the analysis provider and model without retaining provider state. Source spans, exact source text, and preparation coordinate maps are available only in an optional `PreparationTrace` sidecar, not the plan TOML.
 
 ## Errors
 
@@ -358,16 +368,17 @@ public subclasses include `ConfigurationError`, `PlanningError`,
 
 ```python
 from utterplan import (
+    FlowPlan,
     CURRENT_SCHEMA_VERSION,
     MigrationResult,
     MigrationStep,
     SUPPORTED_SCHEMA_VERSIONS,
     migrate_plan_data,
- )
+)
 
 result: MigrationResult = migrate_plan_data(serialized_mapping)
 assert result.target_version == CURRENT_SCHEMA_VERSION
-plan = UtterancePlan.from_dict(result.data)
+plan = FlowPlan.from_dict(result.data)
 ```
 
 Migration functions operate on plain JSON-compatible mappings and never mutate their input. `MigrationResult` records source and target versions, sequential steps, and source and target plan IDs. Current-schema migration is an exact no-op.

@@ -5,7 +5,7 @@ def main() -> None:
     plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
         'Hello [Bonjour]{lang="fr"}.'
     )
-    print([(run.language, run.spoken_start, run.spoken_end) for run in plan.languages])
+    print([(segment.language, segment.text) for unit in plan.flow for segment in unit.segments])
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ import json
 from importlib.resources import files
 from typing import Any
 
-from .versioning import CURRENT_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSIONS
+from .versioning import JSON_SCHEMA_VERSIONS
 
 _SCHEMA_RESOURCES: dict[int, str] = {
     1: "schemas/v1.schema.json",
@@ -15,7 +15,8 @@ _SCHEMA_RESOURCES: dict[int, str] = {
 
 
 def schema_versions() -> tuple[int, ...]:
-    return tuple(sorted(_SCHEMA_RESOURCES))
+    """Return versions with historical JSON Schema resources (not all supported plans)."""
+    return JSON_SCHEMA_VERSIONS
 
 
 def has_schema(version: int) -> bool:
@@ -23,9 +24,10 @@ def has_schema(version: int) -> bool:
 
 
 def schema(version: int | None = None) -> dict[str, Any]:
-    selected = CURRENT_SCHEMA_VERSION if version is None else version
-    if selected not in SUPPORTED_SCHEMA_VERSIONS or selected not in _SCHEMA_RESOURCES:
-        raise ValueError(f"unknown UtterPlan schema version: {selected}")
+    """Load a historical JSON schema; v5 is validated by its TOML/model contract."""
+    selected = max(JSON_SCHEMA_VERSIONS) if version is None else version
+    if selected not in _SCHEMA_RESOURCES:
+        raise ValueError(f"no historical JSON schema for UtterPlan version: {selected}")
     resource = files("utterplan").joinpath(_SCHEMA_RESOURCES[selected])
     return json.loads(resource.read_text(encoding="utf-8"))
 

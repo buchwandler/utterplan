@@ -4,7 +4,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from utterplan import LinguisticsConfig, PauseConfig, PlannerConfig, UtterancePlan, UtterancePlanner
+from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+from utterplan import (
+    FlowPlan,
+    LinguisticsConfig,
+    PauseConfig,
+    PauseIntent,
+    PlannerConfig,
+    UtterancePlan,
+)
 from utterplan.exceptions import PlanningError
 from utterplan.explain import format_explanation
 from utterplan.language import LanguageRun
@@ -269,19 +277,43 @@ def test_semantic_clause_is_independent_of_pause_activation(monkeypatch):
     assert len(plans[0].segments) == 1
     assert plans[0].segments[0].spoken_start < clauses[0].position < plans[0].segments[0].spoken_end
     assert not any(
-        segment.pause_before.seconds or segment.pause_after.seconds for segment in plans[0].segments
+        segment.pause_before is not None or segment.pause_after is not None
+        for segment in plans[0].segments
     )
     assert any(
-        segment.pause_before.seconds or segment.pause_after.seconds for segment in plans[1].segments
+        segment.pause_before == PauseIntent("clause")
+        or segment.pause_after == PauseIntent("clause")
+        for segment in plans[1].segments
     )
     assert not any(
-        segment.pause_before.seconds or segment.pause_after.seconds for segment in plans[2].segments
+        segment.pause_before is not None or segment.pause_after is not None
+        for segment in plans[2].segments
     )
-    quiet_explanation = format_explanation(plans[0])
-    audible_explanation = format_explanation(plans[1])
+    quiet_result = UtterancePlanner(
+        PlannerConfig(
+            language="en-us",
+            text_preparation="identity",
+            linguistics=linguistic,
+            pauses=PauseConfig(mode="tts"),
+        )
+    ).compile(source, trace=True)
+    audible_result = UtterancePlanner(
+        PlannerConfig(
+            language="en-us",
+            text_preparation="identity",
+            linguistics=linguistic,
+            pauses=PauseConfig(mode="auto"),
+        )
+    ).compile(source, trace=True)
+    quiet_explanation = format_explanation(
+        quiet_result.plan, details=True, trace=quiet_result.trace
+    )
+    audible_explanation = format_explanation(
+        audible_result.plan, details=True, trace=audible_result.trace
+    )
     assert f"Semantic boundary: clause at spoken offset {clauses[0].position}" in quiet_explanation
-    assert "pause 0." not in quiet_explanation
-    assert "pause 0." in audible_explanation
+    assert "pause clause" not in quiet_explanation
+    assert "pause clause" in audible_explanation
 
 
 def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):
@@ -362,9 +394,25 @@ def test_fake_spacy_fields_and_provenance_survive_roundtrip(monkeypatch):
     serialized = plan.to_toml()
     assert "provider_doc" not in serialized
     assert "spacy.tokens" not in serialized
-    restored = UtterancePlan.from_toml(serialized)
-    assert restored.tokens == plan.tokens
-    assert restored.linguistic_runs == plan.linguistic_runs
+    restored = FlowPlan.from_toml(serialized)
+    restored_pairs = [
+        (segment, token)
+        for unit in restored.flow
+        for segment in unit.segments
+        for token in segment.tokens
+    ]
+    _restored_segment, restored_token = next(
+        (segment, token)
+        for segment, token in restored_pairs
+        if token.surface(segment.text) == "live"
+    )
+    assert restored_token.pos == "VERB"
+    assert restored_token.tag == "VBP"
+    assert restored_token.lemma == "live"
+    assert restored_token.morph == "Tense=Pres|VerbForm=Fin"
+    assert restored.linguistics[0].provider == "spacy"
+    assert restored.linguistics[0].model == "fake_model"
+    assert restored.linguistics[0].provider_version == "3.7.0"
 
 
 def test_fallback_provenance_is_explicit():

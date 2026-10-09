@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Any
@@ -12,17 +13,11 @@ from tomlkit.exceptions import ParseError
 
 from ._version import __version__
 from .attempts import PlanDraft, PlanningAttempt, planning_attempt_id
+from .codecs.v4_toml import _mapping, _omit_none, _plain_toml, _toml_item
 from .exceptions import PlanFormatError
 from .hashing import semantic_hash
+from .model import _from_current_dict, validate_plan_structure
 from .renderability import RenderabilityIssue, RenderabilityRepair, RenderabilityReport
-from .toml_codec import (
-    _from_toml_data_draft,
-    _mapping,
-    _omit_none,
-    _plain_toml,
-    _toml_item,
-    to_toml_data,
-)
 
 ATTEMPT_SCHEMA = "utterplan.planning-attempt.v1"
 
@@ -67,7 +62,9 @@ def dumps_planning_attempt(attempt: PlanningAttempt) -> str:
     }
     wire = {
         "attempt": planning_attempt_to_dict(attempt)["attempt"],
-        "candidate": to_toml_data(plan),
+        "candidate_json": json.dumps(
+            plan.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ),
         "renderability": report,
     }
     document = tomlkit.document()
@@ -91,14 +88,21 @@ def loads_planning_attempt(value: object) -> PlanningAttempt:
     root = _plain_toml(parsed.unwrap())
     if not isinstance(root, Mapping):
         raise PlanFormatError("attempt artifact must be a TOML table", code="field.type")
-    unknown = set(root) - {"attempt", "candidate", "renderability"}
+    unknown = set(root) - {"attempt", "candidate_json", "renderability"}
     if unknown:
         raise PlanFormatError(
             f"unknown planning-attempt fields: {sorted(unknown)}", code="field.unknown"
         )
     try:
         manifest = _mapping(root["attempt"], "$.attempt")
-        candidate_wire = _mapping(root["candidate"], "$.candidate")
+        candidate_json = root["candidate_json"]
+        if not isinstance(candidate_json, str):
+            raise PlanFormatError("candidate_json must be text", code="field.type")
+        try:
+            candidate_data = json.loads(candidate_json)
+        except json.JSONDecodeError as exc:
+            raise PlanFormatError("candidate_json must contain JSON", code="field.json") from exc
+        candidate_mapping = _mapping(candidate_data, "$.candidate_json")
         report_data = _mapping(root["renderability"], "$.renderability")
         if manifest.get("schema") != ATTEMPT_SCHEMA:
             raise PlanFormatError(
@@ -118,7 +122,8 @@ def loads_planning_attempt(value: object) -> PlanningAttempt:
                 raise PlanFormatError(
                     f"{name} must be text", code="field.type", path=f"$.attempt.{name}"
                 )
-        plan = _from_toml_data_draft(candidate_wire)
+        plan = _from_current_dict(candidate_mapping)
+        validate_plan_structure(plan)
         checked_segments = report_data.get("checked_segments")
         repair_count = report_data.get("repair_count")
         guaranteed = report_data.get("guaranteed")

@@ -8,12 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
 from utterplan import (
     LinguisticsConfig,
     PlannerConfig,
     PlannerProgressEvent,
     ProgressCallback,
-    UtterancePlanner,
     compile_document,
 )
 
@@ -76,7 +76,7 @@ def test_compile_document_forwards_progress_callback() -> None:
         on_progress=events.append,
     )
 
-    assert result.plan.texts.spoken == TEXT
+    assert "".join(segment.text for unit in result.plan.flow for segment in unit.segments) == TEXT
     assert events
     assert events[0].kind == "phase.started"
     assert events[0].phase == "parse"
@@ -86,7 +86,7 @@ def test_planner_compile_forwards_progress_callback() -> None:
     events: list[PlannerProgressEvent] = []
     result = UtterancePlanner(_identity_config()).compile(TEXT, on_progress=events.append)
 
-    assert result.plan.texts.spoken == TEXT
+    assert "".join(segment.text for unit in result.plan.flow for segment in unit.segments) == TEXT
     assert any(event.phase == "finalization" for event in events)
 
 

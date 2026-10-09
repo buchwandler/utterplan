@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import tomlkit
 
-from utterplan import UtterancePlan
+from utterplan import FlowPlan
 from utterplan.cli import build_parser, main
 from utterplan.exceptions import PlanFormatError
 
@@ -62,7 +62,7 @@ def test_compile_many_uses_stable_names_and_writes_toml_report(
     )
     for name in expected:
         plan_path = output_dir / name
-        assert UtterancePlan.load(plan_path).segments
+        assert FlowPlan.load(plan_path).flow
     report_path = output_dir / "compile-report.toml"
     report = _report(report_path)
     assert report["format"] == "utterplan-compile-report"
@@ -71,7 +71,7 @@ def test_compile_many_uses_stable_names_and_writes_toml_report(
     assert report["failed"] == 0
     assert report["complete"] is True
     with pytest.raises(PlanFormatError):
-        UtterancePlan.load(report_path)
+        FlowPlan.load(report_path)
 
 
 def test_compile_many_continues_after_planning_and_source_read_failures(
@@ -229,7 +229,12 @@ def test_compile_many_protects_existing_output_and_force_replaces_it(
     forced_output = capsys.readouterr()
     assert forced == 0
     assert "wrote" in forced_output.err
-    assert UtterancePlan.load(destination).texts.spoken == "Replacement chapter."
+    assert (
+        "".join(
+            segment.text for unit in FlowPlan.load(destination).flow for segment in unit.segments
+        )
+        == "Replacement chapter."
+    )
 
 
 def test_compile_many_default_repair_and_strict_mode_are_both_observable(

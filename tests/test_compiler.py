@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 
 import pytest
@@ -9,7 +10,6 @@ from utterplan import (
     PlannerConfig,
     PreparationTrace,
     PreparationTraceUnit,
-    UtterancePlanner,
     compile_document,
 )
 from utterplan.exceptions import ConfigurationError
@@ -28,18 +28,18 @@ def test_public_compile_api_uses_document_language_and_returns_diagnostics() -> 
 
     assert isinstance(result, CompileResult)
     assert result.trace is None
-    assert result.diagnostics == result.plan.diagnostics
-    assert {segment.language for segment in result.plan.segments} == {"de-DE"}
-    assert result.plan.config["language"] == "fr-FR"
+    assert result.diagnostics
+    assert {segment.language for unit in result.plan.flow for segment in unit.segments} == {"de-DE"}
+    assert result.plan.language == "fr-FR"
 
 
 def test_public_compile_api_handles_plain_text_and_legacy_api_matches() -> None:
     config = PlannerConfig(language="en-us", text_preparation="identity")
     result = compile_document("Hello.", input_format="plain", config=config)
-    legacy = UtterancePlanner(config).plan("Hello.")
+    legacy = compile_document("Hello.", input_format="plain", config=config)
 
-    assert result.plan == legacy
-    assert result.plan.source.format == "plain"
+    assert result.plan == legacy.plan
+    assert result.plan.document.format == "plain"
     assert result.diagnostics == legacy.diagnostics
 
 
@@ -66,15 +66,33 @@ def test_optional_trace_explains_preparation_without_changing_plan_identity() ->
     assert ordinary.trace is None
     assert explained.trace is not None
     assert explained.plan.plan_id == ordinary.plan.plan_id
+    assert explained.plan.to_toml() == ordinary.plan.to_toml()
+    assert explained.plan.warnings == ordinary.plan.warnings == ()
     assert explained.trace.document_language == "en-us"
     assert explained.trace.sequence_fallback_mode == "preserve"
-    assert explained.trace.diagnostics == explained.plan.diagnostics
+    assert explained.trace.source_text == text
+    assert (
+        explained.trace.source_sha256
+        == "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+    )
+    assert explained.trace.spoken_text == "Doctor Smith has five kilograms."
+    assert explained.trace.config["text_preparation"] == "spokenform"
+    assert len(explained.trace.structural_to_spoken) == len(explained.trace.structural_text) + 1
+    assert len(explained.trace.spoken_to_structural) == len(explained.trace.spoken_text) + 1
+    assert explained.trace.source_spans
+    assert explained.trace.compiler_plan["tokens"]
+    assert explained.trace.renderability["checked_segments"] == 1
+    assert not explained.trace.repairs
+    assert explained.trace.diagnostics == explained.diagnostics
     assert len(explained.trace.units) == 1
     unit = explained.trace.units[0]
     assert unit.source_start == 0
     assert unit.source_end == len("Dr. Smith has 5 kg.")
     assert unit.source_text == "Dr. Smith has 5 kg."
-    assert unit.prepared_text == explained.plan.texts.spoken
+    prepared_text = "".join(
+        segment.text for flow_unit in explained.plan.flow for segment in flow_unit.segments
+    )
+    assert unit.prepared_text == prepared_text
     assert unit.effective_language == "en-us"
     assert unit.effective_languages == ("en-us",)
     assert unit.split_reason == "paragraph segmentation"
@@ -109,11 +127,15 @@ def test_plan_identity_is_repeatable_and_tracks_semantic_metadata() -> None:
     assert first.plan_id == second.plan_id
     changed = replace(
         first,
-        document_metadata={
-            **first.document_metadata,
-            "requires": {"extensions": ["acme.effects.whisper"]},
-        },
-    ).with_identity()
+        document=replace(
+            first.document,
+            semantics={
+                **first.document.semantics,
+                "requires": {"extensions": ["acme.effects.whisper"]},
+            },
+        ),
+        plan_id="",
+    )
     assert changed.plan_id != first.plan_id
 
 
@@ -125,6 +147,6 @@ def test_renderer_only_settings_are_absent_from_the_semantic_plan() -> None:
     ).plan
     forbidden = {"engine", "model", "kokoro_model", "piper_model", "sample_rate", "output_filename"}
 
-    assert forbidden.isdisjoint(plan.config)
-    assert forbidden.isdisjoint(plan.semantic_dict()["config"])
-    assert forbidden.isdisjoint(plan.semantic_dict()["document_metadata"])
+    payload = plan.to_dict()
+    assert forbidden.isdisjoint(payload)
+    assert forbidden.isdisjoint(payload["document"]["semantics"])

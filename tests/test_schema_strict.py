@@ -3,14 +3,16 @@ from pathlib import Path
 
 import pytest
 
-from utterplan import PlanFormatError, PlannerConfig, UtterancePlan, UtterancePlanner
+from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+from utterplan import PlanFormatError, PlannerConfig, UtterancePlan
 from utterplan.format import schema
 
 
-def test_source_and_packaged_schema_are_identical():
+def test_unversioned_schema_paths_remain_v4_compatibility_aliases_only():
     source = json.loads(Path("spec/utterplan.schema.json").read_text())
     packaged = json.loads(Path("utterplan/utterplan.schema.json").read_text())
     assert packaged == source
+    assert source["properties"]["schema_version"]["const"] == 4
     assert schema() == source
 
 

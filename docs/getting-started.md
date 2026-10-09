@@ -22,9 +22,9 @@ from utterplan import PlannerConfig, UtterancePlanner
 planner = UtterancePlanner(PlannerConfig(language="en-us"))
 plan = planner.plan("Doctor Smith bought 5 kg of apples.")
 
-print(plan.texts.spoken)
-for segment in plan.segments:
-    print(segment.text, segment.language)
+for unit in plan.flow:
+    for segment in unit.segments:
+        print(segment.text, segment.language)
 ```
 
 Python `PlannerConfig` defaults to plain input. Pass `document_format="ssmd"` when planning SSMD source from Python.
@@ -41,7 +41,7 @@ Without `-o`, the complete canonical TOML plan is written to stdout. Status mess
 
 ## Defaults and linguistic resources
 
-The default compile policy is `spokenform` for text preparation, `tts` for pause mode, and `spacy off` for linguistic resources. The fallback path records `linguistic_runs[*].provider = "fallback"` and leaves POS, tag, and morph unavailable. It does not require an installed spaCy model.
+The default compile policy is `spokenform` for text preparation, `tts` for pause activation, and `spacy off` for linguistic resources. The fallback path records `linguistics[*].provider = "fallback"` and leaves unavailable POS, tag, and morphology empty. It does not require an installed spaCy model.
 
 `--spacy auto` is an explicit opt-in. With a compatible local model, final pass-B tokens may contain POS, tag, lemma, and morphology, and the plan records the actual provider, model, and known versions. `sm`, `md`, `lg`, and `trf` require the requested local model. UtterPlan never downloads models automatically.
 Install the optional library with `python -m pip install 'utterplan[spacy]'` when needed. Language model packages remain explicit environment dependencies and are never downloaded by UtterPlan.
@@ -91,18 +91,14 @@ printf '[Hello]{lang="en-us"} ...s [Bonjour]{lang="fr"}.\n' \
 
 UtterPlan parses SSMD dialect 0.9 only, including canonical fragments without a version header when explicitly selected. Older SSMD source must be converted first: `ssmd migrate old.ssmd --to 0.9`. `utterplan migrate` explicitly imports historical UtterPlan JSON plans into TOML; it does not migrate source files.
 
-The compiled plan preserves SSMD header metadata, declared annotations, structural events, and effective typed directives. Audio and extension references are descriptive data only; consumers decide how to interpret them.
-Structural text preserves the parsed document representation. Spoken text is
-the prepared text and is the coordinate space used by segments, tokens,
-markers, boundaries, and renderer-facing ranges.
-Inspect safe spoken-text subdivision opportunities separately from pause and
-timing events:
+The compiled plan preserves compact document metadata, effective directives, and semantic pause intent. Audio and extension references are descriptive data only; consumers decide how to interpret them.
+
+The plan stores prepared segment text and local token spans, not source-level structural text or dense maps. Preserve compiler details in an optional trace sidecar:
 
 ```bash
-utterplan inspect hello.utterplan.toml --semantic-boundaries
+utterplan compile chapter.ssmd.md -o chapter.utterplan.toml --trace chapter.trace.toml
+utterplan explain chapter.utterplan.toml --trace chapter.trace.toml
+utterplan inspect-trace chapter.trace.toml --preparation --boundaries
 ```
 
-Use `plan.semantic_boundaries` or the public
-`semantic_boundaries_for_segment()` / `semantic_boundaries_in_range()` helpers.
-They expose clause, parenthetical, sentence, and paragraph opportunities without
-requiring SSMD, spaCy, Phrasplit, or renderer-specific packages.
+Trace data contains source text/hash, preparation maps, diagnostics, and renderability evidence. It does not change plan TOML or identity. Segment token offsets are local Python-character ranges into each owning segment's `text`.

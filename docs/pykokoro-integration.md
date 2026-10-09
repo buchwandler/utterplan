@@ -1,63 +1,46 @@
 # PyKokoro integration boundary
 
-UtterPlan is an independent planning compiler. PyKokoro is an optional consumer,
-not a runtime dependency of this package.
-The intended migration keeps the existing PyKokoro user API unchanged:
+UtterPlan is an independent planning compiler. PyKokoro is an optional consumer, not a runtime dependency of this package. A thin adapter can preserve the existing PyKokoro user API:
 
 ```text
 KokoroPipeline.run(text)
     -> map PipelineConfig and GenerationConfig to PlannerConfig
     -> UtterancePlanner.plan(text)
-    -> adapt public PlanSegment records to PyKokoro's G2P input
+    -> adapt public FlowPlan segments to PyKokoro's G2P input
     -> PyKokoro G2P
     -> phoneme processing
     -> model inference
     -> audio
 ```
 
-PyKokoro owns model selection, voice assets, G2P, model tokens, ONNX sessions,
-acoustic behavior, audio, and any compatibility behavior specific to its
-renderer. UtterPlan owns deterministic document parsing, language planning,
-written-to-spoken preparation, segmentation, semantic directives, boundaries,
-pauses, markers, and render units.
+PyKokoro owns model selection, voice assets, G2P, model tokens, ONNX sessions, acoustic behavior, and audio. UtterPlan owns deterministic document parsing, language planning, written-to-spoken preparation, segmentation, typed directives, semantic pause intent, markers, and render units.
 
 ## Thin adapter inputs
 
-A future adapter can use only public UtterancePlan fields:
+A future adapter can use only public v5 flow fields:
 
-- `plan.texts.spoken`;
-- `plan.languages`;
-- `plan.tokens` and `plan.annotations`;
-- `plan.boundaries`;
-- `plan.segments` and `plan.units`;
-- `plan.markers`;
-- `plan.document_metadata`;
-- resolved segment pauses and typed directives.
+- `plan.flow` in order, with each unit's ordered `segments`;
+- `segment.text` and `segment.language`;
+- local `segment.tokens` for optional linguistic context;
+- `segment.directives`, `pause_before`, and `pause_after`;
+- `segment.markers` and optional `segment.heading`;
+- compact `plan.document` and `plan.linguistics` metadata.
 
-It should pass `PlanSegment.text` and `PlanSegment.language` to the next
-
-For contextual pronunciation, pass the segment token snapshot to G2P:
+Token offsets are local to the owning `segment.text`. A consumer must not use compiler source offsets or retokenize the document. Provider/model provenance is descriptive; when contextual G2P requires a specific provider, the adapter must fail clearly or use its documented non-contextual fallback.
 
 ```python
-segment_tokens = plan.tokens_for_segment(segment)
-if linguistic_run.provider != "spacy":
-    # Fail clearly or use the consumer's documented non-contextual fallback.
-    ...
-phonemizer(segment.text, segment.language, segment_tokens)
+for unit in plan.flow:
+    for segment in unit.segments:
+        tokens = [segment.text[token.start : token.end] for token in segment.tokens]
+        phonemizer(segment.text, segment.language, tokens)
 ```
 
-The renderer must not rerun spaCy or infer missing POS/tag values.
-frontend stage. No JSON serialization is required for in-process use.
+The renderer must not rerun spaCy or infer missing POS/tag values. No JSON serialization is required for in-process use.
 
 ## Pause behavior
 
-UtterPlan resolves deterministic base semantic pauses. PyKokoro may apply
-renderer or acoustic variance after consuming the plan when legacy behavior
-requires it. Such variance must remain outside semantic plan identity and must
-not be added to UtterPlan merely to mirror renderer settings.
+The flow carries semantic pause intents and exact authored timed breaks, not planner-invented renderer durations or a renderer activation mode. PyKokoro may interpret supported semantic intents according to its own behavior. Renderer/acoustic variance remains outside UtterPlan and plan identity.
 
 ## Compatibility ownership
 
-Consumer-specific compatibility and integration tests belong in the PyKokoro
-repository. UtterPlan's own test suite validates the public semantic planning
-contract using repository-owned fixtures and goldens only.
+Consumer-specific compatibility and integration tests belong in the PyKokoro repository. UtterPlan's own test suite validates the public FlowPlan contract using repository-owned fixtures and goldens only.

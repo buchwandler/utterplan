@@ -1,6 +1,7 @@
 import pytest
 
-from utterplan import PauseConfig, PlannerConfig, PlanningError, UtterancePlanner
+from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+from utterplan import PauseConfig, PauseIntent, PlannerConfig, PlanningError
 
 
 def test_plain_sentences_paragraphs_and_pauses():
@@ -11,8 +12,8 @@ def test_plain_sentences_paragraphs_and_pauses():
     assert plan.texts.spoken == value
     assert len(plan.segments) == 3
     assert len(plan.units) == 2
-    assert plan.segments[0].pause_after.seconds == 0.6
-    assert plan.segments[1].pause_after.seconds == 1.0
+    assert plan.segments[0].pause_after == PauseIntent("sentence")
+    assert plan.segments[1].pause_after == PauseIntent("paragraph")
 
 
 def test_ssmd_preparation_and_explicit_directives():
@@ -30,7 +31,7 @@ def test_ssmd_break_marker_and_language():
     assert len(plan.segments) >= 2
     assert any(run.language == "fr" for run in plan.languages)
     assert plan.markers[0].name == "mark"
-    assert any(segment.pause_after.seconds == 0.5 for segment in plan.segments)
+    assert any(segment.pause_after == PauseIntent("timed", "500ms") for segment in plan.segments)
 
 
 def test_identity_is_deterministic():
@@ -247,7 +248,8 @@ def test_media_only_document_uses_declared_language_and_round_trips() -> None:
     assert plan.segments[0].directives.audio is not None
     assert len(plan.units) == 1
     plan.validate()
-    assert type(plan).from_toml(plan.to_toml()) == plan
+    flow_plan = planner.compile(source).plan
+    assert type(flow_plan).from_toml(flow_plan.to_toml()) == flow_plan
 
 
 def test_point_audio_at_document_start_uses_following_language_context() -> None:

@@ -30,8 +30,8 @@ def _step(target: int):
 def test_current_plan_migration_is_deterministic_noop() -> None:
     original = _current_data()
     result = migrate_plan_data(original)
-    assert result.source_version == 4
-    assert result.target_version == 4
+    assert result.source_version == 5
+    assert result.target_version == 5
     assert result.steps == ()
     assert not result.changed
     assert result.data == original
@@ -138,7 +138,7 @@ def test_mutating_step_is_rejected() -> None:
 
 def test_future_schema_is_not_migrated() -> None:
     data = _current_data()
-    data["schema_version"] = 5
+    data["schema_version"] = 6
     with pytest.raises(UnsupportedSchemaError):
         migrate_plan_data(data)
 

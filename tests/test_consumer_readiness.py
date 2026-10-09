@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from utterplan import PauseConfig, PlanFormatError, PlannerConfig, SSMDConfig, UtterancePlanner
+from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+from utterplan import PauseConfig, PauseIntent, PlanFormatError, PlannerConfig, SSMDConfig
 
 
 def test_reusable_planner_isolates_request_configuration() -> None:
@@ -14,7 +15,7 @@ def test_reusable_planner_isolates_request_configuration() -> None:
         document_format="plain",
         text_preparation="identity",
         unit="paragraph",
-        pauses=PauseConfig(sentence="180ms"),
+        pauses=PauseConfig(mode="auto", enabled=False),
     )
     planner = UtterancePlanner(base)
     first = planner.plan("One. Two.", unit="sentence")
@@ -23,28 +24,15 @@ def test_reusable_planner_isolates_request_configuration() -> None:
     fresh = UtterancePlanner(base).plan("One. Two.", unit="sentence")
     assert first == fresh == third
     assert second.config["language"] == "de-de"
-    assert second.config["pauses"]["sentence"] == 0.18
+    assert second.config["pauses"] == {"mode": "auto", "enabled": False}
     assert planner.config == base
     planner.close()
 
 
-def test_duration_spellings_have_equal_plan_identity() -> None:
-    left = PlannerConfig(
-        language="en-us",
-        document_format="plain",
-        text_preparation="identity",
-        pauses=PauseConfig(sentence="500ms"),
-    )
-    right = PlannerConfig(
-        language="en-us",
-        document_format="plain",
-        text_preparation="identity",
-        pauses=PauseConfig(sentence=0.5),
-    )
-    assert (
-        UtterancePlanner(left).plan("One. Two.").plan_id
-        == UtterancePlanner(right).plan("One. Two.").plan_id
-    )
+def test_pause_config_contains_activation_policy_only() -> None:
+    assert PauseConfig().__dataclass_fields__.keys() == {"mode", "enabled"}
+    with pytest.raises(TypeError, match="sentence"):
+        PauseConfig(sentence="500ms")  # type: ignore[call-arg]
 
 
 def _ssmd_plan(text: str, **kwargs: object):
@@ -72,18 +60,16 @@ def test_noop_ssmd_header_options_are_removed(option: str) -> None:
         SSMDConfig(**{option: True})
 
 
-def test_ssmd_pause_overrides_override_document_defaults() -> None:
+def test_ssmd_pause_defaults_do_not_override_semantic_sentence_intent() -> None:
     plan = _ssmd_plan(
         """---
 ssmd_version: "0.9"
 pause_defaults:
   sentence: 800ms
 ---
-One. Two.""",
-        pause_overrides={"sentence": "250ms"},
+One. Two."""
     )
-    assert plan.segments[0].pause_after.seconds == pytest.approx(0.25)
-    assert plan.config["ssmd"]["pause_overrides"] == {"sentence": "250ms"}
+    assert plan.segments[0].pause_after == PauseIntent("sentence")
 
 
 def test_ssmd_unknown_header_uses_parser_diagnostic() -> None:
@@ -157,7 +143,7 @@ Hello.""",
     assert plan.document_metadata["sequence_fallback_mode"] == "spell"
 
 
-def test_pause_defaults_enabled_disables_automatic_document_pauses() -> None:
+def test_pause_defaults_enabled_is_not_pause_activation_configuration() -> None:
     plan = _ssmd_plan(
         """---
 ssmd_version: "0.9"
@@ -166,10 +152,7 @@ pause_defaults:
 ---
 One. Two."""
     )
-    assert all(
-        segment.pause_before.seconds == 0 and segment.pause_after.seconds == 0
-        for segment in plan.segments
-    )
+    assert plan.segments[0].pause_after == PauseIntent("sentence")
 
 
 def test_voice_change_pause_uses_logical_voice_in_one_language() -> None:
@@ -182,10 +165,8 @@ def test_voice_change_pause_uses_logical_voice_in_one_language() -> None:
     plan = UtterancePlanner(config).plan('[One]{voice="a"} [Two]{voice="b"}.')
     voice_events = [event for event in plan.boundaries if event.kind == "voice_change"]
     assert voice_events
-    assert any(
-        event_id in plan.segments[0].pause_after.events
-        for event_id in (event.id for event in voice_events)
-    )
+    assert voice_events
+    assert plan.segments[0].pause_after == PauseIntent("voice_change")
 
 
 def test_prepared_contract_uses_spoken_coordinates_and_public_token_fields() -> None:
@@ -223,7 +204,7 @@ voice_bindings:
     assert plan.segments[0].directives.voice.reference == "narrator"
     assert plan.segments[0].directives.voice.reference != "voice-a"
     assert "offset_map" not in plan.to_dict()["preparation"]
-    assert plan == type(plan).from_toml(plan.to_toml())
+    assert plan == type(plan).from_dict(plan.to_dict())
 
 
 def test_language_detection_header_is_preserved_as_portable_metadata() -> None:
@@ -239,7 +220,7 @@ Hallo."""
         "mode": "auto",
         "languages": ["de", "en"],
     }
-    restored = type(plan).from_toml(plan.to_toml())
+    restored = type(plan).from_dict(plan.to_dict())
     assert restored.document_metadata == plan.document_metadata
 
 
@@ -305,12 +286,12 @@ Next paragraph."""
     assert plan.segments[0].directives.prosody.rate == "slow"
     assert plan.segments[0].directives.prosody.pitch == "high"
     assert plan.segments[0].directives.prosody.volume == "soft"
-    assert plan.segments[0].pause_after.seconds == pytest.approx(0.25)
+    assert plan.segments[0].pause_after == PauseIntent("sentence")
     assert plan.document_metadata["prosody_transitions"]["same_voice_only"] is True
     assert plan.document_metadata["language_detection"]["languages"] == ["de-DE", "en-GB"]
     assert plan.document_metadata["requires"]["extensions"] == ["acme.effects.whisper"]
     assert plan.document_metadata["header"]["x-acme-contract"] == {"revision": 2}
-    restored = type(plan).from_toml(plan.to_toml())
+    restored = type(plan).from_dict(plan.to_dict())
     assert restored.document_metadata == plan.document_metadata
     assert restored.segments == plan.segments
 

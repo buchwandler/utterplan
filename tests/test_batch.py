@@ -6,8 +6,12 @@ import pytest
 import tomlkit
 
 import utterplan.batch as batch_module
-from utterplan import CompileRequest, PlannerConfig, UtterancePlan, compile_to_files
+from utterplan import CompileRequest, FlowPlan, PlannerConfig, compile_to_files
 from utterplan.exceptions import PlanFormatError
+
+
+def _load_plan(path: Path) -> FlowPlan:
+    return FlowPlan.from_toml(path.read_text(encoding="utf-8"))
 
 
 def _requests(tmp_path: Path, *, count: int, invalid_index: int | None = None):
@@ -66,7 +70,7 @@ def test_item_three_failure_preserves_successes_and_continues_through_seventeen(
             assert not request.output.exists()
         else:
             assert request.output.exists()
-            assert UtterancePlan.load(request.output).segments
+            assert _load_plan(request.output).flow
 
     report = dict(tomlkit.parse(report_path.read_text(encoding="utf-8")))
     assert report["format"] == "utterplan-compile-report"
@@ -95,7 +99,7 @@ def test_item_three_failure_preserves_successes_and_continues_through_seventeen(
     assert all(snapshot["complete"] is False for snapshot in report_snapshots[1:18])
     assert report_snapshots[-1]["complete"] is True
     with pytest.raises(PlanFormatError):
-        UtterancePlan.load(report_path)
+        _load_plan(report_path)
 
 
 def test_each_success_is_written_before_the_next_request_compiles(
@@ -156,7 +160,7 @@ def test_existing_output_is_protected_unless_force_is_explicit(tmp_path: Path) -
 
     forced = list(compile_to_files([request], config=config, force=True))[0]
     assert forced.status == "written"
-    assert UtterancePlan.load(request.output).plan_id == forced.plan_id
+    assert _load_plan(request.output).plan_id == forced.plan_id
 
 
 def test_target_write_failure_is_reported_and_later_requests_continue(
@@ -222,9 +226,9 @@ def test_path_backed_read_failure_is_an_item_failure_and_continues(tmp_path: Pat
     assert outcomes[1].stage == "read"
     assert outcomes[1].error_code == "input.read_failed"
     assert outcomes[1].source_label.endswith("missing.txt")
-    assert UtterancePlan.load(requests[0].output).segments
+    assert _load_plan(requests[0].output).flow
     assert not requests[1].output.exists()
-    assert UtterancePlan.load(requests[2].output).segments
+    assert _load_plan(requests[2].output).flow
 
 
 def test_unexpected_programming_errors_are_not_converted_to_item_failures(

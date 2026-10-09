@@ -3,7 +3,8 @@ from __future__ import annotations
 import unicodedata
 from pathlib import Path
 
-from utterplan import PlannerConfig, UtterancePlanner, classify_segment
+from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+from utterplan import PauseIntent, PlannerConfig, classify_segment
 from utterplan.model import AudioDirective, PlanSegment, SegmentDirectives, TokenAnnotation
 from utterplan.planner import _is_neutral_punctuation_text
 
@@ -105,7 +106,7 @@ def test_supplied_emphasis_failure_shape_keeps_terminal_pause_on_speech() -> Non
     final = next(segment for segment in plan.segments if "Initiate" in segment.text)
     assert final.text.rstrip().endswith(".")
     assert final.directives.emphasis.level == "moderate"
-    assert final.pause_after.seconds > 0
+    assert final.pause_after == PauseIntent("timed", "500ms")
 
     annotation = next(item for item in plan.annotations if item.attrs.get("emphasis"))
     assert annotation.spoken_end < final.spoken_end
@@ -180,7 +181,7 @@ def test_explicit_pause_stays_between_speech_segments() -> None:
     stop = next(segment for segment in plan.segments if "Stop" in segment.text)
     following = next(segment for segment in plan.segments if "Continue" in segment.text)
     assert stop.text.rstrip().endswith(".")
-    assert stop.pause_after.seconds >= 0.5
+    assert stop.pause_after == PauseIntent("timed", "500ms")
     assert stop.spoken_end <= following.spoken_start
     assert stop.id != following.id
 

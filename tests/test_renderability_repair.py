@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 
+from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
 from utterplan import (
     AnnotationSpan,
     BoundaryEvent,
@@ -15,7 +16,6 @@ from utterplan import (
     SegmentDirectives,
     SemanticBoundary,
     UtterancePlan,
-    UtterancePlanner,
     assess_renderability_repair,
     classify_segment,
     compile_attempt,
@@ -79,7 +79,7 @@ def test_repair_is_the_default_and_records_a_source_located_guarantee() -> None:
 
     assert config.renderability_mode == "repair"
     assert repeated.plan_id == plan.plan_id
-    assert repeated.to_toml() == plan.to_toml()
+    assert repeated.to_dict() == plan.to_dict()
     assert [segment.text for segment in plan.segments] == ["Hello.", "World."]
     assert plan.document_metadata["planning"]["renderability"] == {
         "mode": "repair",
@@ -156,7 +156,6 @@ def test_active_pause_at_join_blocks_merge_but_preserves_safe_drop() -> None:
         id="boundary-000000",
         position=5,
         kind="explicit",
-        seconds=0.5,
         origin="ssmd",
         strength="sentence",
     )
@@ -175,7 +174,7 @@ def test_active_pause_at_join_blocks_merge_but_preserves_safe_drop() -> None:
     repaired, repairs = _repair_renderer_segments(segments, (issue,), "Hello.")
     assert [segment.text for segment in repaired] == ["Hello"]
     assert repairs[0].repair == "drop_non_speech_punctuation"
-    assert (boundary.position, boundary.seconds) == (5, 0.5)
+    assert boundary.position == 5 and boundary.seconds is None
 
 
 def test_active_pause_inside_punctuation_blocks_merge_and_drop() -> None:
@@ -184,7 +183,6 @@ def test_active_pause_inside_punctuation_blocks_merge_and_drop() -> None:
         id="boundary-inside",
         position=6,
         kind="explicit",
-        seconds=0.5,
         origin="ssmd",
         strength="sentence",
     )

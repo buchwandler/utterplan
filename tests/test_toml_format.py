@@ -1,147 +1,194 @@
 from __future__ import annotations
 
+import copy
 import datetime
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
+import tomlkit
 
-from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
-from utterplan.exceptions import PlanFormatError, UnsupportedSchemaError
-from utterplan.toml_codec import (
-    dumps_toml,
-    from_toml_data,
-    loads_toml,
-    to_toml_data,
+from utterplan import (
+    DocumentInfo,
+    EmphasisDirective,
+    FlowPlan,
+    FlowSegment,
+    FlowUnit,
+    LinguisticProvenance,
+    PauseIntent,
+    PlanValidationError,
+    SegmentDirectives,
+    TokenView,
 )
-from utterplan.units import make_units
+from utterplan.codecs.v4_toml import decode_v4_toml_data
+from utterplan.exceptions import PlanFormatError, PlanMigrationError, UnsupportedSchemaError
+from utterplan.hashing import FLOW_HASH_SCHEMA
+from utterplan.migrations import migrate_v4_to_v5
+from utterplan.toml_codec import dumps_toml, from_toml_data, loads_toml, to_toml_data
 
 ROOT = Path(__file__).resolve().parent
-GOLDENS = sorted((ROOT / "golden").glob("*.utterplan.toml"))
+V4_TOML = ROOT / "golden" / "basic_en.utterplan.toml"
+V4_AMBIGUOUS_TOML = ROOT / "golden" / "ssmd_09_comprehensive.utterplan.toml"
+V4_JSON = ROOT / "migration" / "fixtures" / "v4" / "basic_en.utterplan.json"
 
 
-def _plan(path: Path) -> UtterancePlan:
-    return UtterancePlan.load(path)
+def _plan() -> FlowPlan:
+    segment = FlowSegment(
+        text="My life changed.",
+        language="en-US",
+        pause_after=PauseIntent("timed", "500ms"),
+        directives=SegmentDirectives(emphasis=EmphasisDirective("strong")),
+        tokens=(
+            TokenView(
+                0,
+                2,
+                lemma="my",
+                pos="PRON",
+                tag="PRP$",
+                morph="Number=Sing|Person=1|Poss=Yes|PronType=Prs",
+            ),
+            TokenView(3, 7, lemma="life", pos="NOUN", tag="NN"),
+            TokenView(8, 15, lemma="change", pos="VERB", tag="VBD", morph="Tense=Past"),
+        ),
+        markers=("chapter-one",),
+        heading=2,
+    )
+    translated = FlowSegment(
+        text="Outer voice.",
+        language="fr-FR",
+        pause_before=PauseIntent("voice_change"),
+        tokens=(TokenView(0, 5, pos="ADJ", tag="JJ"), TokenView(6, 11, pos="NOUN", tag="NN")),
+    )
+    return FlowPlan(
+        language="en-US",
+        unit="sentence",
+        flow=(FlowUnit((segment, translated)),),
+        document=DocumentInfo(
+            format="ssmd",
+            ssmd_version="0.9",
+            title="Chapter one",
+            semantics={"voice_bindings": {"narrator": "en-US"}},
+        ),
+        linguistics=(
+            LinguisticProvenance(language="en-US", provider="spacy", model="en_core_web_lg"),
+            LinguisticProvenance(language="fr-FR", provider="fallback"),
+        ),
+        producer={"name": "utterplan", "version": "0.5.0"},
+    )
 
 
-def test_v4_golden_plans_roundtrip_with_semantic_identity_and_determinism() -> None:
-    assert GOLDENS
-    for path in GOLDENS:
-        plan = _plan(path)
-        text = dumps_toml(plan)
-        restored = loads_toml(text)
-        assert dumps_toml(plan) == text
-        assert restored.to_dict() == plan.to_dict()
-        assert restored.semantic_dict() == plan.semantic_dict()
-        assert restored.plan_id == plan.plan_id
-        assert [unit.content_hash for unit in restored.units] == [
-            unit.content_hash for unit in plan.units
-        ]
+def test_v5_toml_roundtrip_is_deterministic_and_semantically_identical() -> None:
+    plan = _plan()
+    text = dumps_toml(plan)
+    restored = loads_toml(text)
+
+    assert isinstance(restored, FlowPlan)
+    assert dumps_toml(restored) == text
+    assert restored.to_dict() == plan.to_dict()
+    assert restored.plan_id == plan.plan_id
+    assert restored.flow[0].content_hash == plan.flow[0].content_hash
+    assert restored.flow[0].segments[0].tokens[0].surface("My life changed.") == "My"
+    assert restored.flow[0].segments[0].pause_after == PauseIntent("timed", "500ms")
 
 
-def test_toml_projection_nests_segments_and_emits_tokens_inline() -> None:
-    plan = _plan(ROOT / "golden" / "ssmd_09_comprehensive.utterplan.toml")
+def test_toml_is_compact_local_and_columnar() -> None:
+    plan = _plan()
     wire = to_toml_data(plan)
     text = dumps_toml(plan)
+    segment = wire["flow"][0]["segment"][0]
 
-    assert wire["unit"][0]["segment"][0]["id"] == plan.segments[0].id
-    assert "segment_ids" not in wire["unit"][0]
-    assert wire["token_stream"]["items"][0]["span"] == [
-        plan.tokens[0].spoken_start,
-        plan.tokens[0].spoken_end,
-    ]
-    assert "[[unit.segment]]" in text
-    assert "[[token_stream.items]]" not in text
-    assert '{id = "token-0", span = [' in text
-
-
-def test_known_nullable_fields_are_omitted_and_rehydrated() -> None:
-    plan = _plan(ROOT / "golden" / "ssmd_09_comprehensive.utterplan.toml")
-    wire = to_toml_data(plan)
-
-    assert "version" not in wire["preparation"]
-    assert "use_spacy" not in wire["config"]["linguistics"]
-    assert "pause_overrides" not in wire["config"]["ssmd"]
-    assert "model" not in wire["linguistic_run"][0]
-    assert "morph" not in wire["token_stream"]["items"][0]
-    assert all("language_run_id" not in item for item in wire["semantic_boundary"])
-    assert "strength" not in wire["boundary"][0]
-
-    restored = from_toml_data(wire)
-    assert restored.preparation.version is None
-    assert restored.config["linguistics"]["use_spacy"] is None
-    assert restored.config["ssmd"]["pause_overrides"] is None
-    assert restored.linguistic_runs[0].model is None
-    assert restored.tokens[0].morph is None
-    assert restored.semantic_boundaries[0].language_run_id is None
-    assert restored.boundaries[0].strength is None
+    assert wire["schema_version"] == 5
+    assert wire["hash_schema"] == FLOW_HASH_SCHEMA
+    assert segment["token"]["span"] == [[0, 2], [3, 7], [8, 15]]
+    assert segment["token"]["pos"] == ["PRON", "NOUN", "VERB"]
+    assert segment["token"]["lemma"] == [[2, "change"]]
+    assert wire["flow"][0]["segment"][1]["token"]["lemma"] == [[0, ""], [1, ""]]
+    assert "token.span = [[0, 2], [3, 7], [8, 15]]" in text
+    assert 'pause_after = {type = "timed", time = "500ms"}' in text
+    assert "[[flow]]" in text and "[[flow.segment]]" in text
+    assert "token_stream" not in text
+    assert "source =" not in text
+    assert "config" not in text
+    assert "segment_ids" not in text
+    assert "token_indices" not in text
+    assert "seconds" not in text
+    assert "duration_s" not in text
+    assert "language" not in segment
+    assert wire["flow"][0]["segment"][1]["language"] == "fr-FR"
+    assert text.count('language = "fr-FR"') == 2
 
 
-def test_arbitrary_nested_metadata_null_roundtrips_through_reserved_sentinel() -> None:
-    original = _plan(ROOT / "golden" / "basic_en.utterplan.toml")
-    plan = replace(
-        original,
-        document_metadata={"nested": {"missing": None, "items": [1, None, "x"]}},
-    ).with_identity()
-    wire = to_toml_data(plan)
-
-    assert wire["document_metadata"]["nested"]["missing"] == {"__utterplan_null__": True}
-    restored = from_toml_data(wire)
-    assert restored.document_metadata == plan.document_metadata
-    assert restored.plan_id == plan.plan_id
-
-
-def test_reserved_metadata_keys_are_rejected_when_encoding_or_decoding() -> None:
-    plan = _plan(ROOT / "golden" / "basic_en.utterplan.toml")
-    conflicted = replace(plan, document_metadata={"__utterplan_custom__": "value"})
-    with pytest.raises(PlanFormatError, match="reserved metadata key"):
-        to_toml_data(conflicted)
-
-    wire = to_toml_data(plan)
-    wire["document_metadata"] = {"custom": {"__utterplan_null__": False}}
-    with pytest.raises(PlanFormatError, match="conflicting reserved metadata sentinel"):
-        from_toml_data(wire)
-
-
-def test_toml_preserves_unicode_and_pathological_text_exactly() -> None:
-    empty = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan("")
-    values = [
-        "Unicode café € 🙂 ∑",
-        'quotes " and triple quotes """ stay exact',
-        "backslash \\\\ followed by newline\n",
-        "\nleading and trailing\n",
-        "",
-    ]
-    for value in values:
-        plan = replace(
-            empty,
-            source=replace(empty.source, text=value),
-            texts=replace(empty.texts, structural=value, spoken=value),
-        ).with_identity()
-        restored = loads_toml(dumps_toml(plan))
-        assert restored.source.text == value
-        assert restored.texts.structural == value
-        assert restored.texts.spoken == value
-        assert restored.plan_id == plan.plan_id
-
-
-def test_spacy_morph_field_survives_projection_and_roundtrip() -> None:
-    plan = _plan(ROOT / "golden" / "ssmd_09_comprehensive.utterplan.toml")
-    tokens = list(plan.tokens)
-    tokens[0] = replace(tokens[0], morph="NumType=Card")
-    units = make_units(
-        plan.segments,
-        plan.markers,
-        tuple(tokens),
-        plan.units[0].kind,
-        plan.semantic_boundaries,
+def test_freeform_document_semantics_preserve_null_through_the_toml_sentinel() -> None:
+    plan = _plan()
+    updated = replace(
+        plan,
+        plan_id="",
+        document=replace(plan.document, semantics={"optional": None, "nested": ["x", None]}),
     )
-    plan = replace(plan, tokens=tuple(tokens), units=units, plan_id="").with_identity()
 
-    restored = loads_toml(dumps_toml(plan))
-    assert restored.tokens[0].morph == "NumType=Card"
-    assert restored.to_dict() == plan.to_dict()
+    text = dumps_toml(updated)
+    restored = loads_toml(text)
+
+    assert "__utterplan_null__" in text
+    assert restored.document == updated.document
+
+
+def test_metadata_and_warnings_do_not_change_plan_identity() -> None:
+    plan = _plan()
+    updated = replace(
+        plan,
+        producer={"name": "other", "version": "99"},
+        warnings=("compiler diagnostic",),
+    )
+    assert updated.plan_id == plan.plan_id
+    assert updated.flow[0].content_hash == plan.flow[0].content_hash
+    assert loads_toml(dumps_toml(updated)).plan_id == plan.plan_id
+
+
+def test_v5_model_rejects_identity_and_content_hash_mismatches() -> None:
+    plan = _plan()
+    wrong_identity = plan.to_dict()
+    wrong_identity["language"] = "de-DE"
+    with pytest.raises(PlanValidationError) as error:
+        FlowPlan.from_dict(wrong_identity)
+    assert error.value.code == "plan.identity"
+
+    wrong_hash = plan.to_dict()
+    wrong_hash["flow"][0]["hash"] = "sha256:" + "0" * 64
+    with pytest.raises(PlanValidationError) as error:
+        FlowPlan.from_dict(wrong_hash)
+    assert error.value.code == "flow.hash"
+
+
+def test_version_router_reads_frozen_v4_toml_and_projects_to_v5() -> None:
+    raw = V4_TOML.read_text(encoding="utf-8")
+    frozen = decode_v4_toml_data(tomlkit.parse(raw).unwrap())
+    before = copy.deepcopy(frozen)
+    migrated = loads_toml(raw)
+
+    assert isinstance(migrated, FlowPlan)
+    assert migrated.schema_version == 5
+    assert frozen == before
+    assert migrated.to_dict() == migrate_v4_to_v5(frozen)
+
+
+def test_v4_toml_with_ambiguous_token_coordinates_fails_safely() -> None:
+    with pytest.raises(PlanMigrationError) as error:
+        loads_toml(V4_AMBIGUOUS_TOML.read_text(encoding="utf-8"))
+    assert error.value.code == "migration.token-coordinate-ambiguous"
+
+
+def test_v5_toml_from_legacy_v4_mapping_uses_the_current_wire_shape() -> None:
+    import json
+
+    legacy = json.loads(V4_JSON.read_text(encoding="utf-8"))
+    v5 = FlowPlan.from_dict(migrate_v4_to_v5(legacy))
+    wire = to_toml_data(v5)
+    restored = from_toml_data(wire)
+
+    assert isinstance(restored, FlowPlan)
+    assert restored.to_dict() == v5.to_dict()
 
 
 @pytest.mark.parametrize(
@@ -152,10 +199,11 @@ def test_spacy_morph_field_survives_projection_and_roundtrip() -> None:
         (float("inf"), "non-finite"),
     ],
 )
-def test_metadata_rejects_datetime_and_nonfinite_floats(value: object, message: str) -> None:
-    plan = _plan(ROOT / "golden" / "basic_en.utterplan.toml")
-    wire = to_toml_data(plan)
-    wire["document_metadata"]["invalid"] = value
+def test_document_metadata_rejects_values_toml_cannot_represent(
+    value: object, message: str
+) -> None:
+    wire = to_toml_data(_plan())
+    wire["document"]["semantics"]["invalid"] = value
     with pytest.raises(PlanFormatError, match=message):
         from_toml_data(wire)
 
@@ -167,13 +215,12 @@ def test_invalid_toml_reports_location() -> None:
 
 
 def test_unknown_root_fields_and_future_schema_are_rejected() -> None:
-    plan = _plan(ROOT / "golden" / "basic_en.utterplan.toml")
-    wire: dict[str, Any] = to_toml_data(plan)
+    wire: dict[str, Any] = to_toml_data(_plan())
     wire["extra"] = True
     with pytest.raises(PlanFormatError, match="unknown top-level TOML fields"):
         from_toml_data(wire)
 
-    wire = to_toml_data(plan)
-    wire["schema_version"] = 5
+    wire = to_toml_data(_plan())
+    wire["schema_version"] = 6
     with pytest.raises(UnsupportedSchemaError):
         from_toml_data(wire)

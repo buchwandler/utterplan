@@ -7,8 +7,8 @@
 
 UtterPlan is the canonical, engine-independent semantic compiler from one SSMD
 document (or explicitly selected plain-text document) to an executable speech
-plan. It produces deterministic language runs, prepared text, segments, resolved
-pauses, portable metadata, directives, markers, and render units shared by
+plan. It produces deterministic prepared text, ordered flow units, segment-local
+semantics, pause intents, portable document metadata, and typed directives for
 independent consumers such as ttsready and Readio. It does not manage books or
 consumer workspaces, and stops before G2P, synthesis, and audio.
 
@@ -48,12 +48,13 @@ The CLI also provides:
 utterplan --version
 utterplan validate chapter.utterplan.toml
 utterplan inspect chapter.utterplan.toml --segment 0
-utterplan inspect chapter.utterplan.toml --semantic-boundaries
-utterplan explain chapter.utterplan.toml
+utterplan inspect chapter.utterplan.toml --boundaries --tokens
+utterplan explain chapter.utterplan.toml --trace chapter.trace.toml
+utterplan inspect-trace chapter.trace.toml --preparation --boundaries
 utterplan inspect-attempt chapter.attempt.toml --issues
 ```
 
-`explain` presents the compiled plan as a human-readable speech plan, while `inspect` exposes lower-level diagnostic fields.
+`explain` presents executable flow as a human-readable speech plan. Use `compile --trace PATH` to retain optional compiler provenance; `explain --trace PATH` and `inspect-trace` read that sidecar separately from the plan.
 
 `inspect-attempt` reads the separate `utterplan.planning-attempt.v1` TOML artifact,
 not a canonical plan. Use it to review renderability issues and safe repair
@@ -75,11 +76,11 @@ ssmd migrate old.ssmd --to 0.9
 ```
 
 `utterplan migrate` explicitly imports supported historical `.utterplan.json` plans and writes current TOML. It does not migrate SSMD source.
-Normal plan loading is TOML-only: `UtterancePlan.load()` and plan-inspection commands reject JSON rather than auto-detecting it.
+Normal plan loading is TOML-only: `FlowPlan.load()` and plan-inspection commands reject JSON rather than auto-detecting it.
 
 ## Planning defaults
 
-The minimal CLI defaults are explicit: `spokenform` is the default text-preparation backend, `tts` is the default pause mode, and `spacy off` is the default linguistic-resource policy. With `spacy off`, UtterPlan uses its deterministic fallback tokenizer and analysis and does not depend on an installed spaCy model.
+The minimal CLI defaults are explicit: `spokenform` is the default text-preparation backend, `tts` is the default pause activation mode, and `spacy off` is the default linguistic-resource policy. With `spacy off`, UtterPlan uses its deterministic fallback tokenizer and analysis and does not depend on an installed spaCy model.
 
 Python `PlannerConfig` defaults to `document_format="plain"`; set it to `"ssmd"` when a Python string contains SSMD source.
 
@@ -90,7 +91,7 @@ Python `PlannerConfig.renderability_mode` also defaults to safe punctuation-only
 ## Python API
 
 ```python
-from utterplan import PlannerConfig, UtterancePlan, compile_document
+from utterplan import PlannerConfig, FlowPlan, compile_document
 
 ssmd_source = """---
 ssmd_version: "0.9"
@@ -107,7 +108,7 @@ result = compile_document(
 plan = result.plan
 assert result.trace is not None
 plan.save("example.utterplan.toml")
-assert UtterancePlan.load("example.utterplan.toml") == plan
+assert FlowPlan.load("example.utterplan.toml") == plan
 ```
 
 `compile_document` is the stable public one-document API shared by consumers. The
@@ -135,21 +136,9 @@ Callbacks run synchronously and exceptions propagate. See the [Python API guide]
 
 ## Renderer-consumer boundary
 
-Renderers consume `PlanSegment.text`, which is prepared/spoken text, and use
-`spoken_start`/`spoken_end` for spoken-text coordinates. Resolved segment
-pauses, language, directives, annotations, boundaries, semantic boundaries,
-markers, units, and
-document metadata are public plan fields. Semantic boundaries are stable
-engine-neutral opportunities for spoken-text subdivision; they are not pause
-events and carry no duration or renderer policy. Plans contain no phonemes, model
-tokens, model sessions, renderer configuration, provider documents, or audio.
-For SSMD input, `plan.annotations` preserve declared source semantics and source
-provenance, `document_metadata` preserves portable header data, and
-`segment.directives` carries effective typed semantics after scope and voice-default
-resolution. Typed directives include voice, pronunciation, prosody, emphasis, say-as,
-substitution, audio references, and extension references. Audio and extensions are
-data only. UtterPlan does not fetch media or execute extension handlers.
+Renderers consume `FlowPlan.flow` in order. Each `FlowUnit` contains local `FlowSegment` objects with already-prepared speech text, effective language, segment-local token views, semantic pause intents, directives, markers, and optional heading level. Token `start`/`end` offsets are Python-character indexes into that segment's `text`; they are never document-global coordinates. Pause intents express `none`, semantic strengths, or exact authored times and do not prescribe engine-specific duration policy.
 
+`FlowPlan.document` carries compact document metadata and `FlowPlan.linguistics` identifies the analysis provider without retaining provider documents. Compiler source, preparation maps, diagnostics, and renderability details belong only in an optional trace sidecar. Plans contain no phonemes, model token IDs, models, sessions, renderer configuration, provider documents, or audio. UtterPlan does not fetch media or execute extension handlers.
 The intended dependency direction is:
 
 ```text
@@ -175,10 +164,9 @@ renderer repository rather than UtterPlan's test suite.
 
 ## Versions
 
-The package version is dynamically derived from Git tags by setuptools-scm. Package version and UtterPlan schema version are independent. Current `.utterplan.toml` plans use semantic schema v4; released schema v1, v2, and v3 remain immutable and supported through sequential migrations.
+The package version is dynamically derived from Git tags by setuptools-scm. Package version and UtterPlan schema version are independent. Current `.utterplan.toml` plans use semantic schema v5. Historical JSON Schemas v1–v4 remain immutable and supported through sequential migrations; v5 deliberately has no JSON Schema resource because its canonical executable contract is the validated TOML/FlowPlan model.
 
-Schema v4 adds stable `SemanticBoundary` records in spoken-text coordinates. Migration converts serialized plan data only: the registered v3-to-v4 step preserves existing evidence and derives topology where possible, but does not rerun parsing, NLP, planning, G2P, rendering, or audio processing. Unit hashes use `utterplan-unit-v3` and include relative semantic-boundary positions; older hash algorithms remain available for their historical migration paths.
-Schema v4 retains typed renderer-neutral SSMD semantics, final pass-B token facts, and per-language-run provider provenance. Plans never serialize provider documents, models, sessions, phonemes, token IDs, or audio.
+Schema v5 is a breaking redesign around ordered flow units and segment-local semantics. It preserves deterministic output and moves preparation/source provenance to an optional TOML trace sidecar, which does not affect plan identity. Migration converts serialized plan data only: v1–v4 migrate sequentially to v5 without reparsing, NLP, planning, G2P, rendering, or audio processing. The v4-to-v5 projection fails safely when historical token coordinates or pause semantics cannot be verified.
 
 ## Development
 

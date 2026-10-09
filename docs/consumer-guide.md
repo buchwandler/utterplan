@@ -1,110 +1,85 @@
 # Renderer consumer guide
 
-UtterPlan ends at a semantic planning boundary. A renderer consumes the public
-plan object and begins G2P after planning. It does not need a TOML round trip
-when planner and renderer run in the same process.
+UtterPlan ends at a semantic planning boundary. A renderer consumes the public `FlowPlan` and begins G2P after planning. It does not need a TOML round trip when planner and renderer run in the same process.
 
-UtterPlan accepts SSMD source syntax at version 0.9 only. Source migration is separate from plan migration. Current persisted plans use TOML; supported historical `.utterplan.json` files require the explicit `utterplan migrate` import command and migrate to schema v4 without reparsing or replanning.
+For persistence across processes, save a current plan as `.utterplan.toml` and load it with `FlowPlan.load()`. `to_toml()` / `from_toml()` provide text round-tripping, and `plan_id` identifies executable semantics rather than TOML formatting. Batch reports and optional compiler traces are operational/provenance artifacts, not plans.
 
-For persistence across processes, save a current plan as `.utterplan.toml` and load it with `UtterancePlan.load()`. `to_toml()` / `from_toml()` provide text round-tripping, and `plan_id` is stable across the wire-format projection. TOML is the normal plan format; batch reports are operational records, not plans. Import historical JSON plans explicitly with `utterplan migrate` before handing the resulting TOML to consumers.
+UtterPlan accepts SSMD source syntax at version 0.9 only. Convert older source with `ssmd migrate FILE --to 0.9`; `utterplan migrate` is for importing serialized legacy plans.
 
-## Migrating source and serialized plans
+## Importing legacy plans
 
-### SSMD source documents
-
-UtterPlan 0.4 accepts SSMD 0.9 only. Convert older source files before compilation:
+Historical JSON schemas v1–v4 remain immutable and supported through sequential migrations to schema v5. Import explicitly:
 
 ```bash
-ssmd migrate FILE --to 0.9
+utterplan migrate old.utterplan.json -o current.utterplan.toml
 ```
 
-This is source-dialect migration. It does not convert serialized UtterPlan plans.
-
-### Python input format
-
-`PlannerConfig.document_format` now defaults to `"plain"`. Plain-text callers need no change. Set `document_format="ssmd"` when a Python string contains an SSMD document or fragment:
-
-```python
-planner = UtterancePlanner(
-    PlannerConfig(language="en-us", document_format="ssmd")
-)
-plan = planner.plan(ssmd_source)
-```
-
-### SSMD configuration
-
-`SSMDConfig.strict_header` and `SSMDConfig.unknown_header` were removed because SSMD 0.9 owns header validation. `parse_header` is now `parse_yaml_header`, and the application-level `pause_defaults` option is now `pause_overrides`. The portable SSMD source-header key remains `pause_defaults`. At a shared boundary, an explicit source break takes precedence over application overrides, document defaults, and planner defaults, including an authored `0ms` break.
-
-### Importing legacy JSON plans
-
-Legacy serialized schemas v1, v2, and v3 remain supported and immutable; v4 JSON plans can also be explicitly imported. `utterplan migrate old.utterplan.json -o current.utterplan.toml` applies any required registered schema migration and writes current TOML. Normal `UtterancePlan.load()` does not accept JSON or auto-detect it. The v3-to-v4 step preserves existing boundary evidence and derives only deterministic topology; it does not reparse source, rerun NLP, or replan. Package version and semantic schema version are independent.
+Migration operates on serialized plain data and does not reparse, reprepare, rerun NLP, or replan. The v4-to-v5 projection fails safely if token ownership/spans or authored pause semantics cannot be verified without guessing. Recompiling source is a separate operation. Normal `FlowPlan.load()` and plan-inspection commands reject JSON.
 
 ## Planning defaults
 
-UtterPlan's default text-preparation backend is `spokenform`, its default pause mode is `tts`, and the default CLI linguistic-resource policy is `spacy off`. The default path uses deterministic fallback tokenization and analysis and does not depend on an installed spaCy model.
-The Python API defaults `PlannerConfig.document_format` to `"plain"`; choose `"ssmd"` explicitly for authored SSMD strings. In `SSMDConfig`, use `parse_yaml_header` and `pause_overrides`. SSMD 0.9 owns header diagnostics, and the source-header `pause_defaults` key remains separate from application overrides.
+The default text-preparation backend is `spokenform`, pause activation mode is `tts`, and the default CLI linguistic-resource policy is `spacy off`. Deterministic fallback tokenization and analysis do not require an installed spaCy model. `spacy auto` is opt-in; it may expose richer tokenization, POS, lemmas, and tags, but provider documents remain internal.
 
-`spacy auto` is an opt-in enrichment policy. When a compatible local model is available, it may expose richer tokenization, POS tags, lemmas, and tags. Consumers should not assume `auto` is enabled, and provider documents remain internal planning state rather than public plan data.
+In Python, `PlannerConfig.document_format` defaults to `"plain"`; select `"ssmd"` for SSMD source. `PauseConfig.mode` controls whether eligible semantic pause intents are activated by the compiler. The executable plan carries semantic intent (or an exact authored timed pause), not numeric durations invented from an activation policy. A renderer may interpret supported intents according to its own capabilities.
 
 ## Consumer contract
 
-Use these public fields:
+`FlowPlan.flow` is the render order. Each `FlowUnit` owns its ordered `FlowSegment` records; no ID join is required. A segment provides:
 
-- `plan.texts.spoken` is the prepared text sent toward G2P.
-- `segment.text` is exactly the slice of spoken text from
-  `segment.spoken_start:segment.spoken_end`.
-- `segment.language` identifies the language for the segment.
-- `plan.languages` provides language runs.
-- `plan.annotations` and `segment.annotation_ids` preserve declared semantic spans and source provenance.
-- `plan.tokens` and `segment.token_indices` provide linguistic token metadata.
-- `plan.boundaries` explains pause/timing and document events, including headings.
-- `plan.semantic_boundaries` exposes stable spoken-coordinate opportunities for clause, parenthetical, sentence, and paragraph subdivision. These records are independent of pause activation and contain no duration semantics.
-- `segment.pause_before` and `segment.pause_after` are already-resolved pauses.
-- `segment.directives` carries effective typed renderer-neutral intent, including voice, pronunciation, prosody, emphasis, say-as, substitution, audio reference, and extension reference.
-- `plan.markers` and `unit.marker_ids` identify marker ownership.
-- `plan.units` groups segments for paragraph or sentence rendering.
-- `plan.document_metadata` preserves portable SSMD header metadata, including voice bindings and defaults.
+- `text`: prepared speech text for this segment.
+- `language`: effective language, defaulting from `FlowPlan.language` when omitted on the wire.
+- `tokens`: local token views with optional lemma, POS, tag, and morphology.
+- `pause_before` and `pause_after`: semantic pause intents such as `none`, `sentence`, `parenthetical`, or an exact authored time.
+- `directives`: typed voice, pronunciation, prosody, emphasis, say-as, substitution, audio, and extension data.
+- `markers` and optional `heading` metadata already localized to the owning segment.
 
-> Semantic annotation boundaries do not create standalone punctuation-only speech segments. Neutral punctuation adjacent to a semantic span stays with neighboring speech while annotation provenance remains exact.
->
-> Segment text may include neutral punctuation just outside a semantic annotation range. Interpret directives as applying to the speech-bearing semantic core; do not require the annotation to contain the entire literal segment. Annotation `spoken_start` and `spoken_end` remain exact.
-
-Audio/media segments are exposed through the same renderer-neutral segment contract:
-one SSMD audio annotation produces exactly one segment with
-`segment.directives.audio` set. Consumers should choose media from that directive,
-not infer it from the fallback text or reparse raw SSMD. `audio.src` is an opaque
-source string for an external resolver; UtterPlan does not select or invoke one.
-
-For an audio-bearing segment, `segment.text` is the optional spoken fallback. An
-empty string means there is no spoken fallback. Identical source URIs on separate
-segments are distinct timeline occurrences and must not be deduplicated as
-playback events.
-
-`TokenAnnotation` stores the exact spoken slice plus normalized language, lemma, coarse POS, fine-grained tag, and compact morphology. `LinguisticRun` records actual provider/model provenance.
-
-`plan.linguistic_runs` records the actual final pass-B analysis for each language run. `provider` is `spacy`, `fallback`, or `unknown`; model and version fields are provenance, not renderer inputs. A contextual G2P consumer should use `plan.tokens_for_segment(segment)` (or `segment.token_indices`) and must explicitly fail or use a documented fallback when the relevant provider is not `spacy`.
-All segment ranges and renderer-facing ranges are spoken-text coordinates.
-
-Preparation provenance is diagnostic metadata for consumers. Do not depend on a serialized coordinate map. All structural-to-spoken conversion has already been resolved by the planner.
-Voice bindings and directive voice references are logical names, not backend voice IDs. Consumers translate them to engine-specific resources. UtterPlan resolves SSMD scopes and defaults but does not make engine choices, fetch audio, execute extension handlers, or recompute pause policy.
-Consumers should use the public lookup helpers rather than scanning serialized dictionaries:
+Token offsets are half-open Python-character ranges into the owning `segment.text`. Do not use them to slice document text or add offsets from another segment. Consumers render flow units and segments in their stored order.
 
 ```python
-for boundary in plan.semantic_boundaries_for_segment(segment, kinds={"clause"}):
-    request_local_offset = boundary.position - segment.spoken_start
-    split_text = segment.text[:request_local_offset]
+from utterplan import FlowPlan
+
+plan = FlowPlan.load("chapter.utterplan.toml")
+plan.validate()
+
+for unit in plan.flow:
+    for segment in unit.segments:
+        token_views = [
+            (segment.text[token.start : token.end], token.lemma, token.pos, token.tag, token.morph)
+            for token in segment.tokens
+        ]
+        render_speech(
+            text=segment.text,
+            language=segment.language,
+            tokens=token_views,
+            pause_before=segment.pause_before,
+            pause_after=segment.pause_after,
+            directives=segment.directives,
+        )
 ```
 
-`SemanticBoundary.position` is always an offset into `plan.texts.spoken`. A
-consumer may rebase it into a segment or request-local string, but must not
-interpret it as a source or structural offset. `attrs` is diagnostic provenance;
-provider documents and parser objects are never part of the boundary contract.
+`FlowPlan.document` retains compact document information such as format, title, SSMD version, and portable semantics. `FlowPlan.linguistics` identifies analysis provider/model provenance without retaining provider state. Source text, source locations, compiler diagnostics, preparation mappings, and renderability details are intentionally not executable-plan fields.
 
-## Stable renderer input view
+## Optional compiler trace
 
-Consumers may rely on these plan-level fields: `texts.spoken`, `preparation`, `languages`, `linguistic_runs`, `tokens`, `annotations`, `boundaries`, `segments`, `units`, `markers`, and `document_metadata`. The SSMD version is in `document_metadata["ssmd_version"]`; heading events are preserved in `boundaries`. Each segment additionally provides its ID, spoken text range, language, paragraph/sentence/clause ownership, resolved pauses, typed directives, token indices, and annotation IDs.
+When source-level evidence must survive a process boundary, request a separate trace sidecar:
 
-A completed plan is immutable consumer input. Consumers may inspect and adapt the data for G2P or rendering, but must not rewrite planning decisions or mutate the plan. The canonical invariant is:
+```bash
+utterplan compile chapter.ssmd.md -o chapter.utterplan.toml --trace chapter.trace.toml
+utterplan explain chapter.utterplan.toml --trace chapter.trace.toml
+utterplan inspect-trace chapter.trace.toml --preparation --boundaries
+```
+
+The trace contains source text/hash, structural/prepared text, coordinate maps, preparation changes, diagnostics, and renderability evidence. It is not renderer input, does not affect `FlowPlan.plan_id`, and does not change the resulting plan TOML. See the [coordinate-space contract](coordinate-spaces) for every trace offset's coordinate space.
+
+## Directives and media
+
+Voice bindings and directive voice references are logical names, not backend voice IDs; consumers translate them to engine-specific resources. UtterPlan resolves SSMD scopes and defaults but does not choose engine settings or recompute pause policy.
+
+An audio directive is already attached to its owning segment. Its `src` is opaque data for an external resolver; UtterPlan does not select or invoke one. For an audio-bearing segment, `segment.text` is an optional spoken fallback. Identical source URIs on distinct segments are separate timeline occurrences and must not be deduplicated as playback events. Extension references are also data only; UtterPlan does not execute handlers.
+
+## Stable renderer input
+
+A completed plan is immutable consumer input. Consumers may derive data for G2P/rendering, but must not rewrite planning decisions or mutate the plan:
 
 ```python
 before = plan.to_toml()
@@ -114,36 +89,4 @@ assert plan.to_toml() == before
 assert plan.plan_id == plan_id
 ```
 
-This contract does not require provider documents, models, phonemes, model token IDs, or audio to remain available after planning.
-
-## Renderer-neutral pseudocode
-
-```python
-plan = planner.plan(source_text)
-
-for unit in plan.units:
-    for segment_id in unit.segment_ids:
-        segment = next(item for item in plan.segments if item.id == segment_id)
-        prepared_text = segment.text
-        language = segment.language
-        pause_before = segment.pause_before.seconds
-        pause_after = segment.pause_after.seconds
-        audio = segment.directives.audio
-        if audio is not None:
-            # One segment represents one media occurrence; resolve externally.
-            resolve_audio(audio.src, fallback_text=prepared_text)
-        else:
-            segment_tokens = plan.tokens_for_segment(segment)
-            # Pass tokens to contextual G2P without rerunning spaCy.
-            render_speech(prepared_text, language, segment_tokens, pause_before, pause_after)
-```
-
-A consumer may instead index segments, tokens, annotations, and markers by
-public IDs. The plan's own `validate()` method and `UtterancePlan.load()` enforce
-reference, range, membership, identity, and unit-hash invariants.
-
-## What is intentionally absent
-
-Plans contain no phonemes, model token IDs, model sessions, audio, renderer
-configuration, or model-derived timings. Acoustic retries and renderer-level
-randomness remain outside UtterPlan.
+Plans contain no phonemes, model token IDs, model sessions, audio, renderer configuration, or model-derived timings. Acoustic retries and renderer-level randomness remain outside UtterPlan.

@@ -229,7 +229,14 @@ def preflight_segments(
 def preflight_renderability(plan: UtterancePlan) -> RenderabilityReport:
     """Inspect every renderer-facing segment in a completed plan."""
     pause_values = plan.config.get("pauses")
-    pause_config = PauseConfig(**pause_values) if isinstance(pause_values, dict) else PauseConfig()
+    pause_config = (
+        PauseConfig(
+            mode=pause_values.get("mode", "tts"),
+            enabled=pause_values.get("enabled", True),
+        )
+        if isinstance(pause_values, dict)
+        else PauseConfig()
+    )
     return preflight_segments(
         plan.segments,
         plan.tokens,

@@ -35,7 +35,7 @@ def test_v3_to_v4_normalizes_clause_after_punctuation_and_preserves_event() -> N
     original["boundaries"].append(event)
     before = copy.deepcopy(original)
 
-    result = migrate_plan_data(original)
+    result = migrate_plan_data(original, target_version=4)
     migrated = result.data
     assert list(migrated).index("semantic_boundaries") + 1 == list(migrated).index("boundaries")
     clause = next(item for item in migrated["semantic_boundaries"] if item["kind"] == "clause")
@@ -99,7 +99,7 @@ def test_v3_to_v4_converts_legacy_semantic_events_only() -> None:
             }
         )
 
-    migrated = migrate_plan_data(original).data
+    migrated = migrate_plan_data(original, target_version=4).data
     by_source_id = {
         boundary.get("attrs", {}).get("migrated_from_boundary_id"): boundary["kind"]
         for boundary in migrated["semantic_boundaries"]
@@ -113,7 +113,7 @@ def test_v3_to_v4_converts_legacy_semantic_events_only() -> None:
 
 def test_v3_to_v4_does_not_invent_missing_clause_analysis() -> None:
     original = _fixture("multilingual.json")
-    result = migrate_plan_data(original)
+    result = migrate_plan_data(original, target_version=4)
 
     assert not any(boundary["kind"] == "clause" for boundary in result.data["semantic_boundaries"])
     assert result.data["schema_version"] == 4
@@ -131,7 +131,7 @@ def test_v3_to_v4_derives_missing_sentence_and_paragraph_topology() -> None:
         elif previous["sentence"] != current["sentence"]:
             expected.add((previous["spoken_end"], "sentence"))
 
-    result = migrate_plan_data(original)
+    result = migrate_plan_data(original, target_version=4)
     actual = {
         (boundary["position"], boundary["kind"]) for boundary in result.data["semantic_boundaries"]
     }
@@ -141,8 +141,8 @@ def test_v3_to_v4_derives_missing_sentence_and_paragraph_topology() -> None:
 
 def test_v3_to_v4_is_deterministic_rehashes_units_and_records_provenance() -> None:
     original = _fixture("ssmd_09_comprehensive.json")
-    first = migrate_plan_data(original)
-    second = migrate_plan_data(original)
+    first = migrate_plan_data(original, target_version=4)
+    second = migrate_plan_data(original, target_version=4)
     result = first.data
 
     assert result == second.data

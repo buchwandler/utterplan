@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from typing import Literal
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field, replace
+from typing import Any, Literal
 
 from .attempts import PlanningAttempt
 from .config import PlannerConfig
 from .exceptions import ConfigurationError
-from .model import Diagnostic, UtterancePlan
+from .model import Diagnostic, FlowPlan
 from .progress import ProgressCallback
 
 InputFormat = Literal["ssmd", "plain"]
@@ -50,19 +51,54 @@ class PreparationTraceUnit:
 
 @dataclass(frozen=True, slots=True)
 class PreparationTrace:
-    """Optional diagnostic explanation of semantic preparation, not renderer input."""
+    """Optional compiler provenance, separate from renderer input.
+
+    ``structural_to_spoken`` and ``spoken_to_structural`` map Python-character
+    boundaries between the SSMD-clean structural text and prepared speech.
+    ``source_spans`` maps original-source character ranges to structural ranges.
+    ``PreparationTraceUnit`` offsets use those same structural and spoken spaces.
+    """
 
     document_language: str
     sequence_fallback_mode: Literal["spell", "preserve"]
     diagnostics: tuple[Diagnostic, ...] = ()
     units: tuple[PreparationTraceUnit, ...] = ()
+    source_sha256: str = ""
+    source_text: str = ""
+    structural_text: str = ""
+    spoken_text: str = ""
+    config: Mapping[str, Any] = field(default_factory=dict)
+    structural_to_spoken: tuple[int, ...] = ()
+    spoken_to_structural: tuple[int, ...] = ()
+    source_spans: tuple[Mapping[str, Any], ...] = ()
+    compiler_plan: Mapping[str, Any] = field(default_factory=dict)
+    renderability: Mapping[str, Any] = field(default_factory=dict)
+    repairs: tuple[Mapping[str, Any], ...] = ()
+    warnings: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the complete JSON-compatible trace payload."""
+        return asdict(self)
+
+    def to_toml(self) -> str:
+        """Serialize this optional trace as a TOML sidecar."""
+        from .trace_codec import dumps_trace
+
+        return dumps_trace(self)
+
+    @classmethod
+    def from_toml(cls, value: object) -> PreparationTrace:
+        """Load and validate an optional trace TOML sidecar."""
+        from .trace_codec import loads_trace
+
+        return loads_trace(value)
 
 
 @dataclass(frozen=True, slots=True)
 class CompileResult:
     """Canonical result of compiling one document into its semantic plan."""
 
-    plan: UtterancePlan
+    plan: FlowPlan
     diagnostics: tuple[Diagnostic, ...]
     trace: PreparationTrace | None = None
 

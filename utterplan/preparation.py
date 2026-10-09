@@ -253,11 +253,11 @@ def _map_annotation(annotation: AnnotationSpan, source_map: SourceToSpokenMap) -
 def _map_boundary(boundary: BoundaryEvent, source_map: SourceToSpokenMap) -> BoundaryEvent:
     position, _ = source_map.map_source_span(boundary.position, boundary.position)
     return BoundaryEvent(
-        boundary.id,
-        position,
-        boundary.kind,
-        boundary.seconds,
-        boundary.origin,
-        boundary.strength,
-        boundary.attrs,
+        id=boundary.id,
+        position=position,
+        kind=boundary.kind,
+        origin=boundary.origin,
+        strength=boundary.strength,
+        seconds=boundary.seconds,
+        attrs=boundary.attrs,
     )

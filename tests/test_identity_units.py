@@ -1,7 +1,8 @@
 from dataclasses import replace
 from types import SimpleNamespace
 
-from utterplan import PauseConfig, PlannerConfig, SemanticBoundary, UtterancePlanner
+from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+from utterplan import PauseConfig, PlannerConfig, SemanticBoundary
 from utterplan.hashing import (
     LEGACY_UNIT_HASH_SCHEMA,
     UNIT_HASH_SCHEMA,

@@ -1,39 +1,62 @@
-# UtterPlan format v4
+# UtterPlan format v5
 
-A plan is persisted as UTF-8 TOML in a `.utterplan.toml` file. The root fields identify `format = "utterplan"` and `schema_version = 4`; this is the current semantic schema, not a TOML-specific schema version. Schemas v1, v2, and v3 are frozen at their versioned paths under `spec/schemas/` and `utterplan/schemas/`. The exact caller input is retained in `source`; `texts.structural` is parsed structure and `texts.spoken` is the prepared text sent toward G2P.
+Current plans are persisted as UTF-8 TOML in `.utterplan.toml` files. Their root fields identify `format = "utterplan"` and `schema_version = 5`. Schema v5 is the breaking, renderer-facing contract: the executable plan is an ordered `flow` of render units, each containing the segments that belong to it. The canonical Python model is `FlowPlan`.
 
-The top-level semantic categories include source, config, texts, preparation, languages, `linguistic_runs`, `document_metadata`, annotations, boundaries, `semantic_boundaries`, tokens, segments, units, markers, warnings, diagnostics, and `plan_id`. `document_metadata` preserves SSMD header values, including the parsed version. `boundaries` preserve pause/timing and structural events such as headings. `semantic_boundaries` preserve stable clause, parenthetical, sentence, and paragraph split opportunities. Segments are the atomic renderer-facing records. Their ranges are half-open offsets into `texts.spoken`. Units group segments by paragraph or sentence.
+A minimal plan looks like this:
 
-`plan_id` is `sha256:` followed by the SHA-256 digest of canonical semantic JSON derived from the semantic mapping. Canonical JSON uses UTF-8, sorted keys, compact separators, no ASCII escaping, and excludes producer, warnings, diagnostics, and identity itself. TOML bytes, whitespace, comments, or formatting do not affect plan identity. Unit hashes use `utterplan-unit-v3`, include each referenced token's text, language, lemma, POS, tag, morph, and relative semantic-boundary positions, and contain no phonemes, models, embeddings, or audio.
+```toml
+format = "utterplan"
+schema_version = 5
+plan_id = "sha256:..."
+language = "en-us"
+unit = "paragraph"
+hash_schema = "utterplan-flow-v1"
 
-## TOML wire format and JSON compatibility
+[document]
+format = "plain"
+semantics = {}
 
-The TOML codec is a human-oriented, deterministic projection of the schema-v4 semantic model, not a dump of `UtterancePlan.to_dict()`. The public persistence APIs are `to_toml()`, `from_toml()`, `save()`, and `load()`; `save()` writes atomically. Normal loading, `validate`, `inspect`, and `explain` use TOML and reject JSON plans. JSON import is explicit: `utterplan migrate old.utterplan.json -o current.utterplan.toml` reads a supported historical JSON plan and writes canonical TOML without replanning.
+[[flow]]
+hash = "sha256:..."
 
-The projection places render units and their segments together (`[[unit]]` and `[[unit.segment]]`) and stores ranges as two-element spans. Optional `None` fields are omitted where absence has the same meaning; nested free-form metadata may use the reserved `__utterplan_null__ = true` table to preserve an embedded null. The `__utterplan_` prefix is reserved. TOML dates/times and non-finite floats are not part of the semantic data model. Use the public codec rather than attempting to reconstruct internal objects from TOML tables manually.
+[[flow.segment]]
+text = "Hello world."
+token.span = [[0, 5], [6, 12]]
+```
 
-JSON Schema resources are intentionally retained at `spec/schemas/*.schema.json`, `spec/utterplan.schema.json`, and their packaged copies under `utterplan/`: they validate the decoded semantic mapping, not a JSON plan-file format. Remaining JSON test data is isolated to historical schema/import fixtures (`tests/schema_history/v1-v3/`, `tests/migration/fixtures/v4/`) and partial semantic regression snapshots (`tests/migration/goldens/`). These are not ordinary persisted-plan examples or current serialization goldens.
-Pauses contain both resolved seconds and contributing boundary IDs. Boundary records preserve kind, origin, strength, position, and source attributes. Directives are typed renderer-neutral semantics for voice, pronunciation, effective prosody, emphasis, say-as, substitution, audio references, and extension references. Directive resolution does not invoke a renderer, fetch audio, or execute extensions.
+## Executable flow
 
-The `preparation` object is compact provenance rather than working memory. It contains `backend`, nullable `version`, `languages`, `replacements`, and `warnings`. Canonical structural and spoken text remain in `texts`, so `source_text`, `spoken_text`, `offset_map`, and dense lookup arrays are not serialized. Optional token metadata may be null; inactive segment directives serialize as `{}`. Readers reject future or unavailable schema versions rather than guessing. Unknown top-level semantic fields are not accepted by the current schema. Extensions belong in documented metadata dictionaries.
+Each ordered `flow` entry is a `FlowUnit` with a stable local `hash` and one or more `segment` entries. A segment contains already-prepared speech `text`, an optional language override, local token columns, optional semantic `pause_before` / `pause_after` intents, typed renderer-neutral directives, markers, and an optional heading level. Language defaults to the root `language`; `unit` identifies paragraph or sentence grouping. Consumers render segments in the stored order and do not need compiler lookup tables or segment-ID joins.
+
+Token `span` entries are half-open Python-character ranges local to their owning segment's `text`. `pos`, `tag`, `lemma`, and `morph` columns carry token facts. Dense columns align with the spans; sparse columns are ascending `[token_index, value]` pairs. Absent lemma entries derive from case-folded surface text, while an explicit empty sparse lemma preserves an unknown value. Tokens and their semantics are never indexed by plan-global token IDs.
+
+Pause intents represent `none`, semantic strengths such as `sentence` or `parenthetical`, or an exact authored timed break. They do not contain planner-invented durations or renderer activation policies. A consumer decides how supported semantic intents map to engine behavior; exact authored times remain explicit. Directives are typed renderer-neutral semantics for voice, pronunciation, prosody, emphasis, say-as, substitution, audio references, and extension references. UtterPlan does not fetch audio or execute extensions.
+
+`document` holds compact `DocumentInfo` such as source format, SSMD version, title, and portable document semantics. `linguistics` optionally lists provider/model provenance. `producer` and `warnings` are informational. The executable plan does not retain the original source document, compiler text-preparation objects, parser/provider documents, arbitrary global token tables, or diagnostic lookup graphs.
+
+`plan_id` identifies canonical executable semantics, not TOML bytes. Flow-unit hashes use the `utterplan-flow-v1` contract and are computed from each unit's local segments. Producer identity and formatting do not alter executable identity. Plans contain no phonemes, model token IDs, models, sessions, renderer configuration, or audio.
+
+## TOML API and optional compiler trace
+
+`FlowPlan.to_toml()`, `FlowPlan.from_toml()`, `FlowPlan.save()`, and `FlowPlan.load()` are the persistence APIs. `save()` writes atomically. Normal plan loading and the `validate`, `inspect`, and `explain` commands accept TOML; JSON is never auto-detected as a current plan format. Import a historical JSON plan explicitly with `utterplan migrate old.utterplan.json -o current.utterplan.toml`.
+
+Compiler provenance is optional and separate from executable flow. `utterplan compile --trace plan.trace.toml` writes a versioned trace sidecar containing source text/hash, structural and prepared text, coordinate maps, preparation changes, compiler-only plan state, diagnostics, and renderability evidence. Use `utterplan explain plan.utterplan.toml --trace plan.trace.toml` or `utterplan inspect-trace plan.trace.toml`. Trace data does not enter `FlowPlan`, plan identity, or plan TOML; compiling with and without a trace produces identical executable plans.
+
+The v5 TOML codec is a deterministic human-oriented projection of `FlowPlan`, not a dump of arbitrary Python object state. Direct TOML nulls, dates/times, non-finite floats, and unknown fields are rejected. Optional typed fields are omitted; free-form `document.semantics` preserves embedded nulls with the reserved `__utterplan_null__ = true` table. The `__utterplan_` prefix is reserved. Use the public codec rather than manually reconstructing model objects.
+
+## Historical JSON schemas and migration
+
+Frozen JSON Schema resources for v1, v2, v3, and v4 remain under `spec/schemas/` and their versioned package copies. They describe historical serialized semantic mappings, not current TOML syntax. Schema v5 deliberately has no JSON Schema resource or JSON plan-file format: v5 validity is defined by its `FlowPlan` model and TOML codec. Historical files and fixtures remain versioned and immutable.
+
+Supported historical plans migrate sequentially through v2, v3, and v4 to v5. The v1-to-v2, v2-to-v3, v3-to-v4, and v4-to-v5 steps operate on serialized plain data only. They do not parse SSMD, invoke preparation or NLP, plan, call G2P, render, or process audio. The v4-to-v5 step projects verified segments and token spans into local flow; if token ownership/coordinates or authored pause meaning cannot be established without guessing, migration fails safely. Migration preserves a compiled plan; compiling source again is a separate operation.
+
+Package version and plan schema version are independent. Historical schema files are never rewritten to match the package. Downgrades from v5 are not supported.
 
 ## Coordinate and provenance rules
 
-Annotations retain `structural_start` and `structural_end` in `texts.structural`, nullable `spoken_start` and `spoken_end` in `texts.spoken`, and nullable `source_start`, `source_end`, and `source_node_id` provenance for SSMD source nodes. Source offsets are half-open Python string offsets measured in Unicode code points into the exact original input, including header and markup. They are not renderer slicing coordinates. Diagnostic source offsets use the same coordinate space; diagnostic line and column are 1-based. Preparation stores backend, version, language runs, replacement provenance, and warnings. It does not serialize the transient coordinate map. Boundary, semantic-boundary, and marker positions are always spoken coordinates; segment ranges and renderer-facing annotation applicability are also spoken coordinates.
+- Token `span` offsets address Python characters in the owning `FlowSegment.text` only.
+- `FlowSegment.text` is the prepared speech text for that segment.
+- Compiler trace source spans address exact input-source Python-character offsets; trace structural/spoken maps and preparation changes document their coordinate spaces explicitly.
+- The executable plan does not contain source offsets or dense text maps. Preserve a trace sidecar when source diagnostics or preparation provenance must survive a process boundary.
 
-Automatic parenthetical boundary positions use spoken-text coordinates. A `parenthetical_open` boundary is at the opening parenthesis and has `attrs.anchor` set to `before`. A `parenthetical_close` boundary is immediately after the closing parenthesis and also has `attrs.anchor` set to `before`, so the closing pause belongs before the resumed host segment. Detected automatic boundaries may remain in `plan.boundaries` for provenance while not affecting `segments`, `pause_before`, or `pause_after` when the active pause policy disables them.
-The planner validates the TOML-decoded semantic mapping before constructing objects. It rejects malformed field types instead of coercing values, and validates range, ordering, reference, unit membership, hash, and plan identity invariants.
-
-## Schema versioning and migration
-
-Schema version 4 is the current semantic model encoded by the TOML wire format. The package version is independent from the plan schema version. Immutable JSON Schema definitions for v1, v2, v3, and v4 are retained under `spec/schemas/` and `utterplan/schemas/`; they describe the decoded semantic mapping, not the TOML document syntax. `spec/utterplan.schema.json` and `utterplan/utterplan.schema.json` are current schema v4 aliases.
-
-Every supported historical plan is routed by its declared schema version before current-model construction. The v1-to-v2, v2-to-v3, and v3-to-v4 migrations are deterministic representation conversions over plain JSON data; v1 plans migrate sequentially through v2 and v3. The v3-to-v4 step converts existing boundary evidence and derives segment topology without inventing clause analysis. Migrations do not rerun SSMD parsing, spokenform, phrasplit, linguistic analysis, planning, G2P, or rendering. Legacy linguistic provenance remains `unknown`; missing POS/tag values are never inferred.
-
-`UtterancePlan.from_dict` accepts an explicitly supplied semantic mapping and migrates supported historical schema versions to the current in-memory model. `from_toml` decodes current TOML; `load` reads TOML plan files only and rejects JSON files. Future schema versions fail with `UnsupportedSchemaError`; missing backward links fail with a migration-specific path error. Downgrades are not supported.
-
-A migration may assign a new `plan_id` because identity is canonical to the representation and schema version. When a real migration occurs, the original schema version and plan ID are retained in non-semantic `producer.migration` provenance. Migration provenance does not affect unit content hashes.
-
-The current unit hash identifier is `utterplan-unit-v3`. It includes pronunciation-relevant token semantics and relative semantic-boundary positions, but excludes token IDs, provider names, and package versions.
-
-Released schema files and historical fixtures are immutable. A future schema release requires a new frozen schema resource, a sequential migration step, historical fixture coverage, deterministic migration evidence, current semantic validation, and package coverage for all supported schemas.
+The codec validates token ordering and bounds, directive shape, flow hashes, plan identity, and supported schema version before returning a `FlowPlan`. Historical model decoding remains separate from the current v5 model.

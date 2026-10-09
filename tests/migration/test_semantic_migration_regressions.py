@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from utterplan import UtterancePlanner
+from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+from utterplan import FlowPlan
 
 from .cases import CASES
 
@@ -25,9 +26,16 @@ def _semantic_projection(plan: Any) -> dict[str, Any]:
         "annotations": data["annotations"],
         "boundaries": [
             {
-                key: boundary[key]
-                for key in ("position", "kind", "seconds", "origin", "strength", "attrs")
-                if key in boundary
+                **{
+                    key: boundary[key]
+                    for key in ("position", "kind", "origin", "strength")
+                    if key in boundary
+                },
+                "attrs": {
+                    key: value
+                    for key, value in boundary.get("attrs", {}).items()
+                    if key != "pause_origin"
+                },
             }
             for boundary in data["boundaries"]
         ],
@@ -42,8 +50,6 @@ def _semantic_projection(plan: Any) -> dict[str, Any]:
                     "paragraph",
                     "sentence",
                     "clause",
-                    "pause_before",
-                    "pause_after",
                     "directives",
                     "token_indices",
                     "annotation_ids",
@@ -93,8 +99,8 @@ def test_migration_cases_roundtrip_without_renderer_state() -> None:
         "audio_samples",
     }
     for case in CASES:
-        plan = UtterancePlanner(case.config).plan(case.text)
-        restored = type(plan).from_toml(plan.to_toml())
+        plan = UtterancePlanner(case.config).compile(case.text).plan
+        restored = FlowPlan.from_toml(plan.to_toml())
         assert restored == plan
         serialized = json.dumps(plan.to_dict(), ensure_ascii=False)
         assert not any(f'"{field}"' in serialized for field in forbidden)
@@ -107,4 +113,25 @@ def test_migration_goldens_match_semantic_plan_output() -> None:
         expected = json.loads(path.read_text(encoding="utf-8"))
         actual = _semantic_projection(UtterancePlanner(case.config).plan(case.text))
         for key, expected_value in expected.items():
+            if key == "segments":
+                expected_value = [
+                    {
+                        name: value
+                        for name, value in segment.items()
+                        if name not in {"pause_before", "pause_after"}
+                    }
+                    for segment in expected_value
+                ]
+            if key == "boundaries":
+                expected_value = [
+                    {
+                        **{name: value for name, value in boundary.items() if name != "seconds"},
+                        "attrs": {
+                            name: value
+                            for name, value in boundary.get("attrs", {}).items()
+                            if name != "pause_origin"
+                        },
+                    }
+                    for boundary in expected_value
+                ]
             assert actual[key] == expected_value

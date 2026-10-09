@@ -10,10 +10,17 @@ from typing import Any, Literal, cast
 from ._version import __version__
 from .config import semantic_config
 from .exceptions import PlanFormatError, PlanValidationError, UnsupportedSchemaError
-from .hashing import UNIT_HASH_SCHEMA, semantic_hash, unit_hash_payload
+from .hashing import (
+    FLOW_HASH_SCHEMA,
+    UNIT_HASH_SCHEMA,
+    flow_plan_id,
+    flow_unit_hash,
+    semantic_hash,
+    unit_hash_payload,
+)
 from .language import LanguageRun
 from .migration import migrate_plan_data
-from .versioning import FORMAT, SCHEMA_VERSION
+from .versioning import FORMAT, V4_SCHEMA_VERSION
 
 
 def _plain(value: Any) -> Any:
@@ -175,18 +182,14 @@ class BoundaryEvent:
     id: str
     position: int
     kind: str
-    seconds: float | None = None
     origin: str = "planner"
     strength: str | None = None
     attrs: Mapping[str, Any] = field(default_factory=dict)
+    seconds: int | float | None = None
 
     @property
     def pos(self) -> int:
         return self.position
-
-    @property
-    def duration_s(self) -> float | None:
-        return self.seconds
 
     def to_dict(self) -> dict[str, Any]:
         result = {
@@ -228,19 +231,6 @@ class SemanticBoundary:
         if self.attrs:
             result["attrs"] = _plain(self.attrs)
         return result
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedPause:
-    seconds: float = 0.0
-    events: tuple[str, ...] = ()
-
-    @property
-    def duration_s(self) -> float:
-        return self.seconds
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"seconds": self.seconds, "events": list(self.events)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -394,8 +384,8 @@ class PlanSegment:
     clause: int = 0
     structural_start: int | None = None
     structural_end: int | None = None
-    pause_before: ResolvedPause = field(default_factory=ResolvedPause)
-    pause_after: ResolvedPause = field(default_factory=ResolvedPause)
+    pause_before: PauseIntent | LegacyPause | None = None
+    pause_after: PauseIntent | LegacyPause | None = None
     directives: SegmentDirectives = field(default_factory=SegmentDirectives)
     token_indices: tuple[int, ...] = ()
     annotation_ids: tuple[str, ...] = ()
@@ -434,12 +424,14 @@ class PlanSegment:
             "paragraph": self.paragraph,
             "sentence": self.sentence,
             "clause": self.clause,
-            "pause_before": self.pause_before.to_dict(),
-            "pause_after": self.pause_after.to_dict(),
             "directives": self.directives.to_dict(),
             "token_indices": list(self.token_indices),
             "annotation_ids": list(self.annotation_ids),
         }
+        if self.pause_before is not None:
+            result["pause_before"] = self.pause_before.to_dict()
+        if self.pause_after is not None:
+            result["pause_after"] = self.pause_after.to_dict()
         if self.structural_start is not None:
             result["structural_start"] = self.structural_start
         if self.structural_end is not None:
@@ -536,7 +528,7 @@ class UtterancePlan:
         default_factory=lambda: {"name": FORMAT, "version": __version__}
     )
     format: str = FORMAT
-    schema_version: int = SCHEMA_VERSION
+    schema_version: int = V4_SCHEMA_VERSION
 
     def semantic_dict(self) -> dict[str, Any]:
         data = self.to_dict()
@@ -591,7 +583,7 @@ class UtterancePlan:
     @classmethod
     def from_toml(cls, value: str) -> UtterancePlan:
         """Decode a TOML representation of a semantic schema-v4 plan."""
-        from .toml_codec import loads_toml
+        from .codecs.v4_toml import loads_toml
 
         return loads_toml(value)
 
@@ -608,7 +600,7 @@ class UtterancePlan:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> UtterancePlan:
-        migrated = migrate_plan_data(data)
+        migrated = migrate_plan_data(data, target_version=V4_SCHEMA_VERSION)
         _check_shape(migrated.data)
         try:
             plan = _from_current_dict(migrated.data)
@@ -716,7 +708,7 @@ def _check_shape(data: Mapping[str, Any]) -> None:
     unknown = set(data) - allowed
     if unknown:
         raise PlanFormatError(f"unknown top-level fields: {sorted(unknown)}", code="field.unknown")
-    if data.get("schema_version") != SCHEMA_VERSION:
+    if data.get("schema_version") != V4_SCHEMA_VERSION:
         raise UnsupportedSchemaError(data.get("schema_version"))
     for key in ("source", "config", "texts", "preparation", "segments", "units", "linguistic_runs"):
         if key not in data:
@@ -848,13 +840,67 @@ def _expect(value: Any, expected: type | tuple[type, ...], path: str) -> Any:
     return value
 
 
-def _pause(data: Mapping[str, Any] | None) -> ResolvedPause:
-    data = data or {}
-    return ResolvedPause(float(data.get("seconds", 0.0)), tuple(data.get("events", ())))
+def _pause(data: Any) -> PauseIntent | None:
+    if data is None:
+        return None
+    if isinstance(data, str):
+        return PauseIntent(cast(Any, data))
+    if not isinstance(data, Mapping):
+        raise PlanFormatError("pause intent must be a string or inline table", code="pause.type")
+    if data.get("type") == "timed":
+        if set(data) != {"type", "time"}:
+            raise PlanFormatError(
+                "timed pause table must contain only type and time", code="pause.type"
+            )
+        time = data.get("time")
+        if not isinstance(time, str):
+            raise PlanFormatError("timed pause requires an exact time token", code="pause.time")
+        return PauseIntent("timed", time)
+    if "seconds" in data or "events" in data:
+        raise PlanFormatError(
+            "numeric v4 pause must be migrated before current-model decoding",
+            code="pause.legacy_numeric",
+        )
+    raise PlanFormatError("invalid pause intent table", code="pause.type")
+
+
+def _legacy_pause(data: Any) -> PauseIntent | LegacyPause | None:
+    if data is None:
+        return None
+    if isinstance(data, Mapping) and ("seconds" in data or "events" in data):
+        seconds = data.get("seconds")
+        events = data.get("events")
+        if type(seconds) not in {int, float} or not isinstance(events, (list, tuple)):
+            raise PlanFormatError("invalid schema-v4 pause payload", code="pause.legacy_numeric")
+        seconds_value = cast(int | float, seconds)
+        if (
+            not math.isfinite(seconds_value)
+            or seconds_value < 0
+            or any(not isinstance(item, str) for item in events)
+        ):
+            raise PlanFormatError("invalid schema-v4 pause payload", code="pause.legacy_numeric")
+        return LegacyPause(seconds_value, tuple(events))
+    return _pause(data)
 
 
 def _directive(data: Mapping[str, Any] | None) -> SegmentDirectives:
-    data = data or {}
+    if data is None:
+        data = {}
+    if not isinstance(data, Mapping):
+        raise PlanFormatError("directives must be an object", code="segment.directives")
+    allowed = {
+        "voice",
+        "pronunciation",
+        "prosody",
+        "emphasis",
+        "say_as",
+        "substitution",
+        "audio",
+        "extensions",
+    }
+    unknown = set(data) - allowed
+    if unknown:
+        raise PlanFormatError(f"unknown directive fields: {sorted(unknown)}", code="field.unknown")
     voice = data.get("voice")
     pronunciation = data.get("pronunciation")
     prosody = data.get("prosody")
@@ -979,13 +1025,15 @@ def _from_current_dict(data: Mapping[str, Any]) -> UtterancePlan:
         ),
         boundaries=tuple(
             BoundaryEvent(
-                str(x["id"]),
-                int(x.get("position", x.get("pos", 0))),
-                str(x["kind"]),
-                x.get("seconds", x.get("duration_s")),
-                str(x.get("origin", "planner")),
-                x.get("strength"),
-                dict(x.get("attrs", {})),
+                id=str(x["id"]),
+                position=int(x.get("position", x.get("pos", 0))),
+                kind=str(x["kind"]),
+                origin=str(x.get("origin", "planner")),
+                seconds=x.get("seconds"),
+                strength=x.get("strength"),
+                attrs={
+                    **dict(x.get("attrs", {})),
+                },
             )
             for x in data.get("boundaries", ())
         ),
@@ -1015,8 +1063,8 @@ def _from_current_dict(data: Mapping[str, Any]) -> UtterancePlan:
                 int(x.get("clause", 0)),
                 x.get("structural_start"),
                 x.get("structural_end"),
-                _pause(x.get("pause_before")),
-                _pause(x.get("pause_after")),
+                _legacy_pause(x.get("pause_before")),
+                _legacy_pause(x.get("pause_after")),
                 _directive(x.get("directives")),
                 tuple(x.get("token_indices", ())),
                 tuple(x.get("annotation_ids", ())),
@@ -1163,7 +1211,6 @@ def validate_plan_structure(plan: UtterancePlan) -> None:
                 code="semantic_boundary.attrs",
                 path=f"{path}.attrs",
             ) from exc
-    boundary_ids = {event.id for event in plan.boundaries}
     previous_segment_end = 0
     for segment in plan.segments:
         if not (0 <= segment.spoken_start <= segment.spoken_end <= len(text)):
@@ -1178,27 +1225,13 @@ def validate_plan_structure(plan: UtterancePlan) -> None:
             raise PlanValidationError("segments are not sorted", code="segment.order")
         previous_segment_end = segment.spoken_end
         for pause in (segment.pause_before, segment.pause_after):
-            if not math.isfinite(pause.seconds) or pause.seconds < 0:
-                raise PlanValidationError(
-                    "pause must be finite and non-negative", code="pause.invalid"
-                )
-            for event_id in pause.events:
-                if event_id not in boundary_ids:
-                    raise PlanValidationError(
-                        f"unknown boundary {event_id}", code="pause.unknown_boundary"
-                    )
+            if pause is not None and not isinstance(pause, (PauseIntent, LegacyPause)):
+                raise PlanValidationError("pause must be semantic intent", code="pause.invalid")
     for event in plan.boundaries:
         if not (0 <= event.position <= len(text)):
             raise PlanValidationError(
                 "boundary position is outside spoken text", code="boundary.out_of_range"
             )
-        if event.seconds is not None and (
-            not math.isfinite(float(event.seconds)) or float(event.seconds) < 0
-        ):
-            raise PlanValidationError(
-                "boundary seconds must be finite and non-negative", code="boundary.seconds"
-            )
-    annotation_ids = {annotation.id for annotation in plan.annotations}
     for annotation in plan.annotations:
         if not (
             0
@@ -1299,6 +1332,7 @@ def validate_plan_structure(plan: UtterancePlan) -> None:
                     code="linguistic_run.token_membership",
                 )
     segment_ids = {segment.id for segment in plan.segments}
+    annotation_ids = {annotation.id for annotation in plan.annotations}
     token_count = len(plan.tokens)
     for segment in plan.segments:
         if any(index < 0 or index >= token_count for index in segment.token_indices):
@@ -1423,3 +1457,648 @@ class _HashUnit:
         self.semantic_boundaries = semantic_boundaries
         self.spoken_start = spoken_start
         self.spoken_end = spoken_end
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyPause:
+    """Frozen schema-v4 pause payload retained only by the historical model reader."""
+
+    seconds: int | float
+    events: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.seconds) not in {int, float}
+            or not math.isfinite(self.seconds)
+            or self.seconds < 0
+        ):
+            raise ValueError("legacy pause seconds must be finite and non-negative")
+        if not isinstance(self.events, tuple) or any(
+            not isinstance(item, str) for item in self.events
+        ):
+            raise ValueError("legacy pause events must be a tuple of strings")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"seconds": self.seconds, "events": list(self.events)}
+
+
+PauseType = Literal[
+    "none",
+    "x-weak",
+    "weak",
+    "medium",
+    "strong",
+    "x-strong",
+    "timed",
+    "clause",
+    "sentence",
+    "paragraph",
+    "parenthetical",
+    "voice_change",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class PauseIntent:
+    """A pause instruction, without renderer-selected timing."""
+
+    type: PauseType
+    time: str | None = None
+
+    def __post_init__(self) -> None:
+        allowed = {
+            "none",
+            "x-weak",
+            "weak",
+            "medium",
+            "strong",
+            "x-strong",
+            "timed",
+            "clause",
+            "sentence",
+            "paragraph",
+            "parenthetical",
+            "voice_change",
+        }
+        if not isinstance(self.type, str) or self.type not in allowed:
+            raise ValueError(f"unsupported pause intent: {self.type!r}")
+        if self.type == "timed":
+            if not isinstance(self.time, str) or not self.time.strip():
+                raise ValueError("timed pause requires time")
+        elif self.time is not None:
+            raise ValueError("time is only valid for type='timed'")
+
+    def to_dict(self) -> str | dict[str, str]:
+        if self.type == "timed":
+            return {"type": "timed", "time": cast(str, self.time)}
+        return self.type
+
+
+@dataclass(frozen=True, slots=True)
+class TokenView:
+    """Linguistic facts for one token, with a segment-local character span."""
+
+    start: int
+    end: int
+    lemma: str | None = None
+    pos: str | None = None
+    tag: str | None = None
+    morph: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.start) is not int or type(self.end) is not int:
+            raise ValueError("token span coordinates must be integers")
+        if self.start < 0 or self.end <= self.start:
+            raise ValueError("token span must be non-empty and non-negative")
+        for field_name in ("lemma", "pos", "tag", "morph"):
+            value = getattr(self, field_name)
+            if value is not None and not isinstance(value, str):
+                raise ValueError(f"token {field_name} must be a string or None")
+
+    def surface(self, text: str) -> str:
+        """Derive token surface from its owning segment text."""
+        if self.end > len(text):
+            raise ValueError("token span is outside segment text")
+        return text[self.start : self.end]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in (
+                ("start", self.start),
+                ("end", self.end),
+                ("lemma", self.lemma),
+                ("pos", self.pos),
+                ("tag", self.tag),
+                ("morph", self.morph),
+            )
+            if value is not None
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class FlowSegment:
+    """One atomic renderer operation in the ordered executable flow."""
+
+    text: str
+    language: str
+    pause_before: PauseIntent | None = None
+    pause_after: PauseIntent | None = None
+    directives: SegmentDirectives = field(default_factory=SegmentDirectives)
+    tokens: tuple[TokenView, ...] = ()
+    markers: tuple[str, ...] = ()
+    heading: int | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.text, str):
+            raise ValueError("segment text must be a string")
+        if not isinstance(self.language, str) or not self.language:
+            raise ValueError("segment language must be a non-empty string")
+        if not isinstance(self.directives, SegmentDirectives):
+            raise ValueError("segment directives must be SegmentDirectives")
+        if not isinstance(self.tokens, tuple) or any(
+            not isinstance(token, TokenView) for token in self.tokens
+        ):
+            raise ValueError("segment tokens must be a tuple of TokenView values")
+        if not isinstance(self.markers, tuple):
+            raise ValueError("segment markers must be a tuple")
+        if self.pause_before is not None and not isinstance(self.pause_before, PauseIntent):
+            raise ValueError("pause_before must be a PauseIntent or None")
+        if self.pause_after is not None and not isinstance(self.pause_after, PauseIntent):
+            raise ValueError("pause_after must be a PauseIntent or None")
+        if any(not isinstance(marker, str) or not marker for marker in self.markers):
+            raise ValueError("segment markers must be non-empty strings")
+        previous_end = 0
+        for index, token in enumerate(self.tokens):
+            if token.end > len(self.text):
+                raise ValueError(f"token {index} span is outside segment text")
+            if token.start < previous_end:
+                raise ValueError("token spans must be ordered and non-overlapping")
+            previous_end = token.end
+        if self.heading is not None and (type(self.heading) is not int or self.heading < 1):
+            raise ValueError("heading must be a positive integer")
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "text": self.text,
+            "language": self.language,
+            "directives": self.directives.to_dict(),
+            "tokens": [token.to_dict() for token in self.tokens],
+            "markers": list(self.markers),
+        }
+        if self.pause_before is not None:
+            result["pause_before"] = self.pause_before.to_dict()
+        if self.pause_after is not None:
+            result["pause_after"] = self.pause_after.to_dict()
+        if self.heading is not None:
+            result["heading"] = self.heading
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class FlowUnit:
+    """A render/cache unit containing ordered atomic renderer segments."""
+
+    segments: tuple[FlowSegment, ...]
+    content_hash: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.segments, tuple) or any(
+            not isinstance(segment, FlowSegment) for segment in self.segments
+        ):
+            raise PlanValidationError(
+                "flow unit segments must be a tuple of FlowSegment values", code="flow.segments"
+            )
+        expected = flow_unit_hash(self.segments)
+        if not self.content_hash:
+            object.__setattr__(self, "content_hash", expected)
+        elif not isinstance(self.content_hash, str) or self.content_hash != expected:
+            raise PlanValidationError(
+                "flow unit hash does not match local semantics", code="flow.hash"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "segments": [segment.to_dict() for segment in self.segments],
+            "hash": self.content_hash,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentInfo:
+    """Small portable document metadata retained for downstream consumers."""
+
+    format: str | None = None
+    ssmd_version: str | None = None
+    title: str | None = None
+    semantics: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for name in ("format", "ssmd_version", "title"):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, str):
+                raise ValueError(f"document {name} must be a string or None")
+        if not isinstance(self.semantics, Mapping):
+            raise ValueError("document semantics must be a mapping")
+        object.__setattr__(self, "semantics", _plain(self.semantics))
+
+    def to_dict(self) -> dict[str, Any]:
+        result = {"semantics": _plain(self.semantics)}
+        for key in ("format", "ssmd_version", "title"):
+            value = getattr(self, key)
+            if value is not None:
+                result[key] = value
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class LinguisticProvenance:
+    """Document/language-level provider provenance, not provider runtime state."""
+
+    language: str
+    provider: Literal["spacy", "fallback", "unknown"]
+    model: str | None = None
+    provider_version: str | None = None
+    model_version: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.language, str) or not self.language:
+            raise ValueError("linguistic provenance language must be non-empty")
+        if not isinstance(self.provider, str) or self.provider not in {
+            "spacy",
+            "fallback",
+            "unknown",
+        }:
+            raise ValueError("linguistic provenance provider is unsupported")
+        for name in ("model", "provider_version", "model_version"):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, str):
+                raise ValueError(f"linguistic provenance {name} must be a string or None")
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            key: value
+            for key, value in (
+                ("language", self.language),
+                ("provider", self.provider),
+                ("model", self.model),
+                ("provider_version", self.provider_version),
+                ("model_version", self.model_version),
+            )
+            if value is not None
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class FlowPlan:
+    """Compact v5 renderer-facing plan model, independent of compiler lookup tables."""
+
+    language: str
+    unit: Literal["sentence", "paragraph"]
+    flow: tuple[FlowUnit, ...]
+    document: DocumentInfo = field(default_factory=DocumentInfo)
+    linguistics: tuple[LinguisticProvenance, ...] = ()
+    plan_id: str = ""
+    producer: Mapping[str, Any] = field(default_factory=dict)
+    warnings: tuple[str, ...] = ()
+    format: str = FORMAT
+    schema_version: int = 5
+    hash_schema: str = "utterplan-flow-v1"
+
+    def __post_init__(self) -> None:
+        if self.format != FORMAT:
+            raise PlanValidationError("format must be 'utterplan'", code="format.invalid")
+        if type(self.schema_version) is not int or self.schema_version != 5:
+            raise PlanValidationError("FlowPlan requires schema version 5", code="schema.version")
+        if not isinstance(self.language, str) or not self.language:
+            raise PlanValidationError(
+                "language must be a non-empty string", code="language.invalid"
+            )
+        if not isinstance(self.unit, str) or self.unit not in {"sentence", "paragraph"}:
+            raise PlanValidationError("unit must be sentence or paragraph", code="unit.invalid")
+        if self.hash_schema != FLOW_HASH_SCHEMA:
+            raise PlanValidationError("unsupported flow hash schema", code="flow.hash_schema")
+        if not isinstance(self.document, DocumentInfo):
+            raise PlanValidationError("document must be DocumentInfo", code="document.type")
+        if not isinstance(self.flow, tuple):
+            raise PlanValidationError("flow must be a tuple", code="flow.type")
+        if not isinstance(self.linguistics, tuple):
+            raise PlanValidationError("linguistics must be a tuple", code="linguistics.type")
+        if not isinstance(self.warnings, tuple):
+            raise PlanValidationError("warnings must be a tuple", code="warnings.type")
+        if any(not isinstance(item, FlowUnit) for item in self.flow):
+            raise PlanValidationError("flow must contain FlowUnit values", code="flow.type")
+        if any(not isinstance(item, LinguisticProvenance) for item in self.linguistics):
+            raise PlanValidationError(
+                "linguistics must contain provenance records", code="linguistics.type"
+            )
+        if not isinstance(self.producer, Mapping):
+            raise PlanValidationError("producer must be a mapping", code="producer.type")
+        object.__setattr__(self, "producer", _plain(self.producer))
+        if not isinstance(self.plan_id, str):
+            raise PlanValidationError("plan_id must be a string", code="plan.identity")
+        if any(not isinstance(item, str) for item in self.warnings):
+            raise PlanValidationError("warnings must be strings", code="warnings.type")
+        try:
+            expected = flow_plan_id(self.to_dict())
+        except (TypeError, ValueError) as exc:
+            raise PlanValidationError(
+                "plan contains values outside the semantic data model", code="plan.identity"
+            ) from exc
+        if not self.plan_id:
+            object.__setattr__(self, "plan_id", expected)
+        elif self.plan_id != expected:
+            raise PlanValidationError(
+                "plan ID does not match executable semantics", code="plan.identity"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the v5 semantic consumer model, with no compiler graph."""
+        result: dict[str, Any] = {
+            "format": self.format,
+            "schema_version": self.schema_version,
+            "plan_id": self.plan_id,
+            "language": self.language,
+            "unit": self.unit,
+            "hash_schema": self.hash_schema,
+            "flow": [unit.to_dict() for unit in self.flow],
+            "document": self.document.to_dict(),
+            "linguistics": [item.to_dict() for item in self.linguistics],
+        }
+        if self.producer:
+            result["producer"] = _plain(self.producer)
+        if self.warnings:
+            result["warnings"] = list(self.warnings)
+        return result
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> FlowPlan:
+        if not isinstance(data, Mapping):
+            raise PlanFormatError("v5 plan must be an object", code="plan.type")
+        allowed_root = {
+            "format",
+            "schema_version",
+            "plan_id",
+            "language",
+            "unit",
+            "hash_schema",
+            "flow",
+            "document",
+            "linguistics",
+            "producer",
+            "warnings",
+        }
+        unknown = set(data) - allowed_root
+        if unknown:
+            raise PlanFormatError(
+                f"unknown v5 plan fields: {sorted(unknown)}", code="field.unknown"
+            )
+        required = {
+            "format",
+            "schema_version",
+            "plan_id",
+            "language",
+            "unit",
+            "hash_schema",
+            "flow",
+        }
+        missing = required - set(data)
+        if missing:
+            raise PlanFormatError(
+                f"required v5 fields are missing: {sorted(missing)}", code="field.required"
+            )
+        if (
+            data.get("format") != FORMAT
+            or type(data.get("schema_version")) is not int
+            or data.get("schema_version") != 5
+        ):
+            raise PlanFormatError("expected schema-v5 UtterPlan", code="schema.version")
+        language = data.get("language")
+        if not isinstance(language, str) or not language:
+            raise PlanFormatError("language must be a non-empty string", code="language.invalid")
+        unit_value = data.get("unit")
+        if not isinstance(unit_value, str) or unit_value not in {"sentence", "paragraph"}:
+            raise PlanFormatError("unit must be sentence or paragraph", code="unit.invalid")
+        unit = cast(Literal["sentence", "paragraph"], unit_value)
+        flow_value = data.get("flow")
+        if not isinstance(flow_value, (list, tuple)):
+            raise PlanFormatError("flow must be an array", code="flow.type")
+        flow: list[FlowUnit] = []
+        for unit_index, raw_unit in enumerate(flow_value):
+            unit_path = f"$.flow[{unit_index}]"
+            if not isinstance(raw_unit, Mapping):
+                raise PlanFormatError(
+                    "flow unit must be an object", code="flow.unit", path=unit_path
+                )
+            if set(raw_unit) - {"segments", "hash"}:
+                raise PlanFormatError(
+                    "unknown flow unit fields", code="field.unknown", path=unit_path
+                )
+            raw_segments = raw_unit.get("segments")
+            if not isinstance(raw_segments, (list, tuple)):
+                raise PlanFormatError(
+                    "flow unit segments must be an array", code="flow.segments", path=unit_path
+                )
+            segments: list[FlowSegment] = []
+            for segment_index, raw_segment in enumerate(raw_segments):
+                segment_path = f"{unit_path}.segments[{segment_index}]"
+                if not isinstance(raw_segment, Mapping):
+                    raise PlanFormatError(
+                        "flow segment must be an object", code="flow.segment", path=segment_path
+                    )
+                allowed_segment = {
+                    "text",
+                    "language",
+                    "pause_before",
+                    "pause_after",
+                    "directives",
+                    "tokens",
+                    "markers",
+                    "heading",
+                }
+                unknown_segment = set(raw_segment) - allowed_segment
+                if unknown_segment:
+                    raise PlanFormatError(
+                        f"unknown flow segment fields: {sorted(unknown_segment)}",
+                        code="field.unknown",
+                        path=segment_path,
+                    )
+                text = raw_segment.get("text")
+                segment_language = raw_segment.get("language", language)
+                directives = raw_segment.get("directives", {})
+                if not isinstance(text, str):
+                    raise PlanFormatError(
+                        "segment text must be a string", code="segment.text", path=segment_path
+                    )
+                if not isinstance(segment_language, str) or not segment_language:
+                    raise PlanFormatError(
+                        "segment language must be non-empty",
+                        code="segment.language",
+                        path=segment_path,
+                    )
+                if not isinstance(directives, Mapping):
+                    raise PlanFormatError(
+                        "segment directives must be an object",
+                        code="segment.directives",
+                        path=segment_path,
+                    )
+                try:
+                    parsed_directives = _directive(directives)
+                    raw_tokens = raw_segment.get("tokens", [])
+                    if not isinstance(raw_tokens, (list, tuple)):
+                        raise PlanFormatError(
+                            "segment tokens must be an array", code="token.type", path=segment_path
+                        )
+                    tokens: list[TokenView] = []
+                    for token_index, raw_token in enumerate(raw_tokens):
+                        token_path = f"{segment_path}.tokens[{token_index}]"
+                        if not isinstance(raw_token, Mapping):
+                            raise PlanFormatError(
+                                "token must be an object", code="token.type", path=token_path
+                            )
+                        if set(raw_token) - {"start", "end", "lemma", "pos", "tag", "morph"}:
+                            raise PlanFormatError(
+                                "unknown token fields", code="field.unknown", path=token_path
+                            )
+                        tokens.append(
+                            TokenView(
+                                _expect(raw_token.get("start"), int, f"{token_path}.start"),
+                                _expect(raw_token.get("end"), int, f"{token_path}.end"),
+                                raw_token.get("lemma"),
+                                raw_token.get("pos"),
+                                raw_token.get("tag"),
+                                raw_token.get("morph"),
+                            )
+                        )
+                    raw_markers = raw_segment.get("markers", [])
+                    if not isinstance(raw_markers, (list, tuple)) or any(
+                        not isinstance(marker, str) or not marker for marker in raw_markers
+                    ):
+                        raise PlanFormatError(
+                            "markers must be non-empty strings",
+                            code="segment.markers",
+                            path=segment_path,
+                        )
+                    pause_before = _pause(raw_segment.get("pause_before"))
+                    pause_after = _pause(raw_segment.get("pause_after"))
+                    segments.append(
+                        FlowSegment(
+                            text=text,
+                            language=segment_language,
+                            pause_before=pause_before,
+                            pause_after=pause_after,
+                            directives=parsed_directives,
+                            tokens=tuple(tokens),
+                            markers=tuple(raw_markers),
+                            heading=raw_segment.get("heading"),
+                        )
+                    )
+                except PlanFormatError:
+                    raise
+                except (TypeError, ValueError, KeyError, IndexError) as exc:
+                    raise PlanFormatError(str(exc), code="flow.segment", path=segment_path) from exc
+            unit_hash = raw_unit.get("hash")
+            if not isinstance(unit_hash, str):
+                raise PlanFormatError(
+                    "flow unit hash must be a string", code="flow.hash", path=unit_path
+                )
+            flow.append(FlowUnit(tuple(segments), unit_hash))
+
+        document_value = data.get("document", {})
+        if not isinstance(document_value, Mapping):
+            raise PlanFormatError("document must be an object", code="document.type")
+        if set(document_value) - {"format", "ssmd_version", "title", "semantics"}:
+            raise PlanFormatError(
+                "unknown document fields", code="field.unknown", path="$.document"
+            )
+        semantics = document_value.get("semantics", {})
+        if not isinstance(semantics, Mapping):
+            raise PlanFormatError("document semantics must be an object", code="document.semantics")
+        try:
+            document = DocumentInfo(
+                format=document_value.get("format"),
+                ssmd_version=document_value.get("ssmd_version"),
+                title=document_value.get("title"),
+                semantics=_plain(semantics),
+            )
+        except ValueError as exc:
+            raise PlanFormatError(str(exc), code="document.invalid", path="$.document") from exc
+
+        raw_linguistics = data.get("linguistics", [])
+        if not isinstance(raw_linguistics, (list, tuple)):
+            raise PlanFormatError("linguistics must be an array", code="linguistics.type")
+        linguistics: list[LinguisticProvenance] = []
+        for index, value in enumerate(raw_linguistics):
+            path = f"$.linguistics[{index}]"
+            if not isinstance(value, Mapping):
+                raise PlanFormatError(
+                    "linguistic provenance must be an object", code="linguistics.record", path=path
+                )
+            if set(value) - {"language", "provider", "model", "provider_version", "model_version"}:
+                raise PlanFormatError(
+                    "unknown linguistic provenance fields", code="field.unknown", path=path
+                )
+            linguistic_language = value.get("language")
+            linguistic_provider = value.get("provider")
+            if not isinstance(linguistic_language, str) or not isinstance(linguistic_provider, str):
+                raise PlanFormatError(
+                    "linguistic provenance requires language and provider strings",
+                    code="linguistics.record",
+                    path=path,
+                )
+            try:
+                linguistics.append(
+                    LinguisticProvenance(
+                        language=linguistic_language,
+                        provider=cast(Literal["spacy", "fallback", "unknown"], linguistic_provider),
+                        model=value.get("model"),
+                        provider_version=value.get("provider_version"),
+                        model_version=value.get("model_version"),
+                    )
+                )
+            except (TypeError, ValueError) as exc:
+                raise PlanFormatError(str(exc), code="linguistics.record", path=path) from exc
+
+        producer = data.get("producer", {})
+        warnings = data.get("warnings", [])
+        if not isinstance(producer, Mapping):
+            raise PlanFormatError("producer must be an object", code="producer.type")
+        if not isinstance(warnings, (list, tuple)) or any(
+            not isinstance(item, str) for item in warnings
+        ):
+            raise PlanFormatError("warnings must be strings", code="warnings.type")
+        return cls(
+            language=language,
+            unit=unit,
+            flow=tuple(flow),
+            document=document,
+            linguistics=tuple(linguistics),
+            plan_id=data.get("plan_id", ""),
+            producer=dict(producer),
+            warnings=tuple(warnings),
+            format=data.get("format", FORMAT),
+            schema_version=data.get("schema_version", 5),
+            hash_schema=data.get("hash_schema", FLOW_HASH_SCHEMA),
+        )
+
+    def validate(self) -> None:
+        """Recheck content hashes and semantic identity for callers loading mutable mappings."""
+        for unit in self.flow:
+            if unit.content_hash != flow_unit_hash(unit.segments):
+                raise PlanValidationError(
+                    "flow unit hash does not match local semantics", code="flow.hash"
+                )
+        if self.plan_id != flow_plan_id(self.to_dict()):
+            raise PlanValidationError(
+                "plan ID does not match executable semantics", code="plan.identity"
+            )
+
+    def to_toml(self) -> str:
+        from .toml_codec import dumps_toml
+
+        return dumps_toml(self)
+
+    @classmethod
+    def from_toml(cls, value: str) -> FlowPlan:
+        from .toml_codec import loads_toml
+
+        result = loads_toml(value)
+        if not isinstance(result, cls):
+            raise PlanFormatError("TOML did not decode to a v5 FlowPlan", code="schema.version")
+        return result
+
+    @classmethod
+    def load(cls, path: str | Path) -> FlowPlan:
+        """Load a semantic plan from a TOML file; JSON is a migration input only."""
+        source = Path(path)
+        if source.suffix.lower() == ".json":
+            raise PlanFormatError(
+                "JSON is not a supported plan-file format", code="format.unsupported_json"
+            )
+        return cls.from_toml(source.read_text(encoding="utf-8"))
+
+    def save(self, path: str | Path, *, create_parent: bool = False) -> None:
+        """Write the canonical TOML plan, optionally creating parent directories."""
+        from .atomic_io import atomic_write_text
+
+        atomic_write_text(path, self.to_toml(), create_parent=create_parent)

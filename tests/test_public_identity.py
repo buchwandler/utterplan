@@ -5,7 +5,7 @@ import importlib.util
 from importlib.metadata import version
 
 import utterplan
-from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
+from utterplan import FlowPlan, PlannerConfig, UtterancePlanner
 
 
 def test_public_package_identity() -> None:
@@ -16,10 +16,10 @@ def test_public_package_identity() -> None:
 def test_public_planner_identity() -> None:
     plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello.")
 
-    assert isinstance(plan, UtterancePlan)
+    assert isinstance(plan, FlowPlan)
     payload = plan.to_dict()
     assert payload["format"] == "utterplan"
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 5
     assert payload["producer"]["name"] == "utterplan"
 
 

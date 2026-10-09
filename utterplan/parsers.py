@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Literal
 
-from .config import PlannerConfig, parse_duration
-from .exceptions import ConfigurationError, PlanFormatError, PlanningError
+from .config import PlannerConfig
+from .exceptions import PlanFormatError, PlanningError
 from .model import AnnotationSpan, BoundaryEvent, Diagnostic, Marker
 
 
@@ -202,43 +202,26 @@ class SSMDDocumentParser:
                 name = attrs.get("name") or attrs.get("marker") or "marker"
                 markers.append(Marker(f"marker-{len(markers):06d}", str(name), position, attrs))
             elif kind == "break":
-                seconds = _duration(attrs, config, parsed.header)
+                break_attrs = {**attrs, "anchor": event_anchor, "pause_origin": "explicit"}
                 boundaries.append(
                     BoundaryEvent(
                         id=f"boundary-{len(boundaries):06d}",
                         position=position,
                         kind="explicit",
-                        seconds=seconds,
                         origin="ssmd",
                         strength=attrs.get("strength"),
-                        attrs={
-                            **attrs,
-                            "anchor": event_anchor,
-                            "pause_origin": _duration_origin(attrs, config, parsed.header),
-                        },
+                        attrs=break_attrs,
                     )
                 )
             elif kind == "paragraph":
-                paragraph_origin = _duration_origin(
-                    {**attrs, "strength": "x-strong"}, config, parsed.header
-                )
-                if paragraph_origin == "none":
-                    paragraph_origin = "planner_default"
                 boundaries.append(
                     BoundaryEvent(
                         id=f"boundary-{len(boundaries):06d}",
                         position=position,
                         kind="paragraph",
-                        seconds=_duration(attrs, config, parsed.header),
                         origin="ssmd",
-                        strength=attrs.get("strength", "paragraph"),
-                        attrs={
-                            **attrs,
-                            "anchor": event_anchor,
-                            "strength": "p",
-                            "source": paragraph_origin,
-                            "pause_origin": paragraph_origin,
-                        },
+                        strength="paragraph",
+                        attrs={**attrs, "anchor": event_anchor},
                     )
                 )
             elif kind == "heading":
@@ -247,32 +230,28 @@ class SSMDDocumentParser:
                         id=f"boundary-{len(boundaries):06d}",
                         position=position,
                         kind="heading",
-                        seconds=0.0,
                         origin="ssmd",
                         attrs={**attrs, "anchor": event_anchor, "structural_only": True},
                     )
                 )
 
         for position, _removed_start, _removed_end, source_start, source_end in legacy_scene_breaks:
-            attrs = {"strength": "x-strong", "legacy_horizontal_rule": True}
-            pause_origin = _duration_origin(attrs, config, parsed.header)
-            if pause_origin == "none":
-                pause_origin = "planner_default"
+            attrs = {
+                "strength": "x-strong",
+                "legacy_horizontal_rule": True,
+                "anchor": "after",
+                "pause_origin": "explicit",
+                "source_start": source_start,
+                "source_end": source_end,
+            }
             boundaries.append(
                 BoundaryEvent(
                     id=f"boundary-{len(boundaries):06d}",
                     position=position,
                     kind="explicit",
-                    seconds=_duration(attrs, config, parsed.header),
                     origin="ssmd",
                     strength="x-strong",
-                    attrs={
-                        **attrs,
-                        "anchor": "after",
-                        "source_start": source_start,
-                        "source_end": source_end,
-                        "pause_origin": pause_origin,
-                    },
+                    attrs=attrs,
                 )
             )
 
@@ -673,84 +652,3 @@ def _format_location(line: int | None, column: int | None) -> str:
     if column is not None:
         location += f", column {column}"
     return location
-
-
-def _duration(
-    attrs: dict[str, Any], config: PlannerConfig, header: dict[str, Any] | None = None
-) -> float | None:
-    value = attrs.get("time")
-    if value is not None:
-        try:
-            return parse_duration(value, field_name="break.time")
-        except ConfigurationError as exc:
-            raise PlanFormatError(str(exc), code="break.duration") from exc
-
-    strength = str(attrs.get("strength", "")).lower()
-    key = {
-        "x-weak": "weak",
-        "weak": "weak",
-        "medium": "clause",
-        "strong": "sentence",
-        "x-strong": "paragraph",
-    }.get(strength)
-    defaults: dict[str, Any] = {
-        "weak": config.pauses.weak,
-        "clause": config.pauses.clause,
-        "sentence": config.pauses.sentence,
-        "paragraph": config.pauses.paragraph,
-        "parenthetical": config.pauses.parenthetical,
-        "voice_change": config.pauses.voice_change,
-    }
-    if header and isinstance(header.get("pause_defaults"), dict):
-        for name, candidate in header["pause_defaults"].items():
-            if name == "enabled":
-                continue
-            try:
-                parse_duration(candidate, field_name=f"pause_defaults.{name}")
-            except ConfigurationError:
-                continue
-            defaults[name] = candidate
-    if config.ssmd.pause_overrides:
-        defaults.update(config.ssmd.pause_overrides)
-    if not _pause_enabled(config, header):
-        return None
-    if key in defaults:
-        try:
-            return parse_duration(defaults[key], field_name=f"pause_defaults.{key}")
-        except ConfigurationError as exc:
-            raise PlanFormatError(str(exc), code="pause.duration") from exc
-    return None
-
-
-def _pause_enabled(config: PlannerConfig, header: dict[str, Any] | None) -> bool:
-    enabled = config.pauses.enabled
-    if header and isinstance(header.get("pause_defaults"), dict):
-        value = header["pause_defaults"].get("enabled")
-        if isinstance(value, bool):
-            enabled = value
-    if config.ssmd.pause_overrides and "enabled" in config.ssmd.pause_overrides:
-        enabled = bool(config.ssmd.pause_overrides["enabled"])
-    return enabled
-
-
-def _duration_origin(attrs: dict[str, Any], config: PlannerConfig, header: dict[str, Any]) -> str:
-    if attrs.get("time") is not None:
-        return "explicit"
-    strength = str(attrs.get("strength", "")).lower()
-    key = {
-        "x-weak": "weak",
-        "weak": "weak",
-        "medium": "clause",
-        "strong": "sentence",
-        "x-strong": "paragraph",
-    }.get(strength)
-    if config.ssmd.pause_overrides and key in config.ssmd.pause_overrides:
-        return "config_default"
-    header_defaults = header.get("pause_defaults")
-    if isinstance(header_defaults, dict) and header_defaults.get(key) is not None:
-        try:
-            parse_duration(header_defaults[key], field_name=f"pause_defaults.{key}")
-        except ConfigurationError:
-            return "planner_default"
-        return "header_default"
-    return "planner_default" if key else "none"

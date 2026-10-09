@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import jsonschema
-
-from utterplan import PlannerConfig, UtterancePlanner
-from utterplan.format import schema
+from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+from utterplan import PlannerConfig
 
 
 def _planner() -> UtterancePlanner:
@@ -185,5 +183,4 @@ def test_new_directive_models_round_trip_through_plan_json() -> None:
         '[whispered]{ext="whisper" amount="soft"}'
     )
 
-    assert type(plan).from_toml(plan.to_toml()) == plan
-    jsonschema.validate(plan.to_dict(), schema())
+    assert type(plan).from_dict(plan.to_dict()) == plan

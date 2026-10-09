@@ -7,7 +7,7 @@ DEFAULT_SOURCE = Path(__file__).with_name("chapter.ssmd")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Compile an SSMD file to an UtterancePlan.")
+    parser = argparse.ArgumentParser(description="Compile an SSMD file to a FlowPlan.")
     parser.add_argument(
         "source",
         nargs="?",

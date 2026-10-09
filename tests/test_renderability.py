@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 
+from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
 from utterplan import (
     ConfigurationError,
     PlannerConfig,
@@ -12,7 +13,6 @@ from utterplan import (
     PlanValidationError,
     TokenAnnotation,
     UtterancePlan,
-    UtterancePlanner,
     classify_segment,
     contains_speech_content,
     format_renderability_error,

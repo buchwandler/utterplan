@@ -213,12 +213,9 @@ def _compile_one(
     except OSError as error:
         return _write_failure(request, index=index, total=total, error=error)
 
-    planning = plan.document_metadata.get("planning", {})
-    renderability = planning.get("renderability", {}) if isinstance(planning, dict) else {}
-    repairs = renderability.get("repair_count", 0) if isinstance(renderability, dict) else 0
     repair_diagnostics = tuple(
         diagnostic
-        for diagnostic in plan.diagnostics
+        for diagnostic in result.diagnostics
         if diagnostic.code == "planning.renderability.repaired"
     )
     return CompileOutcome(
@@ -229,10 +226,10 @@ def _compile_one(
         output=output,
         source_label=source_label,
         plan_id=plan.plan_id,
-        segments=len(plan.segments),
-        repairs=repairs if isinstance(repairs, int) else 0,
+        segments=sum(len(unit.segments) for unit in plan.flow),
+        repairs=len(repair_diagnostics),
         repair_diagnostics=repair_diagnostics,
-        units=len(plan.units),
+        units=len(plan.flow),
     )
 
 

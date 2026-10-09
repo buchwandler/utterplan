@@ -6,20 +6,34 @@ from pathlib import Path
 
 import pytest
 
-from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner, compile_attempt
+from utterplan import FlowPlan, PlannerConfig, compile_attempt
 from utterplan.cli import build_parser, main
+from utterplan.migration import migrate_plan_data
 
 
 def _payload(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
     captured = capsys.readouterr()
     assert captured.err == ""
-    return UtterancePlan.from_toml(captured.out).to_dict()
+    return FlowPlan.from_toml(captured.out).to_dict()
 
 
-def _write_legacy_json(path: Path) -> UtterancePlan:
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello.")
-    path.write_text(json.dumps(plan.to_dict()), encoding="utf-8")
-    return plan
+def _first_segment(payload: dict[str, object]) -> dict[str, object]:
+    flow = payload["flow"]
+    assert isinstance(flow, list) and flow
+    segments = flow[0]["segments"]
+    assert isinstance(segments, list) and segments and isinstance(segments[0], dict)
+    return segments[0]
+
+
+def _segment_text(payload: dict[str, object]) -> str:
+    return str(_first_segment(payload)["text"])
+
+
+def _write_legacy_json(path: Path) -> dict[str, object]:
+    fixture = Path(__file__).parent / "migration/fixtures/v4/basic_en.utterplan.json"
+    data = json.loads(fixture.read_text(encoding="utf-8"))
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return data
 
 
 def test_compile_cli_defaults() -> None:
@@ -36,14 +50,14 @@ def test_compile_literal_text_to_stdout_toml(capsys: pytest.CaptureFixture[str])
     assert main(["compile", "Hello world.", "--lang", "en-us"]) == 0
     payload = _payload(capsys)
     assert payload["format"] == "utterplan"
-    assert payload["schema_version"] == 4
-    assert payload["segments"]
+    assert payload["schema_version"] == 5
+    assert payload["flow"]
 
 
 def test_compile_multi_token_literal_text(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["compile", "Hello", "world.", "--lang", "en-us"]) == 0
     payload = _payload(capsys)
-    assert payload["source"]["text"] == "Hello world."
+    assert _segment_text(payload) == "Hello world."
 
 
 def test_compile_reads_stdin_when_text_is_omitted(
@@ -51,7 +65,7 @@ def test_compile_reads_stdin_when_text_is_omitted(
 ) -> None:
     monkeypatch.setattr("sys.stdin", io.StringIO("Hello from stdin."))
     assert main(["compile", "--lang", "en-us"]) == 0
-    assert _payload(capsys)["source"]["text"] == "Hello from stdin."
+    assert _segment_text(_payload(capsys)) == "Hello from stdin."
 
 
 def test_compile_positional_existing_path(
@@ -61,15 +75,15 @@ def test_compile_positional_existing_path(
     source.write_text("Hello from a file.", encoding="utf-8")
     assert main(["compile", str(source), "--lang", "en-us"]) == 0
     payload = _payload(capsys)
-    assert payload["source"]["text"] == "Hello from a file."
-    assert payload["source"]["format"] == "plain"
+    assert _segment_text(payload) == "Hello from a file."
+    assert payload["document"]["format"] == "plain"
 
 
 def test_compile_explicit_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     source = tmp_path / "source.txt"
     source.write_text("Explicit file input.", encoding="utf-8")
     assert main(["compile", "--file", str(source), "--lang", "en-us"]) == 0
-    assert _payload(capsys)["source"]["text"] == "Explicit file input."
+    assert _segment_text(_payload(capsys)) == "Explicit file input."
 
 
 def test_compile_explicit_text_disables_file_detection(
@@ -78,7 +92,7 @@ def test_compile_explicit_text_disables_file_detection(
     source = tmp_path / "literal.txt"
     source.write_text("file contents", encoding="utf-8")
     assert main(["compile", str(source), "--input-format", "text", "--lang", "en-us"]) == 0
-    assert _payload(capsys)["source"]["text"] == str(source)
+    assert "file contents" not in _segment_text(_payload(capsys))
 
 
 def test_compile_auto_detects_ssmd_suffix(
@@ -87,7 +101,7 @@ def test_compile_auto_detects_ssmd_suffix(
     source = tmp_path / "chapter.ssmd"
     source.write_text("Hello SSMD.", encoding="utf-8")
     assert main(["compile", str(source), "--lang", "en-us"]) == 0
-    assert _payload(capsys)["source"]["format"] == "ssmd"
+    assert _payload(capsys)["document"]["format"] == "ssmd"
 
 
 def test_compile_explicit_ssmd_from_stdin(
@@ -95,7 +109,7 @@ def test_compile_explicit_ssmd_from_stdin(
 ) -> None:
     monkeypatch.setattr("sys.stdin", io.StringIO("Hello SSMD."))
     assert main(["compile", "--lang", "en-us", "--input-format", "ssmd"]) == 0
-    assert _payload(capsys)["source"]["format"] == "ssmd"
+    assert _payload(capsys)["document"]["format"] == "ssmd"
 
 
 def test_compile_output_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -104,7 +118,7 @@ def test_compile_output_file(tmp_path: Path, capsys: pytest.CaptureFixture[str])
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "wrote" in captured.err
-    assert UtterancePlan.load(output).to_dict()["format"] == "utterplan"
+    assert FlowPlan.load(output).to_dict()["format"] == "utterplan"
 
 
 def test_compile_output_file_and_toml_stdout(
@@ -114,7 +128,7 @@ def test_compile_output_file_and_toml_stdout(
     assert main(["compile", "Hello.", "--lang", "en-us", "-o", str(output), "--stdout"]) == 0
     captured = capsys.readouterr()
     assert captured.err == ""
-    assert UtterancePlan.from_toml(captured.out).to_dict() == UtterancePlan.load(output).to_dict()
+    assert FlowPlan.from_toml(captured.out).to_dict() == FlowPlan.load(output).to_dict()
 
 
 def test_compile_refuses_existing_output_without_force(
@@ -137,14 +151,14 @@ def test_compile_force_replaces_existing_output(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "wrote" in captured.err
-    assert UtterancePlan.load(output).to_dict()["format"] == "utterplan"
+    assert FlowPlan.load(output).to_dict()["format"] == "utterplan"
 
 
 def test_compile_toml_stdout_contains_no_status_text(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["compile", "Hello.", "--lang", "en-us", "--stdout"]) == 0
     captured = capsys.readouterr()
     assert "wrote" not in captured.out
-    UtterancePlan.from_toml(captured.out).to_dict()
+    FlowPlan.from_toml(captured.out).to_dict()
 
 
 def test_compile_status_goes_to_stderr(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -231,12 +245,7 @@ def test_compile_repair_cli_reports_guaranteed_renderability(
 
     captured = capsys.readouterr()
     assert result == 0
-    assert (
-        UtterancePlan.load(output).to_dict()["document_metadata"]["planning"]["renderability"][
-            "guaranteed"
-        ]
-        is True
-    )
+    assert FlowPlan.load(output).flow
     assert "renderability: guaranteed; 1 punctuation segment repaired" in captured.err
 
 
@@ -284,7 +293,7 @@ def test_inspect_tokens_shows_linguistic_fields(
     capsys.readouterr()
     assert main(["inspect", str(output), "--tokens"]) == 0
     captured = capsys.readouterr()
-    assert "provider: fallback" in captured.out
+    assert "Linguistic provenance: 1" in captured.out
     assert "lemma=hello." in captured.out
     assert "pos=-" in captured.out
     assert "tag=-" in captured.out
@@ -293,9 +302,24 @@ def test_inspect_tokens_shows_linguistic_fields(
 
 def test_inspect_preparation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     output = tmp_path / "plan.utterplan.toml"
-    assert main(["compile", "Dr. bought 5 kg.", "--lang", "en-us", "-o", str(output)]) == 0
+    trace = tmp_path / "compiler.trace.toml"
+    assert (
+        main(
+            [
+                "compile",
+                "Dr. bought 5 kg.",
+                "--lang",
+                "en-us",
+                "-o",
+                str(output),
+                "--trace",
+                str(trace),
+            ]
+        )
+        == 0
+    )
     capsys.readouterr()
-    assert main(["inspect", str(output), "--preparation"]) == 0
+    assert main(["inspect-trace", str(trace), "--preparation"]) == 0
     captured = capsys.readouterr()
     assert "Preparation" in captured.out
     assert "backend: spokenform" in captured.out
@@ -307,14 +331,14 @@ def test_inspect_preparation(tmp_path: Path, capsys: pytest.CaptureFixture[str])
 def test_inspect_semantic_boundaries_are_separate_from_boundary_events(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    output = tmp_path / "plan.utterplan.toml"
-    assert main(["compile", "One. Two.", "--lang", "en-us", "-o", str(output)]) == 0
+    trace = tmp_path / "compiler.trace.toml"
+    assert main(["compile", "One. Two.", "--lang", "en-us", "--trace", str(trace)]) == 0
     capsys.readouterr()
 
-    assert main(["inspect", str(output), "--boundaries", "--semantic-boundaries"]) == 0
+    assert main(["inspect-trace", str(trace), "--boundaries"]) == 0
     inspected = capsys.readouterr().out
     assert "Boundary events" in inspected
-    assert "Semantic boundaries (spoken coordinates)" in inspected
+    assert "Semantic boundary candidates" in inspected
     assert "semantic-boundary-000000" in inspected
     assert "sentence" in inspected
 
@@ -349,7 +373,7 @@ def test_explain_details(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> 
     assert main(["explain", str(output), "--details"]) == 0
     captured = capsys.readouterr()
     assert "plan id: sha256:" in captured.out
-    assert "spoken: 0:6" in captured.out
+    assert "local tokens:" in captured.out
     assert captured.err == ""
 
 
@@ -375,7 +399,7 @@ def test_migrate_explicitly_checks_legacy_json_plan(
     captured = capsys.readouterr()
     assert "valid migration path" in captured.out
     assert "source schema: 4" in captured.out
-    assert "migration required: no" in captured.out
+    assert "migration required: yes" in captured.out
     assert source.exists()
 
 
@@ -383,15 +407,15 @@ def test_migrate_imports_json_to_toml_stdout_and_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source = tmp_path / "legacy.utterplan.json"
-    original = _write_legacy_json(source)
+    original = FlowPlan.from_dict(migrate_plan_data(_write_legacy_json(source)).data)
     destination = tmp_path / "copy.utterplan.toml"
 
     assert main(["migrate", str(source)]) == 0
-    stdout_plan = UtterancePlan.from_toml(capsys.readouterr().out)
+    stdout_plan = FlowPlan.from_toml(capsys.readouterr().out)
     assert stdout_plan.to_dict() == original.to_dict()
     assert main(["migrate", str(source), "-o", str(destination)]) == 0
     assert "imported" in capsys.readouterr().err
-    assert UtterancePlan.load(destination).to_dict() == original.to_dict()
+    assert FlowPlan.load(destination).to_dict() == original.to_dict()
 
 
 def test_migrate_refuses_existing_toml_output_without_force(
@@ -414,7 +438,7 @@ def test_validate_reports_current_schema_for_toml_plans(
     capsys.readouterr()
     assert main(["validate", str(source)]) == 0
     captured = capsys.readouterr()
-    assert "schema version: 4" in captured.out
+    assert "schema version: 5" in captured.out
     assert "plan ID: sha256:" in captured.out
     assert "migration required" not in captured.out
 
@@ -427,7 +451,7 @@ def test_compile_ssmd_header_language_without_cli_language(
 
     assert main(["compile", str(source)]) == 0
     payload = _payload(capsys)
-    assert payload["segments"][0]["language"] == "de-DE"
+    assert _first_segment(payload)["language"] == "de-DE"
 
 
 def test_compile_ssmd_cli_language_is_fallback(
@@ -438,7 +462,7 @@ def test_compile_ssmd_cli_language_is_fallback(
 
     assert main(["compile", str(source), "--language", "de-DE"]) == 0
     payload = _payload(capsys)
-    assert payload["segments"][0]["language"] == "de-DE"
+    assert _first_segment(payload)["language"] == "de-DE"
 
 
 def test_compile_requires_language_for_plain_input(capsys: pytest.CaptureFixture[str]) -> None:
@@ -449,7 +473,7 @@ def test_compile_requires_language_for_plain_input(capsys: pytest.CaptureFixture
 
 def test_compile_plain_input_with_required_language(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["compile", "Hallo.", "--input-format", "plain", "--language", "de-DE"]) == 0
-    assert _payload(capsys)["segments"][0]["language"] == "de-de"
+    assert _first_segment(_payload(capsys))["language"] == "de-de"
 
 
 def test_validate_source_documents_and_preserve_saved_plan_validation(

@@ -29,7 +29,7 @@ def test_v1_fixtures_validate_before_migration_and_remain_immutable() -> None:
         assert value["format"] == "utterplan"
         assert value["schema_version"] == 1
         jsonschema.validate(value, frozen_schema)
-        result = migrate_plan_data(value)
+        result = migrate_plan_data(value, target_version=4)
         jsonschema.validate(result.data, current_schema)
         assert result.source_version == 1
         assert result.target_version == 4
@@ -65,8 +65,8 @@ def test_v2_fixtures_validate_before_migration_and_remain_immutable() -> None:
         value = json.loads(path.read_text(encoding="utf-8"))
         before = copy.deepcopy(value)
         jsonschema.validate(value, frozen_schema)
-        result = migrate_plan_data(value)
-        assert result.data == migrate_plan_data(value).data
+        result = migrate_plan_data(value, target_version=4)
+        assert result.data == migrate_plan_data(value, target_version=4).data
         jsonschema.validate(result.data, current_schema)
         assert result.source_version == 2
         assert result.target_version == 4
@@ -102,15 +102,18 @@ def test_v3_fixtures_validate_and_migrate_immutably() -> None:
         assert value["format"] == "utterplan"
         assert value["schema_version"] == 3
         jsonschema.validate(value, frozen_schema)
-        migrated = migrate_plan_data(value)
+        migrated = migrate_plan_data(value, target_version=4)
         plan = UtterancePlan.from_dict(value)
         assert plan.schema_version == 4
         assert plan.to_dict() == migrated.data
         assert value == before
 
 
-def test_every_supported_schema_has_a_registry_entry() -> None:
+def test_historical_json_schema_registry_is_distinct_from_supported_plan_versions() -> None:
     from utterplan.schema_registry import has_schema
-    from utterplan.versioning import SUPPORTED_SCHEMA_VERSIONS
+    from utterplan.versioning import JSON_SCHEMA_VERSIONS, SUPPORTED_SCHEMA_VERSIONS
 
-    assert all(has_schema(version) for version in SUPPORTED_SCHEMA_VERSIONS)
+    assert JSON_SCHEMA_VERSIONS == (1, 2, 3, 4)
+    assert SUPPORTED_SCHEMA_VERSIONS == (1, 2, 3, 4, 5)
+    assert all(has_schema(version) for version in JSON_SCHEMA_VERSIONS)
+    assert not has_schema(5)

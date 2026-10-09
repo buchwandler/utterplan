@@ -1,4 +1,5 @@
-from utterplan import PlannerConfig, UtterancePlanner
+from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+from utterplan import PlannerConfig
 
 TEXT = "The backup battery (still warm from the morning test) sat beside the console."
 

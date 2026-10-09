@@ -185,7 +185,7 @@ def migrate_plan_data(
         target_version=target,
         registry=migration_registry(),
     )
-    if steps:
+    if steps and target != 5:
         _record_provenance(
             working,
             source_version=envelope.schema_version,

@@ -5,13 +5,12 @@ from importlib.metadata import version
 from pathlib import Path
 from types import SimpleNamespace
 
-import jsonschema
 import pytest
 
-from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
+from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+from utterplan import FlowPlan, PauseIntent, PlannerConfig
 from utterplan.cli import _format_for_path, main
 from utterplan.exceptions import PlanFormatError
-from utterplan.format import schema
 from utterplan.language import language_lookup_key
 from utterplan.pauses import boundary_is_active
 
@@ -137,9 +136,12 @@ def test_ssmd_09_parser_uses_strict_dialect_for_unversioned_fragments() -> None:
     assert error.value.code == "syntax.comma_separator_legacy"
 
 
-@pytest.mark.parametrize(("break_time", "expected_seconds"), [("200ms", 0.2), ("0ms", 0.0)])
+@pytest.mark.parametrize(
+    ("break_time", "expected"),
+    [("200ms", PauseIntent("timed", "200ms")), ("0ms", PauseIntent("timed", "0ms"))],
+)
 def test_explicit_ssmd_break_precedes_sentence_default(
-    break_time: str, expected_seconds: float
+    break_time: str, expected: PauseIntent
 ) -> None:
     source = f"""---
 ssmd_version: "0.9"
@@ -150,10 +152,10 @@ One. ...{break_time} Two."""
     plan = _planner().plan(source)
 
     explicit = next(event for event in plan.boundaries if event.kind == "explicit")
-    sentence = next(event for event in plan.boundaries if event.kind == "sentence")
     first_segment = plan.segments[0]
-    assert first_segment.pause_after.seconds == pytest.approx(expected_seconds)
-    assert first_segment.pause_after.events == tuple(sorted((explicit.id, sentence.id)))
+    assert first_segment.pause_after == expected
+    assert explicit.attrs["time"] == break_time
+    assert explicit.seconds is None
 
 
 @pytest.mark.parametrize(
@@ -235,7 +237,6 @@ def test_ssmd_annotation_source_provenance_roundtrips_in_schema_v3() -> None:
     assert annotation.source_start == 0
     assert annotation.source_end == len(source)
     payload = plan.to_dict()
-    jsonschema.validate(payload, schema())
     restored = type(plan).from_dict(payload)
     assert restored.annotations == plan.annotations
 
@@ -247,11 +248,6 @@ def test_heading_events_are_preserved_but_inactive_for_pause_resolution() -> Non
     assert [event.attrs["level"] for event in headings] == ["1", "2"]
     assert all(event.attrs["structural_only"] for event in headings)
     assert all(not boundary_is_active(event, _planner().config.pauses) for event in headings)
-    heading_ids = {event.id for event in headings}
-    assert all(
-        heading_ids.isdisjoint(segment.pause_before.events + segment.pause_after.events)
-        for segment in plan.segments
-    )
 
 
 def test_cli_auto_detection_recognizes_ssmd_names_and_versioned_markdown(tmp_path: Path) -> None:
@@ -275,8 +271,8 @@ ssmd_version: "0.9"
         encoding="utf-8",
     )
     assert main(["compile", str(source), "--lang", "en-us", "--text-preparation", "identity"]) == 0
-    payload = UtterancePlan.from_toml(capsys.readouterr().out).to_dict()
-    assert payload["source"]["format"] == "ssmd"
+    plan = FlowPlan.from_toml(capsys.readouterr().out)
+    assert plan.document.format == "ssmd"
 
 
 def test_cli_auto_detection_keeps_ordinary_markdown_plain(
@@ -285,8 +281,8 @@ def test_cli_auto_detection_keeps_ordinary_markdown_plain(
     source = tmp_path / "ordinary.md"
     source.write_text("# Ordinary Markdown", encoding="utf-8")
     assert main(["compile", str(source), "--lang", "en-us", "--text-preparation", "identity"]) == 0
-    payload = UtterancePlan.from_toml(capsys.readouterr().out).to_dict()
-    assert payload["source"]["format"] == "plain"
+    plan = FlowPlan.from_toml(capsys.readouterr().out)
+    assert plan.document.format == "plain"
 
 
 def test_parser_warnings_retain_structured_source_diagnostics(
@@ -369,11 +365,10 @@ def test_zero_width_non_media_annotation_is_not_preserved(
 def test_sequence_fallback_mode_roundtrips_and_is_part_of_plan_identity() -> None:
     source = '---\nssmd_version: "0.9"\nsequence_fallback_mode: preserve\n---\nHello.'
     plan = _planner().plan(source)
-    jsonschema.validate(plan.to_dict(), schema())
 
     restored = type(plan).from_dict(plan.to_dict())
     assert restored.document_metadata["sequence_fallback_mode"] == "preserve"
-    assert type(plan).from_toml(plan.to_toml()) == plan
+    assert FlowPlan.from_toml(_planner().compile(source).plan.to_toml()).schema_version == 5
 
     changed_policy = replace(
         plan,

@@ -9,7 +9,8 @@ usage: utterplan compile [-h] [--file FILE] [--language LANGUAGE]
                          [--text-preparation {spokenform,identity}]
                          [--pause-mode {tts,manual,auto}]
                          [--spacy {auto,off,sm,md,lg,trf}] [-o OUTPUT]
-                         [--force] [--stdout] [--renderability {strict,repair}]
+                         [--trace TRACE] [--force] [--stdout]
+                         [--renderability {strict,repair}]
                          [text ...]
 ```
 
@@ -65,6 +66,7 @@ Without `--output`, compile writes the pretty TOML plan to stdout. With
 `--force` is supplied. Add `--stdout` with an output path to write the file and
 also emit the same TOML plan to stdout.
 
+`--trace PATH` writes optional compiler provenance to a separate TOML sidecar. The trace is not embedded in, or hashed as part of, the executable plan. Keep and distribute the sidecar only when source text, preparation maps, diagnostics, or renderability evidence must be retained.
 Human status messages are written to stderr, never mixed into TOML stdout:
 
 ```bash
@@ -85,7 +87,7 @@ utterplan compile-many chapters/*.ssmd --output-dir build/plans \
   --language en-us --report build/compile-report.toml
 ```
 
-Source names determine output names: `chapter.ssmd`, `chapter.ssmd.md`, and `chapter.md` each map to `chapter.utterplan.toml`. Duplicate output names and a report path that collides with a plan output are rejected before any writes. Existing plans are protected unless `--force` is supplied. By default the command writes an atomically refreshed `compile-report.toml` in the output directory; the report is operational TOML, not a plan accepted by `UtterancePlan.load()`.
+Source names determine output names: `chapter.ssmd`, `chapter.ssmd.md`, and `chapter.md` each map to `chapter.utterplan.toml`. Duplicate output names and a report path that collides with a plan output are rejected before any writes. Existing plans are protected unless `--force` is supplied. By default the command writes an atomically refreshed `compile-report.toml` in the output directory; the report is operational TOML, not a plan accepted by `FlowPlan.load()`.
 
 Shared planning options include `--language`, `--input-format auto|plain|ssmd`, `--unit`, `--text-preparation`, `--pause-mode`, `--spacy`, and `--renderability`. Progress, repair notices, actionable errors, and the final counts are written to stderr. Exit status is 0 if every input succeeds, 1 if any input fails, and 2 for usage errors such as output collisions. `--fail-fast` skips later requests after the first failure but preserves all completed outputs and updates the report.
 
@@ -98,7 +100,7 @@ utterplan explain chapter.utterplan.toml
 utterplan explain chapter.utterplan.toml --details
 ```
 
-The default output shows prepared wording, render units, ordered segments, languages, resolved pauses, headings, SSMD version/title/document language, effective typed directives, metadata, and warning/error codes with source locations. Add `--details` for IDs, offsets, provenance, hashes, plan identity, and token analysis beneath each segment. Use `inspect --tokens` for a compact token/provenance view.
+The default output explains executable flow: prepared segment text, unit order, effective languages, semantic pause intents, headings, markers, and typed directives. Compiler source diagnostics and preparation provenance are intentionally absent from the plan unless a trace sidecar was saved. Add `--details` for local token offsets, flow hashes, plan identity, and trace preparation mappings. Pass `--trace PATH` to attach a matching sidecar; the TOML trace can also be read independently with `inspect-trace`.
 
 ## Inspect a persisted planning attempt
 
@@ -116,7 +118,7 @@ The default view summarizes status, renderability, and candidate size. `--issues
 shows source context and conservative repair assessments; segment and unit selectors
 accept an ID or zero-based index. `--json` emits the complete artifact as JSON for
 inspection, but the persisted attempt itself remains TOML. A blocked candidate is an
-inspect-only draft, not a canonical plan, and is rejected by `UtterancePlan.load()`.
+inspect-only draft, not a canonical plan, and is rejected by `FlowPlan.load()`.
 
 ## Planning controls
 
@@ -142,12 +144,13 @@ utterplan validate chapter.ssmd.md
 utterplan validate plain.txt --input-format plain --language en-us
 utterplan inspect chapter.utterplan.toml --segment 0
 utterplan inspect chapter.utterplan.toml --unit 0 --boundaries --tokens
-utterplan inspect chapter.utterplan.toml --preparation
-utterplan inspect chapter.utterplan.toml --semantic-boundaries
+utterplan compile chapter.ssmd.md -o chapter.utterplan.toml --trace chapter.trace.toml
+utterplan explain chapter.utterplan.toml --trace chapter.trace.toml
+utterplan inspect-trace chapter.trace.toml --preparation --boundaries
 utterplan inspect-attempt chapter.attempt.toml --issues
 ```
 
-`inspect --preparation` reports the preparation backend and version, structural and spoken text lengths, replacement count, and each replacement's structural and spoken ranges and text. This is the supported human-facing preparation diagnostic; raw coordinate lookup tables are intentionally absent from the persisted TOML plan.
+`inspect-trace --preparation` reports source/prepared text lengths, maps, preparation changes, and repair/diagnostic evidence from the optional trace. `inspect-trace --boundaries` shows compiler-only boundary events and semantic candidates. These fields are intentionally absent from the executable plan TOML.
 
 ## Migrate a saved plan
 
@@ -167,11 +170,7 @@ route and reports source schema, target schema, and whether migration is require
 without writing a file. A future schema version is rejected rather than guessed
 or downgraded.
 
-Schema migration is a separate operation from SSMD source migration. UtterPlan
-preserves released schemas v1, v2, and v3 and migrates supported plans through the
-registered chain to current schema v4. The v3-to-v4 step does not rerun parsing,
-NLP, or planning. Use `ssmd migrate FILE --to 0.9` for older SSMD source
-documents.
+Schema migration is separate from SSMD source migration. Frozen JSON schemas v1–v4 migrate through the registered sequential chain to current schema v5. The v4-to-v5 projection does not rerun parsing, text preparation, NLP, or planning, and refuses ambiguous token coordinates or pause meanings rather than guessing. Use `ssmd migrate FILE --to 0.9` for older SSMD source documents.
 
 For a saved TOML plan, `validate` verifies the current semantic schema and plan
 invariants; JSON plan paths are rejected outside `migrate`. For an SSMD or

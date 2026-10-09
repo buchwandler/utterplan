@@ -7,16 +7,21 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from . import PlannerConfig, UtterancePlan, __version__
+import tomlkit
+from tomlkit.exceptions import ParseError
+
+from . import __version__
 from .atomic_io import atomic_write_text
 from .attempts import PlanningAttempt
 from .batch import CompileOutcome, CompileRequest, compile_to_files
-from .compiler import InputFormat, compile_document
-from .config import LinguisticsConfig, PauseConfig
+from .compiler import InputFormat, PreparationTrace, compile_document
+from .config import LinguisticsConfig, PauseConfig, PlannerConfig
 from .exceptions import PlanFormatError, PlanRenderabilityError, UtterPlanError
 from .explain import format_explanation
 from .migration import MigrationResult, migrate_plan_data
+from .model import FlowPlan
 from .renderability import format_renderability_error
+from .trace_codec import loads_trace
 
 _EXAMPLES = """examples:
   utterplan compile chapter.ssmd.md
@@ -96,6 +101,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     compile_parser.add_argument("-o", "--output", type=Path, help="write the plan to this file")
     compile_parser.add_argument(
+        "--trace", type=Path, help="write compiler provenance to this optional trace sidecar"
+    )
+    compile_parser.add_argument(
         "--force", action="store_true", help="replace an existing output file"
     )
     compile_parser.add_argument(
@@ -151,7 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     migrate_parser = commands.add_parser(
-        "migrate", help="explicitly import and migrate a legacy JSON plan to TOML"
+        "migrate", help="migrate a legacy JSON or v4 TOML plan to the current v5 TOML format"
     )
     migrate_parser.add_argument("input", type=Path)
     migrate_parser.add_argument("-o", "--output", type=Path)
@@ -171,6 +179,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="include IDs, offsets, provenance, and plan identity details",
     )
+    explain_parser.add_argument("--trace", type=Path, help="optional compiler trace sidecar")
     inspect_parser = commands.add_parser("inspect", help="inspect a saved TTS plan")
     inspect_parser.add_argument("input", type=Path)
     inspect_parser.add_argument("--unit", type=int)
@@ -184,6 +193,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="show semantic split opportunities in spoken coordinates",
     )
     inspect_parser.add_argument("--preparation", action="store_true")
+
+    trace_inspect_parser = commands.add_parser(
+        "inspect-trace", help="inspect compiler provenance from an optional trace sidecar"
+    )
+    trace_inspect_parser.add_argument("input", type=Path)
+    trace_inspect_parser.add_argument("--boundaries", action="store_true")
+    trace_inspect_parser.add_argument("--preparation", action="store_true")
+    trace_inspect_parser.add_argument(
+        "--json", action="store_true", help="emit the full trace as JSON"
+    )
 
     attempt_inspect_parser = commands.add_parser(
         "inspect-attempt", help="inspect a persisted planning-attempt artifact"
@@ -418,8 +437,14 @@ def _compile_many(args: argparse.Namespace) -> int:
 
 def _compile(args: argparse.Namespace) -> int:
     source, input_format = _read_compile_input(args)
-    if args.output is not None and args.output.exists() and not args.force:
-        raise ValueError(f"output exists: {args.output}; use --force to replace it")
+    trace_path: Path | None = args.trace
+    paths = [path for path in (args.output, trace_path) if path is not None]
+    if len({path.resolve() for path in paths}) != len(paths):
+        raise ValueError("plan output and trace output must use different paths")
+    if not args.force:
+        existing = next((path for path in paths if path.exists()), None)
+        if existing is not None:
+            raise ValueError(f"output exists: {existing}; use --force to replace it")
 
     fallback_language = _language_fallback(source, input_format, args.language)
     config = PlannerConfig(
@@ -431,13 +456,21 @@ def _compile(args: argparse.Namespace) -> int:
         linguistics=_linguistics_config(args.spacy),
         renderability_mode=args.renderability,
     )
-    plan = compile_document(
+    result = compile_document(
         source,
         input_format=input_format,
         config=config,
         fallback_language=args.language,
-    ).plan
+        trace=trace_path is not None,
+    )
+    plan = result.plan
     payload = plan.to_toml()
+    if trace_path is not None:
+        if result.trace is None:
+            raise RuntimeError("trace was requested but the compiler returned no trace")
+        atomic_write_text(trace_path, result.trace.to_toml(), create_parent=True)
+
+    segment_count = sum(len(unit.segments) for unit in plan.flow)
     if args.output is None:
         print(payload, end="")
     else:
@@ -446,13 +479,14 @@ def _compile(args: argparse.Namespace) -> int:
             print(payload, end="")
         else:
             print(
-                f"wrote {args.output} ({len(plan.segments)} segments, {len(plan.units)} units)",
+                f"wrote {args.output} ({segment_count} segments, {len(plan.flow)} units)",
                 file=sys.stderr,
             )
     if args.renderability == "repair":
-        planning = plan.document_metadata.get("planning", {})
-        report = planning.get("renderability", {}) if isinstance(planning, dict) else {}
-        repair_count = report.get("repair_count", 0) if isinstance(report, dict) else 0
+        repair_count = sum(
+            diagnostic.code == "planning.renderability.repaired"
+            for diagnostic in result.diagnostics
+        )
         if repair_count:
             suffix = "s" if repair_count != 1 else ""
             print(
@@ -473,8 +507,36 @@ def _format_renderability_error(error: PlanRenderabilityError, args: argparse.Na
 
 
 def _migration_result(path: Path) -> MigrationResult:
+    content = path.read_text(encoding="utf-8")
+    if path.suffix.lower() == ".toml":
+        try:
+            wire = tomlkit.parse(content).unwrap()
+        except ParseError as exc:
+            line = getattr(exc, "line", None)
+            column = getattr(exc, "col", None)
+            location = f"line {line}, column {column}: " if line is not None else ""
+            raise PlanFormatError(f"{location}{exc}", code="toml.invalid") from exc
+        if not isinstance(wire, dict):
+            raise PlanFormatError("TOML root must be a table", code="toml.root")
+        version = wire.get("schema_version")
+        if version == 4:
+            from .codecs.v4_toml import decode_v4_toml_data
+
+            return migrate_plan_data(decode_v4_toml_data(wire))
+        if version == 5:
+            plan = FlowPlan.from_toml(content)
+            return MigrationResult(
+                data=plan.to_dict(),
+                source_version=5,
+                target_version=5,
+                steps=(),
+                source_plan_id=plan.plan_id,
+                target_plan_id=plan.plan_id,
+            )
+        raise PlanFormatError("migrate supports only v4 TOML plan files", code="schema.version")
+
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(content)
     except json.JSONDecodeError as exc:
         raise PlanFormatError(str(exc), code="json.invalid") from exc
     return migrate_plan_data(value)
@@ -498,7 +560,7 @@ def _migrate(args: argparse.Namespace) -> int:
             print(f"steps: {steps}")
         return 0
 
-    plan = UtterancePlan.from_dict(result.data)
+    plan = FlowPlan.from_dict(result.data)
     payload = plan.to_toml()
     if args.output is None:
         print(payload, end="")
@@ -522,12 +584,12 @@ def _validate(args: argparse.Namespace) -> int:
             code="format.unsupported_json",
         )
     if name.endswith(".utterplan.toml") or path.suffix.lower() == ".toml":
-        plan = UtterancePlan.load(path)
+        plan = FlowPlan.from_toml(path.read_text(encoding="utf-8"))
         print("valid")
         print(f"schema version: {plan.schema_version}")
         print(f"plan ID: {plan.plan_id}")
-        print(f"segments: {len(plan.segments)}")
-        print(f"units: {len(plan.units)}")
+        print(f"segments: {_flow_segment_count(plan)}")
+        print(f"units: {len(plan.flow)}")
         print(f"warnings: {len(plan.warnings)}")
         return 0
 
@@ -552,10 +614,24 @@ def _validate(args: argparse.Namespace) -> int:
     )
     print("valid")
     print(f"input format: {input_format}")
-    print(f"segments: {len(compile_result.plan.segments)}")
-    print(f"units: {len(compile_result.plan.units)}")
+    print(f"segments: {_flow_segment_count(compile_result.plan)}")
+    print(f"units: {len(compile_result.plan.flow)}")
     print(f"warnings: {len(compile_result.plan.warnings)}")
     return 0
+
+
+def _flow_segment_count(plan: FlowPlan) -> int:
+    return sum(len(unit.segments) for unit in plan.flow)
+
+
+def _load_plan_file(path: Path) -> FlowPlan:
+    name = path.name.lower()
+    if name.endswith(".utterplan.json") or path.suffix.lower() == ".json":
+        raise PlanFormatError(
+            "JSON is not a supported plan-file format; use 'utterplan migrate INPUT.json -o OUTPUT.utterplan.toml'",
+            code="format.unsupported_json",
+        )
+    return FlowPlan.from_toml(path.read_text(encoding="utf-8"))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -572,9 +648,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "inspect-attempt":
             _inspect_attempt(PlanningAttempt.load(args.input), args)
             return 0
-        plan = UtterancePlan.load(args.input)
+        if args.command == "inspect-trace":
+            _inspect_trace(loads_trace(args.input.read_text(encoding="utf-8")), args)
+            return 0
+        plan = _load_plan_file(args.input)
         if args.command == "explain":
-            print(format_explanation(plan, details=args.details), end="")
+            trace = loads_trace(args.trace.read_text(encoding="utf-8")) if args.trace else None
+            print(format_explanation(plan, details=args.details, trace=trace), end="")
             return 0
         _inspect(plan, args)
         return 0
@@ -589,87 +669,138 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
-def _inspect(plan: UtterancePlan, args: argparse.Namespace) -> None:
-    print(f"Default language: {plan.config.get('language', '')}")
-    print("\nTexts")
-    print(f"  source:      {len(plan.source.text)} characters")
-    print(f"  structural:  {len(plan.texts.structural)} characters")
-    print(f"  spoken:      {len(plan.texts.spoken)} characters")
-    print(f"\nUnits:     {len(plan.units)}")
-    print(f"Segments:  {len(plan.segments)}")
-    print(f"Languages: {len(plan.languages)}")
-    print(f"Warnings:  {len(plan.warnings)}")
+def _inspect(plan: FlowPlan, args: argparse.Namespace) -> None:
+    segments = [
+        (unit_index, segment_index, segment)
+        for unit_index, unit in enumerate(plan.flow)
+        for segment_index, segment in enumerate(unit.segments)
+    ]
+    print(f"Default language: {plan.language}")
+    print(f"Schema version: {plan.schema_version}")
+    print(f"Plan ID: {plan.plan_id}")
+    print(f"Units: {len(plan.flow)}")
+    print(f"Segments: {len(segments)}")
+    print(f"Linguistic provenance: {len(plan.linguistics)}")
+    print(f"Warnings: {len(plan.warnings)}")
+
     if args.warnings:
+        if not plan.warnings:
+            print("No warnings.")
         for warning in plan.warnings:
             print(f"warning: {warning}")
-    if args.preparation:
-        preparation = plan.preparation
-        version = f" {preparation.version}" if preparation.version else ""
-        print("\nPreparation")
-        print(f"  backend: {preparation.backend}{version}")
-        print(f"  source: {len(plan.texts.structural)} characters")
-        print(f"  spoken: {len(plan.texts.spoken)} characters")
-        print(f"  replacements: {len(preparation.replacements)}")
-        for replacement in preparation.replacements:
-            source_range = (
-                f"{replacement.get('source_start', 0)}:{replacement.get('source_end', 0)}"
-            )
-            output_range = (
-                f"{replacement.get('output_start', 0)}:{replacement.get('output_end', 0)}"
-            )
-            label = replacement.get("rule") or replacement.get("kind", "")
-            print(f"  {source_range} -> {output_range} {label}")
+    if args.preparation or args.semantic_boundaries:
+        print("Compiler preparation and boundary candidates are available only in inspect-trace.")
+    if args.boundaries:
+        print("\nFlow events")
+        found = False
+        for unit_index, segment_index, segment in segments:
+            events: list[str] = []
+            if segment.heading is not None:
+                events.append(f"heading level {segment.heading}")
+            events.extend(f"@{name}" for name in segment.markers)
+            for edge, pause in (("before", segment.pause_before), ("after", segment.pause_after)):
+                if pause is not None:
+                    value = f"timed {pause.time}" if pause.type == "timed" else pause.type
+                    events.append(f"pause {edge}: {value}")
+            if events:
+                found = True
+                print(f"  unit {unit_index}, segment {segment_index}: {', '.join(events)}")
+        if not found:
+            print("  None.")
+    if args.tokens:
+        print("\nLocal tokens")
+        for unit_index, segment_index, segment in segments:
+            print(f"  unit {unit_index}, segment {segment_index} [{segment.language}]")
+            if not segment.tokens:
+                print("    None.")
+            for token in segment.tokens:
+                surface = segment.text[token.start : token.end]
+                print(
+                    f"    {token.start}:{token.end} {surface!r}  lemma={token.lemma or '-'}  "
+                    f"pos={token.pos or '-'}  tag={token.tag or '-'}  morph={token.morph or '-'}"
+                )
+    if args.unit is not None:
+        if not 0 <= args.unit < len(plan.flow):
+            raise _CliUsageError(f"unknown flow unit index {args.unit}")
+        unit = plan.flow[args.unit]
+        print(f"\nFlow unit {args.unit}")
+        for index, segment in enumerate(unit.segments):
+            print(f"  segment {index} [{segment.language}]: {segment.text!r}")
+    if args.segment is not None:
+        if not 0 <= args.segment < len(segments):
+            raise _CliUsageError(f"unknown flow segment index {args.segment}")
+        unit_index, segment_index, segment = segments[args.segment]
+        print(f"\nSegment {args.segment} (unit {unit_index}, local index {segment_index})")
+        print(f"  text:         {segment.text!r}")
+        print(f"  language:     {segment.language}")
+        print(f"  pause_before: {_pause_text(segment.pause_before)}")
+        print(f"  pause_after:  {_pause_text(segment.pause_after)}")
+        print(f"  heading:      {segment.heading if segment.heading is not None else '-'}")
+        print(f"  markers:      {', '.join(segment.markers) or '-'}")
+        print(f"  directives:   {segment.directives.to_dict()}")
+        for token in segment.tokens:
             print(
-                f"    {replacement.get('source', '')!r} -> {replacement.get('replacement', '')!r}"
+                f"  token:        {token.start}:{token.end} {segment.text[token.start : token.end]!r}"
             )
+
+
+def _pause_text(pause: Any) -> str:
+    if pause is None:
+        return "-"
+    return f"timed {pause.time}" if pause.type == "timed" else pause.type
+
+
+def _inspect_trace(trace: PreparationTrace, args: argparse.Namespace) -> None:
+    if args.json:
+        print(json.dumps(trace.to_dict(), ensure_ascii=False, indent=2))
+        return
+    print("UtterPlan compiler trace")
+    print(f"  source hash: {trace.source_sha256}")
+    print(f"  source characters: {len(trace.source_text)}")
+    print(f"  document language: {trace.document_language}")
+    print(f"  sequence fallback: {trace.sequence_fallback_mode}")
+    print(f"  diagnostics: {len(trace.diagnostics)}")
+    print(f"  warnings: {len(trace.warnings)}")
+
+    compiler_plan = trace.compiler_plan
+    if args.preparation:
+        preparation = compiler_plan.get("preparation", {})
+        preparation = preparation if isinstance(preparation, dict) else {}
+        print("\nPreparation")
+        print(f"  structural: {len(trace.structural_text)} characters")
+        print(f"  spoken: {len(trace.spoken_text)} characters")
+        print(f"  backend: {preparation.get('backend', 'unknown')}")
+        print(f"  replacements: {len(preparation.get('replacements', []))}")
+        print(f"  source spans: {len(trace.source_spans)}")
+        print(f"  structural/spoken map points: {len(trace.structural_to_spoken)}")
+        for unit in trace.units:
+            print(f"  {unit.split_reason}: {unit.source_text!r} -> {unit.prepared_text!r}")
+            for change in unit.transformations:
+                print(
+                    f"    {change.source!r} -> {change.replacement!r} ({change.rule or change.kind})"
+                )
+
     if args.boundaries:
         print("\nBoundary events")
-        for boundary in plan.boundaries:
-            print(
-                f"  {boundary.id}: {boundary.kind} at {boundary.position}, "
-                f"{boundary.seconds}s, {boundary.origin}"
-            )
-    if args.semantic_boundaries:
-        print("\nSemantic boundaries (spoken coordinates)")
-        if not plan.semantic_boundaries:
+        boundaries = compiler_plan.get("boundaries", [])
+        if not isinstance(boundaries, list) or not boundaries:
             print("  None.")
-        for semantic_boundary in plan.semantic_boundaries:
-            run_id = semantic_boundary.language_run_id or "-"
+        for boundary in boundaries:
+            if not isinstance(boundary, dict):
+                continue
             print(
-                f"  {semantic_boundary.id}  {semantic_boundary.position:>6}  {semantic_boundary.kind:<14} "
-                f"{semantic_boundary.origin}  run={run_id}"
+                f"  {boundary.get('id', '-')} {boundary.get('kind', '?')} "
+                f"at {boundary.get('position', '?')} ({boundary.get('origin', '?')})"
             )
-    if args.tokens:
-        print("\nTokens")
-        if plan.linguistic_runs:
-            for linguistic_run in plan.linguistic_runs:
-                model = linguistic_run.model or "-"
-                print(f"  provider: {linguistic_run.provider}, model={model}")
-        else:
-            print("  provider: unknown, model=-")
-        for index, token in enumerate(plan.tokens):
-            token_id = token.id or f"token-{index}"
-            print(
-                f"  {token_id}  {token.spoken_start}:{token.spoken_end}  {token.text!r}  "
-                f"lang={token.language or '-'}  lemma={token.lemma or '-'}  "
-                f"pos={token.pos or '-'}  tag={token.tag or '-'}  morph={token.morph or '-'}"
-            )
-    if args.unit is not None:
-        unit = plan.units[args.unit]
-        print(f"\nUnit {unit.index}: {unit.kind} {unit.spoken_start}:{unit.spoken_end}")
-        for segment_id in unit.segment_ids:
-            print(f"  {segment_id}")
-    if args.segment is not None:
-        segment = plan.segments[args.segment]
-        print(f"\nSegment {args.segment}")
-        print(f"  text:          {segment.text!r}")
-        print(f"  language:      {segment.language}")
-        print(f"  paragraph:     {segment.paragraph}")
-        print(f"  sentence:      {segment.sentence}")
-        print(f"  clause:        {segment.clause}")
-        print(f"  pause_before:  {segment.pause_before.seconds}s {segment.pause_before.events}")
-        print(f"  pause_after:   {segment.pause_after.seconds}s {segment.pause_after.events}")
-        print(f"  directives:    {segment.directives.to_dict()}")
+        semantic = compiler_plan.get("semantic_boundaries", [])
+        if isinstance(semantic, list) and semantic:
+            print("Semantic boundary candidates")
+            for item in semantic:
+                if isinstance(item, dict):
+                    print(
+                        f"  {item.get('id', '-')} {item.get('kind', '?')} "
+                        f"at {item.get('position', '?')} ({item.get('origin', '?')})"
+                    )
 
 
 def _inspect_attempt(attempt: PlanningAttempt, args: argparse.Namespace) -> None:

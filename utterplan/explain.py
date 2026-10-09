@@ -4,14 +4,17 @@ import json
 from collections.abc import Mapping
 from typing import Literal
 
+from .compiler import PreparationTrace
 from .model import (
     AudioDirective,
     BoundaryEvent,
+    FlowPlan,
+    LegacyPause,
     Marker,
+    PauseIntent,
     PlanSegment,
     PlanUnit,
     PronunciationDirective,
-    ResolvedPause,
     SegmentDirectives,
     UtterancePlan,
     VoiceDirective,
@@ -46,27 +49,152 @@ def _replacement_count(plan: UtterancePlan) -> str:
     return "no replacements" if count == 0 else _count(count, "replacement", "replacements")
 
 
-def _format_seconds(seconds: float) -> str:
-    return f"{seconds:.2f} s"
-
-
-def format_explanation(plan: UtterancePlan, *, details: bool = False) -> str:
-    """Return a deterministic, human-oriented explanation of a compiled plan."""
-    lines = ["UtterPlan explanation", ""]
-    _format_plan_summary(plan, lines, details=details)
-    _format_preparation(plan, lines, details=details)
-    _format_heading_events(plan, lines)
-    _format_semantic_boundaries(plan, lines, details=details)
-    _format_speech_plan(plan, lines, details=details)
+def format_explanation(
+    plan: FlowPlan,
+    *,
+    details: bool = False,
+    trace: PreparationTrace | None = None,
+) -> str:
+    """Explain executable v5 flow, with compiler provenance only when trace is supplied."""
+    lines = ["UtterPlan explanation", "", "Plan"]
+    lines.append(f"  schema: {plan.schema_version}")
+    lines.append(f"  default language: {plan.language}")
+    lines.append(f"  grouping: {plan.unit}")
+    lines.append(
+        f"  result: {_count(len(plan.flow), 'unit')}, {_count(_flow_segment_count(plan), 'segment')}"
+    )
+    lines.append(f"  document format: {plan.document.format or 'unknown'}")
+    if plan.document.title:
+        lines.append(f"  title: {_quote(plan.document.title)}")
     if details:
-        _format_language_runs(plan, lines)
-        _format_metadata(plan, lines)
-    if details or any(
-        diagnostic.severity in {"warn", "warning", "error"} for diagnostic in plan.diagnostics
-    ):
-        _format_diagnostics(plan, lines)
-    _format_warnings(plan, lines)
+        lines.append(f"  plan id: {plan.plan_id}")
+        producer = plan.producer
+        producer_name = producer.get("name", "") if isinstance(producer, Mapping) else ""
+        producer_version = producer.get("version") if isinstance(producer, Mapping) else None
+        producer_text = f"{producer_name} {producer_version}".strip()
+        lines.append(f"  producer: {producer_text or '-'}")
+    lines.append("")
+
+    if plan.document.semantics and details:
+        lines.extend(["Document semantics", f"  {_json(plan.document.semantics)}", ""])
+    if plan.linguistics:
+        lines.append("Linguistic provenance")
+        for item in plan.linguistics:
+            model = f", model={item.model}" if item.model else ""
+            lines.append(f"  {item.language}: {item.provider}{model}")
+        lines.append("")
+
+    lines.append("Speech plan")
+    for unit_index, unit in enumerate(plan.flow, start=1):
+        lines.append(f"  Unit {unit_index}")
+        for segment_index, segment in enumerate(unit.segments, start=1):
+            lines.append(f"    {segment_index}. [{segment.language}] {_quote(segment.text)}")
+            if segment.heading is not None:
+                lines.append(f"       heading: level {segment.heading}")
+            if segment.markers:
+                lines.append(f"       markers: {', '.join('@' + name for name in segment.markers)}")
+            lines.extend(_format_pause(segment.pause_before, edge="before"))
+            lines.extend(_format_directives(segment.directives))
+            lines.extend(_format_pause(segment.pause_after, edge="after"))
+            if details:
+                lines.append(f"       local tokens: {len(segment.tokens)}")
+                for token in segment.tokens:
+                    surface = segment.text[token.start : token.end]
+                    lines.append(
+                        f"         {token.start}:{token.end} {_quote(surface)}  "
+                        f"lemma={token.lemma or '-'} pos={token.pos or '-'} "
+                        f"tag={token.tag or '-'} morph={token.morph or '-'}"
+                    )
+        if details:
+            lines.append(f"    flow hash: {unit.content_hash}")
+        lines.append("")
+
+    if plan.warnings:
+        lines.append("Warnings")
+        lines.extend(f"  - {warning}" for warning in plan.warnings)
+        lines.append("")
+    else:
+        lines.extend(["No warnings.", ""])
+
+    if trace is None:
+        lines.append(
+            "Compiler provenance is not stored in the plan; supply a trace sidecar for details."
+        )
+        return "\n".join(lines).rstrip() + "\n"
+
+    if trace.warnings:
+        lines.append("Compiler warnings")
+        lines.extend(f"  - {warning}" for warning in trace.warnings)
+        lines.append("")
+    if trace.diagnostics:
+        lines.append("Diagnostics")
+        for diagnostic in trace.diagnostics:
+            location = (
+                f" at line {diagnostic.line}, column {diagnostic.column}"
+                if diagnostic.line is not None
+                else ""
+            )
+            if diagnostic.path:
+                location += f" ({diagnostic.path})"
+            lines.append(
+                f"  {diagnostic.code} [{diagnostic.severity}]{location}: {diagnostic.message}"
+            )
+        lines.append("")
+    if details:
+        preparation = trace.compiler_plan.get("preparation", {})
+        preparation = preparation if isinstance(preparation, Mapping) else {}
+        replacements = preparation.get("replacements", [])
+        replacement_count = len(replacements) if isinstance(replacements, list) else 0
+        lines.extend(
+            [
+                "Preparation trace",
+                f"  backend: {preparation.get('backend', 'unknown')}",
+                f"  replacements: {replacement_count}",
+                f"  structural characters: {len(trace.structural_text)}",
+                f"  spoken characters: {len(trace.spoken_text)}",
+            ]
+        )
+        for trace_unit in trace.units:
+            for change in trace_unit.transformations:
+                source_range = (
+                    f"{change.source_start}:{change.source_end}"
+                    if change.source_start is not None and change.source_end is not None
+                    else "unknown"
+                )
+                output_range = (
+                    f"{change.output_start}:{change.output_end}"
+                    if change.output_start is not None and change.output_end is not None
+                    else "unknown"
+                )
+                lines.append(
+                    f"  {source_range} {_quote(change.source or '')} -> "
+                    f"{output_range} {_quote(change.replacement or '')} "
+                    f"({change.rule or change.kind or 'preparation'})"
+                )
+        lines.extend(
+            [
+                "",
+                "Compiler trace",
+                f"  source hash: {trace.source_sha256}",
+                f"  boundary events: {len(trace.compiler_plan.get('boundaries', []))}",
+                f"  repairs: {len(trace.repairs)}",
+                "",
+            ]
+        )
+        semantic_boundaries = trace.compiler_plan.get("semantic_boundaries", [])
+        if isinstance(semantic_boundaries, (list, tuple)):
+            for boundary in semantic_boundaries:
+                if not isinstance(boundary, Mapping):
+                    continue
+                kind = boundary.get("kind")
+                position = boundary.get("position")
+                if isinstance(kind, str) and type(position) is int:
+                    lines.append(f"Semantic boundary: {kind} at spoken offset {position}")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _flow_segment_count(plan: FlowPlan) -> int:
+    return sum(len(unit.segments) for unit in plan.flow)
 
 
 def _format_plan_summary(plan: UtterancePlan, lines: list[str], *, details: bool) -> None:
@@ -248,13 +376,9 @@ def _format_segment(
     details: bool,
 ) -> list[str]:
     result = [f"    {number}. [{segment.language}] {_quote(segment.text)}"]
-    result.extend(
-        _format_pause(segment.pause_before, boundaries_by_id, edge="before", details=details)
-    )
+    result.extend(_format_pause(segment.pause_before, edge="before"))
     result.extend(_format_directives(segment.directives))
-    result.extend(
-        _format_pause(segment.pause_after, boundaries_by_id, edge="after", details=details)
-    )
+    result.extend(_format_pause(segment.pause_after, edge="after"))
     if details:
         result.extend(
             [
@@ -286,38 +410,16 @@ def _format_segment_tokens(plan: UtterancePlan, segment: PlanSegment) -> list[st
 
 
 def _format_pause(
-    pause: ResolvedPause,
-    boundaries_by_id: Mapping[str, BoundaryEvent],
-    *,
-    edge: Literal["before", "after"],
-    details: bool,
+    pause: PauseIntent | LegacyPause | None, *, edge: Literal["before", "after"]
 ) -> list[str]:
-    if not pause.events and pause.seconds == 0:
+    if pause is None:
         return []
-    causes = []
-    for event_id in pause.events:
-        boundary = boundaries_by_id.get(event_id)
-        cause = _boundary_description(boundary) if boundary is not None else f"boundary {event_id}"
-        if cause not in causes:
-            causes.append(cause)
-    description = " + ".join(causes)
-    line = f"       {edge}: pause {_format_seconds(pause.seconds)}"
-    if description:
-        line += f": {description}"
-    result = [line]
-    if details and pause.events:
-        result.append(f"         events: {', '.join(pause.events)}")
-        for event_id in pause.events:
-            boundary = boundaries_by_id.get(event_id)
-            if boundary is None:
-                continue
-            strength = f", strength {boundary.strength}" if boundary.strength else ""
-            attrs = f", attrs {_json(boundary.attrs)}" if boundary.attrs else ""
-            result.append(
-                f"         boundary {boundary.id}: kind {boundary.kind}, "
-                f"origin {boundary.origin}{strength}{attrs}"
-            )
-    return result
+    if isinstance(pause, LegacyPause):
+        if pause.seconds == 0 and not pause.events:
+            return []
+        return [f"       {edge}: legacy pause {pause.seconds:g}s"]
+    value = f"timed {pause.time}" if pause.type == "timed" else pause.type
+    return [f"       {edge}: pause {value}"]
 
 
 def _boundary_description(boundary: BoundaryEvent) -> str:

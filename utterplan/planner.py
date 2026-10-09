@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
+from collections.abc import Mapping
 from dataclasses import asdict, replace
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -9,7 +11,7 @@ if TYPE_CHECKING:
     from .compiler import CompileResult, PreparationTrace
 
 from .attempts import PlanDraft, PlanningAttempt, PlanningAttemptStatus, planning_attempt_id
-from .config import PauseConfig, PlannerConfig, parse_duration
+from .config import PauseConfig, PlannerConfig
 from .directives import resolve_directives
 from .exceptions import ConfigurationError, PlanningError, PlanRenderabilityError
 from .language import LanguageRun, build_language_runs, language_lookup_key, spans_from_annotations
@@ -18,6 +20,7 @@ from .model import (
     AnnotationSpan,
     BoundaryEvent,
     Diagnostic,
+    FlowPlan,
     LinguisticRun,
     Marker,
     PlanSegment,
@@ -32,7 +35,7 @@ from .parsers import (
     SSMDDocumentParser,
     effective_sequence_fallback_mode,
 )
-from .pauses import boundary_is_active, resolve_pauses
+from .pauses import boundary_is_active, resolve_pause_intents
 from .preparation import IdentityTextPreparer, SourceToSpokenMap, SpokenformTextPreparer
 from .progress import PlannerProgressEvent, ProgressCallback, _notify_progress
 from .renderability import RenderabilityIssue, RenderabilityReport, preflight_segments
@@ -77,8 +80,13 @@ class UtterancePlanner:
             raise PlanRenderabilityError(
                 attempt.renderability.issues, mode=attempt.renderability_mode
             )
-        plan = attempt.candidate.to_plan()
-        return CompileResult(plan=plan, diagnostics=plan.diagnostics, trace=preparation_trace)
+        internal_plan = attempt.candidate.to_plan()
+        from .flow_projection import project_compiler_plan
+
+        plan = project_compiler_plan(internal_plan)
+        return CompileResult(
+            plan=plan, diagnostics=internal_plan.diagnostics, trace=preparation_trace
+        )
 
     def compile_attempt(
         self,
@@ -101,7 +109,7 @@ class UtterancePlanner:
         config: PlannerConfig | None = None,
         unit: str | None = None,
         on_progress: ProgressCallback | None = None,
-    ) -> UtterancePlan:
+    ) -> FlowPlan:
         """Return a canonical semantic plan, optionally reporting synchronous progress.
 
         The callback is operational only and cannot affect the plan. Keep handlers
@@ -131,7 +139,7 @@ class UtterancePlanner:
         _notify_progress(on_progress, PlannerProgressEvent(kind="phase.started", phase="parse"))
         parsed = self._parse(text, config)
         _notify_progress(on_progress, PlannerProgressEvent(kind="phase.completed", phase="parse"))
-        pause_config = _effective_pause_config(config, parsed.header)
+        pause_config = config.pauses
         fallback_mode = effective_sequence_fallback_mode(parsed.header)
         document_language = parsed.document_language or config.language
         preserve_language_tags = config.document_format == "ssmd"
@@ -394,7 +402,7 @@ class UtterancePlanner:
             semantic_boundaries
         )
         boundaries = _relink_semantic_pause_events(boundaries, semantic_id_map)
-        segments = resolve_pauses(segments, boundaries, pause_config)
+        segments = resolve_pause_intents(segments, boundaries, pause_config)
         markers = tuple(_map_marker(marker, prepared.source_map) for marker in parsed.markers)
         segment_tuple = tuple(segments)
         units = make_units(
@@ -475,7 +483,9 @@ class UtterancePlanner:
             renderability_mode=config.renderability_mode,
         )
         preparation_trace = (
-            _make_preparation_trace(parsed, prepared, plan, document_language, fallback_mode)
+            _make_preparation_trace(
+                parsed, prepared, plan, document_language, fallback_mode, config, attempt
+            )
             if trace
             else None
         )
@@ -516,6 +526,8 @@ def _make_preparation_trace(
     plan: UtterancePlan,
     document_language: str,
     fallback_mode: Literal["spell", "preserve"],
+    config: PlannerConfig,
+    attempt: PlanningAttempt,
 ) -> PreparationTrace:
     from .compiler import PreparationChange, PreparationTrace, PreparationTraceUnit
 
@@ -572,55 +584,46 @@ def _make_preparation_trace(
                 warnings=tuple(parsed.warnings) + prepared.info.warnings,
             )
         )
+    structural_to_spoken = tuple(
+        prepared.source_map.map_source_span(index, index)[0]
+        for index in range(len(parsed.structural_text) + 1)
+    )
+    spoken_to_structural = tuple(
+        prepared.source_map.map_output_span(index, index)[0]
+        for index in range(len(plan.texts.spoken) + 1)
+    )
+    warnings = tuple(dict.fromkeys((*plan.warnings, *parsed.warnings, *prepared.info.warnings)))
     return PreparationTrace(
         document_language=document_language,
         sequence_fallback_mode=fallback_mode,
-        diagnostics=plan.diagnostics,
+        diagnostics=attempt.diagnostics,
         units=tuple(trace_units),
+        source_sha256="sha256:" + hashlib.sha256(parsed.source_text.encode("utf-8")).hexdigest(),
+        source_text=parsed.source_text,
+        structural_text=parsed.structural_text,
+        spoken_text=plan.texts.spoken,
+        config=_trace_plain(_config_dict(config)),
+        structural_to_spoken=structural_to_spoken,
+        spoken_to_structural=spoken_to_structural,
+        source_spans=tuple(_trace_plain(asdict(item)) for item in parsed.text_spans),
+        compiler_plan=plan.to_dict(),
+        renderability=_trace_plain(asdict(attempt.renderability)),
+        repairs=tuple(_trace_plain(asdict(item)) for item in attempt.repairs),
+        warnings=warnings,
     )
 
 
-def _effective_pause_config(config: PlannerConfig, header: dict[str, Any]) -> PauseConfig:
-    values: dict[str, Any] = {"mode": config.pauses.mode}
-    values.update(
-        {
-            name: getattr(config.pauses, name)
-            for name in (
-                "weak",
-                "clause",
-                "sentence",
-                "paragraph",
-                "parenthetical",
-                "voice_change",
-                "enabled",
-            )
-        }
-    )
-    header_defaults = header.get("pause_defaults") if isinstance(header, dict) else None
-    if isinstance(header_defaults, dict):
-        for name, value in header_defaults.items():
-            if name == "enabled" and isinstance(value, bool):
-                values[name] = value
-            elif name != "enabled":
-                try:
-                    values[name] = parse_duration(value, field_name=f"pause_defaults.{name}")
-                except ConfigurationError:
-                    continue
-    if config.ssmd.pause_overrides:
-        for name, value in config.ssmd.pause_overrides.items():
-            values[name] = (
-                bool(value)
-                if name == "enabled"
-                else parse_duration(value, field_name=f"ssmd.pause_overrides.{name}")
-            )
-    return PauseConfig(**values)
+def _trace_plain(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _trace_plain(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_trace_plain(item) for item in value]
+    return value
 
 
 def _config_dict(config: PlannerConfig) -> dict[str, Any]:
     result = asdict(config)
     result["language_aliases"] = dict(config.language_aliases)
-    if result.get("ssmd", {}).get("pause_overrides") is not None:
-        result["ssmd"]["pause_overrides"] = dict(config.ssmd.pause_overrides or {})
     return result
 
 
