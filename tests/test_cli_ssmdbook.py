@@ -429,3 +429,42 @@ def test_report_path_collision_with_plan_output_is_preflighted(
     assert result == 2
     assert "report path collides with plan output" in captured.err
     assert not output_dir.exists()
+
+
+def test_compile_book_localizes_fallback_boundaries_with_default_settings(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "fallback-boundaries.ssmdbook"
+    _write_book(
+        root,
+        (5, 6),
+        contents={
+            5: _ssmd('[alpha]{emphasis="strong"}—beta'),
+            6: _ssmd('alpha—[beta]{emphasis="strong"}'),
+        },
+    )
+
+    result = main(["compile-book", str(root), "--chapters", "5-6"])
+    capsys.readouterr()
+
+    assert result == 0
+    output_dir = root / "utterplan"
+    report = _report(output_dir / "compile-report.toml")
+    assert report["requested"] == 2
+    assert report["written"] == 2
+    assert report["failed"] == 0
+    assert report["skipped"] == 0
+    assert report["complete"] is True
+
+    for number, expected_surface in ((5, "alpha"), (6, "beta")):
+        plan_path = output_dir / f"chapter-{number:04d}.utterplan.toml"
+        assert plan_path.exists()
+        plan = FlowPlan.load(plan_path)
+        assert plan.linguistics[0].provider == "fallback"
+        surfaces = {
+            segment.text[token.start : token.end]
+            for unit in plan.flow
+            for segment in unit.segments
+            for token in segment.tokens
+        }
+        assert expected_surface in surfaces

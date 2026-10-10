@@ -21,6 +21,7 @@ def project_compiler_plan(plan: UtterancePlan) -> FlowPlan:
     segments_by_id = {segment.id: segment for segment in plan.segments}
     markers_by_id = {marker.id: marker for marker in plan.markers}
     headings = _headings_by_segment(plan)
+    token_providers = _token_providers(plan)
     markers_by_segment: dict[str, list[tuple[int, int, str]]] = {}
 
     for unit in plan.units:
@@ -51,9 +52,9 @@ def project_compiler_plan(plan: UtterancePlan) -> FlowPlan:
             )
 
     flow: list[FlowUnit] = []
-    for unit in plan.units:
+    for flow_index, unit in enumerate(plan.units):
         unit_segments: list[FlowSegment] = []
-        for segment_id in unit.segment_ids:
+        for segment_index, segment_id in enumerate(unit.segment_ids):
             segment = segments_by_id.get(segment_id)
             if segment is None:
                 raise PlanValidationError(
@@ -68,7 +69,12 @@ def project_compiler_plan(plan: UtterancePlan) -> FlowPlan:
                     pause_before=pause_before,
                     pause_after=pause_after,
                     directives=segment.directives,
-                    tokens=_tokens_for_segment(plan, segment),
+                    tokens=_tokens_for_segment(
+                        plan,
+                        segment,
+                        token_providers,
+                        f"$.flow[{flow_index}].segments[{segment_index}].tokens",
+                    ),
                     markers=tuple(
                         name
                         for _position, _marker_index, name in sorted(
@@ -105,7 +111,12 @@ def _pause(value: Any, field: str) -> PauseIntent | None:
     return value
 
 
-def _tokens_for_segment(plan: UtterancePlan, segment: Any) -> tuple[TokenView, ...]:
+def _tokens_for_segment(
+    plan: UtterancePlan,
+    segment: Any,
+    token_providers: tuple[str | None, ...],
+    projection_path: str,
+) -> tuple[TokenView, ...]:
     result: list[TokenView] = []
     spoken = plan.texts.spoken
     for token_index in segment.token_indices:
@@ -127,24 +138,42 @@ def _tokens_for_segment(plan: UtterancePlan, segment: Any) -> tuple[TokenView, .
             continue
         is_whole = start == token.spoken_start and end == token.spoken_end
         surface = spoken[start:end]
+        provider = token_providers[token_index]
         if not is_whole:
-            prefix = token.text[: start - token.spoken_start]
-            suffix = token.text[end - token.spoken_start :]
-            if _has_word_character(prefix) and _has_word_character(surface):
+            relative_start = start - token.spoken_start
+            relative_end = end - token.spoken_start
+            prefix = token.text[:relative_start]
+            suffix = token.text[relative_end:]
+            if provider == "fallback":
+                split_at_start = _splits_alphanumeric_run(token.text, relative_start)
+                split_at_end = _splits_alphanumeric_run(token.text, relative_end)
+            else:
+                split_at_start = _has_word_character(prefix) and _has_word_character(surface)
+                split_at_end = _has_word_character(suffix) and _has_word_character(surface)
+            if split_at_start:
                 raise PlanValidationError(
-                    "compiler segment splits a lexical token at its start",
+                    f"compiler segment {segment.id} "
+                    f"[{segment.spoken_start}:{segment.spoken_end}] splits token "
+                    f"{token_index} [{token.spoken_start}:{token.spoken_end}] at its start",
                     code="token.segment_split",
+                    path=projection_path,
                 )
-            if _has_word_character(suffix) and _has_word_character(surface):
+            if split_at_end:
                 raise PlanValidationError(
-                    "compiler segment splits a lexical token at its end",
+                    f"compiler segment {segment.id} "
+                    f"[{segment.spoken_start}:{segment.spoken_end}] splits token "
+                    f"{token_index} [{token.spoken_start}:{token.spoken_end}] at its end",
                     code="token.segment_split",
+                    path=projection_path,
                 )
             if not _has_word_character(surface):
                 # Punctuation-only fragments at semantic boundaries remain in text, not token facts.
                 continue
         lemma = token.lemma
-        if not is_whole and lemma == token.text.casefold():
+        if not is_whole and (
+            lemma == token.text.casefold()
+            or (provider == "fallback" and lemma == token.text.lower())
+        ):
             lemma = surface.casefold()
         result.append(
             TokenView(
@@ -161,6 +190,22 @@ def _tokens_for_segment(plan: UtterancePlan, segment: Any) -> tuple[TokenView, .
 
 def _has_word_character(value: str) -> bool:
     return any(character.isalnum() for character in value)
+
+
+def _splits_alphanumeric_run(value: str, position: int) -> bool:
+    return (
+        0 < position < len(value)
+        and value[position - 1].isalnum()
+        and value[position].isalnum()
+    )
+
+
+def _token_providers(plan: UtterancePlan) -> tuple[str | None, ...]:
+    providers: list[str | None] = [None] * len(plan.tokens)
+    for run in plan.linguistic_runs:
+        for token_index in range(run.token_start, run.token_end):
+            providers[token_index] = run.provider
+    return tuple(providers)
 
 
 def _locate_segment(

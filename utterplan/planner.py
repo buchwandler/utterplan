@@ -1221,18 +1221,18 @@ def _split_run(text: str, language: str) -> list[Any]:
     ):
         return [_FallbackSplit(0, len(text), 0, 0, text)]
     return _repair_quote_boundaries(_split_closing_quote_boundaries(valid, text), text)
-
-
 def _split_closing_quote_boundaries(items: list[Any], text: str) -> list[Any]:
     pattern = re.compile(r'[.!?]["\'»”’]+\s+(?=[A-ZÄÖÜÀ-Þ])')
     repaired: list[Any] = []
     for item in items:
-        start = int(item.char_start)
+        item_start = int(item.char_start)
+        item_end = int(item.char_end)
+        start = item_start
         sentence = int(getattr(item, "sentence_idx", 0) or 0)
         paragraph = int(getattr(item, "paragraph_idx", 0) or 0)
-        for match in pattern.finditer(text[start : int(item.char_end)]):
-            end = start + match.start() + len(match.group(0).rstrip())
-            if end <= start or end >= int(item.char_end):
+        for match in pattern.finditer(text[item_start:item_end]):
+            end = item_start + match.start() + len(match.group(0).rstrip())
+            if end <= start or end >= item_end:
                 continue
             repaired.append(
                 _FallbackSplit(
@@ -1244,15 +1244,15 @@ def _split_closing_quote_boundaries(items: list[Any], text: str) -> list[Any]:
                 )
             )
             sentence += 1
-            start += match.end()
-        if start < int(item.char_end):
+            start = item_start + match.end()
+        if start < item_end:
             repaired.append(
                 _FallbackSplit(
                     start,
-                    int(item.char_end),
+                    item_end,
                     paragraph,
                     sentence,
-                    text[start : int(item.char_end)],
+                    text[start:item_end],
                 )
             )
     return repaired

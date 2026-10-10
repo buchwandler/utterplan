@@ -2,11 +2,22 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from utterplan import FlowPlan, PauseConfig, PlannerConfig, UtterancePlanner, compile_document
+from utterplan import (
+    FlowPlan,
+    LinguisticsConfig,
+    PauseConfig,
+    PlannerConfig,
+    UtterancePlanner,
+    compile_document,
+)
+from utterplan.exceptions import PlanValidationError
+from utterplan.flow_projection import _token_providers, _tokens_for_segment
 from utterplan.migrations.v4_to_v5 import migrate_v4_to_v5
+from utterplan.model import LinguisticRun, TokenAnnotation
 
 
 def _segments(plan: FlowPlan):
@@ -95,3 +106,103 @@ def test_fresh_compile_localizes_a_token_cut_by_ssmd_semantics() -> None:
     for segment in segments:
         for token in segment.tokens:
             assert segment.text[token.start : token.end]
+
+
+def _project_partial_token(
+    text: str,
+    start: int,
+    end: int,
+    *,
+    provider: str = "fallback",
+    lemma: str | None = None,
+):
+    token = TokenAnnotation(0, len(text), text, lemma=lemma)
+    plan = SimpleNamespace(
+        texts=SimpleNamespace(spoken=text),
+        tokens=(token,),
+        linguistic_runs=(LinguisticRun("language-0001", provider, 0, 1),),
+    )
+    segment = SimpleNamespace(
+        id="seg-000123",
+        language="en-US",
+        spoken_start=start,
+        spoken_end=end,
+        token_indices=(0,),
+    )
+    return _tokens_for_segment(
+        plan,
+        segment,
+        _token_providers(plan),
+        "$.flow[0].segments[0].tokens",
+    )
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_surface"),
+    (
+        ('[alpha]{emphasis="strong"}—beta', "alpha"),
+        ('alpha—[beta]{emphasis="strong"}', "beta"),
+    ),
+)
+def test_fresh_compile_localizes_fallback_tokens_at_internal_punctuation(
+    body: str, expected_surface: str
+) -> None:
+    source = f'---\nssmd_version: "0.9"\nlanguage: en-US\n---\n{body}\n'
+    result = compile_document(
+        source,
+        input_format="ssmd",
+        config=PlannerConfig(
+            language="en-US",
+            document_format="ssmd",
+            text_preparation="identity",
+            linguistics=LinguisticsConfig(use_spacy=False),
+        ),
+    )
+
+    assert result.plan.linguistics[0].provider == "fallback"
+    segments = _segments(result.plan)
+    assert any(
+        segment.text[token.start : token.end] == expected_surface
+        for segment in segments
+        for token in segment.tokens
+    )
+    for segment in segments:
+        assert all(segment.text[token.start : token.end] for token in segment.tokens)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "split_side"),
+    ((0, 3, "end"), (2, 5, "start")),
+)
+def test_fallback_provider_rejects_true_alphanumeric_splits_with_coordinates(
+    start: int, end: int, split_side: str
+) -> None:
+    with pytest.raises(PlanValidationError) as exc_info:
+        _project_partial_token("hello", start, end, lemma="hello")
+
+    error = exc_info.value
+    assert error.code == "token.segment_split"
+    assert error.path == "$.flow[0].segments[0].tokens"
+    assert f"segment seg-000123 [{start}:{end}]" in str(error)
+    assert f"token 0 [0:5] at its {split_side}" in str(error)
+
+
+@pytest.mark.parametrize("provider", ("spacy", "unknown"))
+def test_nonfallback_provider_keeps_punctuation_connected_partial_tokens_strict(
+    provider: str,
+) -> None:
+    with pytest.raises(PlanValidationError) as exc_info:
+        _project_partial_token("alpha—beta", 0, 5, provider=provider, lemma="alpha—beta")
+
+    assert exc_info.value.code == "token.segment_split"
+
+
+def test_fallback_partial_default_lemmas_are_casefolded_per_fragment() -> None:
+    text = "Straße—Bahn"
+    default_lemma = text.lower()
+
+    left = _project_partial_token(text, 0, 6, lemma=default_lemma)
+    right = _project_partial_token(text, 7, 11, lemma=default_lemma)
+
+    assert [token.lemma for token in left] == ["strasse"]
+    assert [token.lemma for token in right] == ["bahn"]

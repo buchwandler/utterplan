@@ -2,6 +2,7 @@ import pytest
 
 from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
 from utterplan import PauseConfig, PauseIntent, PlannerConfig, PlanningError
+from utterplan.planner import _FallbackSplit, _split_closing_quote_boundaries
 
 
 def test_plain_sentences_paragraphs_and_pauses():
@@ -268,3 +269,17 @@ def test_point_audio_at_document_start_uses_following_language_context() -> None
     media_index = plan.segments.index(media)
     assert media_index == 0
     assert plan.segments[media_index + 1].spoken_start == media.spoken_start
+
+
+def test_quote_boundary_repair_preserves_ranges_after_multiple_closing_quotes() -> None:
+    text = 'He said "One." Next. She said "Two." Then. They said "Three." Finally.'
+    initial = _FallbackSplit(0, len(text), 0, 0, text)
+
+    segments = _split_closing_quote_boundaries([initial], text)
+
+    assert len(segments) == 4
+    assert all(text[item.char_start : item.char_end] == item.text for item in segments)
+    assert all(
+        not text[left.char_end : right.char_start].strip()
+        for left, right in zip(segments, segments[1:], strict=False)
+    )
