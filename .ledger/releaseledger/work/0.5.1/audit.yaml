@@ -1,0 +1,72 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.5.1
+git_base_ref: v0.5.0
+git_base_sha: d188cab06076e60fc77d42a27f504f2613ca3fc9
+git_head_ref: HEAD
+git_head_sha: 1ae820690dfdfb7f9c5da46ff426a3513fb1ea94
+git_range: d188cab06076e60fc77d42a27f504f2613ca3fc9..1ae820690dfdfb7f9c5da46ff426a3513fb1ea94
+commit_count: 2
+rows:
+  - sha: f143f17dff20963d4285a8142014ecfbde2821ee
+    source_ref: git:f143f17dff20963d4285a8142014ecfbde2821ee
+    short_sha: f143f17
+    changed_paths:
+      - tests/test_cli_ssmdbook.py
+      - tests/test_flow_compilation.py
+      - tests/test_planner.py
+      - utterplan/flow_projection.py
+      - utterplan/planner.py
+    stats:
+      files_changed: 5
+      insertions: 232
+      deletions: 22
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: fix blocker"
+  - sha: 1ae820690dfdfb7f9c5da46ff426a3513fb1ea94
+    source_ref: git:1ae820690dfdfb7f9c5da46ff426a3513fb1ea94
+    short_sha: 1ae8206
+    changed_paths:
+      - docs/architecture.md
+      - docs/coordinate-spaces.md
+      - docs/debugging.md
+      - docs/format.md
+      - docs/python-api.md
+      - tests/migration/goldens/multilingual_preparation.json
+      - tests/migration/goldens/ssmd_break.json
+      - tests/test_cli.py
+      - tests/test_cli_batch.py
+      - tests/test_consumer_contract.py
+      - tests/test_flow_compilation.py
+      - tests/test_linguistics.py
+      - tests/test_planner.py
+      - tests/test_renderability_repair.py
+      - tests/test_segment_topology.py
+      - tests/test_segmentation_adapter.py
+      - tests/test_segmentation_recovery.py
+      - tests/test_sentence_topology.py
+      - tests/test_ssmd_09_parser.py
+      - tests/test_token_topology.py
+      - utterplan/flow_projection.py
+      - utterplan/planner.py
+      - utterplan/segmentation.py
+      - utterplan/token_topology.py
+    stats:
+      files_changed: 24
+      insertions: 2117
+      deletions: 301
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: robust sentence splitting"

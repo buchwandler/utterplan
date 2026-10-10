@@ -1,0 +1,64 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.5.1
+git_base_ref: d188cab06076e60fc77d42a27f504f2613ca3fc9
+git_base_sha: d188cab06076e60fc77d42a27f504f2613ca3fc9
+git_head_ref: 1ae820690dfdfb7f9c5da46ff426a3513fb1ea94
+git_head_sha: 1ae820690dfdfb7f9c5da46ff426a3513fb1ea94
+include_merges: nontrivial
+entries:
+  - kind: fixed
+    summary: "Fixed fallback token projection and sentence-boundary repair for punctuation-separated text"
+    status: accepted
+    source_refs:
+      - git:f143f17dff20963d4285a8142014ecfbde2821ee
+    paths:
+      - tests/test_cli_ssmdbook.py
+      - tests/test_flow_compilation.py
+      - tests/test_planner.py
+      - utterplan/flow_projection.py
+      - utterplan/planner.py
+    sources:
+      - git:f143f17dff20963d4285a8142014ecfbde2821ee
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: changed
+    summary: "Improved sentence topology with validated fallback recovery and token-edge safeguards"
+    status: accepted
+    source_refs:
+      - git:1ae820690dfdfb7f9c5da46ff426a3513fb1ea94
+    paths:
+      - docs/architecture.md
+      - docs/coordinate-spaces.md
+      - docs/debugging.md
+      - docs/format.md
+      - docs/python-api.md
+      - tests/migration/goldens/multilingual_preparation.json
+      - tests/migration/goldens/ssmd_break.json
+      - tests/test_cli.py
+      - tests/test_cli_batch.py
+      - tests/test_consumer_contract.py
+      - tests/test_flow_compilation.py
+      - tests/test_linguistics.py
+      - tests/test_planner.py
+      - tests/test_renderability_repair.py
+      - tests/test_segment_topology.py
+      - tests/test_segmentation_adapter.py
+      - tests/test_segmentation_recovery.py
+      - tests/test_sentence_topology.py
+      - tests/test_ssmd_09_parser.py
+      - tests/test_token_topology.py
+      - utterplan/flow_projection.py
+      - utterplan/planner.py
+      - utterplan/segmentation.py
+      - utterplan/token_topology.py
+    sources:
+      - git:1ae820690dfdfb7f9c5da46ff426a3513fb1ea94
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

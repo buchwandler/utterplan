@@ -1,0 +1,2950 @@
+ docs/architecture.md                               |   6 +
+ docs/coordinate-spaces.md                          |   4 +
+ docs/debugging.md                                  |   2 +
+ docs/format.md                                     |   6 +
+ docs/python-api.md                                 |   6 +
+ .../goldens/multilingual_preparation.json          |   4 +-
+ tests/migration/goldens/ssmd_break.json            |   2 +-
+ tests/test_cli.py                                  |  10 +-
+ tests/test_cli_batch.py                            |  12 +-
+ tests/test_consumer_contract.py                    |   7 +-
+ tests/test_flow_compilation.py                     |  24 +-
+ tests/test_linguistics.py                          |  19 +-
+ tests/test_planner.py                              |  53 +-
+ tests/test_renderability_repair.py                 |  51 +-
+ tests/test_segment_topology.py                     |  39 +-
+ tests/test_segmentation_adapter.py                 | 203 +++++
+ tests/test_segmentation_recovery.py                | 114 +++
+ tests/test_sentence_topology.py                    | 361 +++++++++
+ tests/test_ssmd_09_parser.py                       |  11 +-
+ tests/test_token_topology.py                       |  73 ++
+ utterplan/flow_projection.py                       |  21 +-
+ utterplan/planner.py                               | 441 ++++++-----
+ utterplan/segmentation.py                          | 847 +++++++++++++++++++++
+ utterplan/token_topology.py                        | 102 +++
+ 24 files changed, 2117 insertions(+), 301 deletions(-)
+
+diff --git a/docs/architecture.md b/docs/architecture.md
+index d1551d5..e48e56c 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -28,6 +28,12 @@ The dependency direction is from SSMD, spokenform, and phrasplit into UtterPlan,
+
+ `FlowPlan` is the current v5 executable contract: ordered `FlowUnit` objects each own ordered `FlowSegment` records. Segments include prepared text, effective language, local tokens, semantic pause intents, directives, markers, and optional heading metadata. `DocumentInfo` retains compact portable document information; `LinguisticProvenance` identifies providers without retaining their documents. UtterPlan ends before G2P. Engine/model selection, synthesis, and audio composition happen downstream.
+
++## Compiler-owned segmentation topology
++
++Segmentation has four distinct layers: parser-owned paragraph events define paragraph regions; PhraseSplit supplies advisory sentence-boundary proposals; UtterPlan validates those proposals and owns canonical paragraph, sentence, and private sentence-part spans in prepared spoken-text coordinates; renderer-required language, directive, pause, marker, and media cuts subdivide a part into final segments. Positive-width atomic media spans protect their interiors from automatic sentence/part boundaries; zero-width media events remain renderer operations, not parts. The public v5 `FlowPlan` contains only the resulting compact ordered flow—there is no serialized sentence-parts table.
++
++PhraseSplit failure or an invalid proposal batch falls back to deterministic, conservative terminal scanning. Unsafe automatic cuts inside provider-aware lexical content are merged or dropped before projection; the final flow-projection token-edge check remains defense in depth. Exact surface and non-whitespace coverage checks run before and after applicable repairs. This normalization is independent of `renderability_mode`: strict and repair compilation use the same topology, while renderability mode governs only the existing punctuation-repair policy. See the [coordinate-space contract](coordinate-spaces) for offset ownership.
++
+ ## SSMD and preparation
+
+ The document parser calls SSMD with `dialect="0.9"` for every SSMD source path, including unversioned fragments selected with `document_format="ssmd"`. UtterPlan does not parse SSMD 0.8 or migrate source. Older documents must first be converted with `ssmd migrate FILE --to 0.9`. The `utterplan migrate` command imports serialized legacy plans and applies schema migrations only.
+diff --git a/docs/coordinate-spaces.md b/docs/coordinate-spaces.md
+index 356a95f..d7baba7 100644
+--- a/docs/coordinate-spaces.md
++++ b/docs/coordinate-spaces.md
+@@ -19,4 +19,8 @@ Trace coordinates use Python string character boundaries (Unicode code points),
+ - `structural_to_spoken` maps structural character boundaries to spoken boundaries; `spoken_to_structural` maps spoken boundaries back to structural boundaries.
+ - `PreparationTraceUnit.source_start` / `source_end` address structural text. `PreparationChange.source_start` / `source_end` use structural coordinates; `output_start` / `output_end` use prepared spoken coordinates.
+
++## Compiler-only segmentation coordinates
++
++Paragraph, sentence, and sentence-part spans use half-open Python-character offsets into the prepared global `spoken_text`. PhraseSplit offsets are run-local and are translated to global spoken coordinates exactly once before validation. Renderer segments retain the exact `spoken_text[start:end]` slice; language-run edges and other required renderer cuts do not change their owning paragraph, sentence, or part index. These spans are compiler topology, not fields in the v5 flow. Segmentation diagnostics map their spoken ranges back to exact source coordinates through the compiler's source map.
++
+ Diagnostic source offsets use the exact original-source coordinate space. Diagnostic `line` and `column` values are 1-based; columns count Python characters from the start of a line. The trace retains all these maps and source evidence. The executable FlowPlan intentionally does not.
+diff --git a/docs/debugging.md b/docs/debugging.md
+index b4b5dde..b850577 100644
+--- a/docs/debugging.md
++++ b/docs/debugging.md
+@@ -17,6 +17,8 @@ utterplan inspect-trace chapter.trace.toml --preparation --boundaries
+
+ Safe punctuation-only repair is the default during compilation. If a semantic blocker prevents repair, the error includes source location, prepared fragment, spoken context, blocked repair reason, and a concrete next action; UtterPlan never guesses symbol pronunciation. Use `--renderability strict` to see safe repair opportunities without applying them. Batch compilation reports each repair and continues with later sources.
+
++Sentence segmentation is a compiler-integrity step, not a renderability repair. PhraseSplit is advisory: dependency failure or a malformed/partial proposal batch produces a `segmentation.phrasplit_*` diagnostic and triggers conservative fallback. Unsafe automatic token-edge candidates are dropped or merged before projection; exact text and non-whitespace coverage are checked in both strict and repair modes. Inspect compiler diagnostics with `compile --trace FILE` and `inspect-trace FILE --boundaries`; sentence-part topology itself is intentionally not persisted in v5.
++
+ Use `inspect --tokens` to inspect local `TokenView` values. Fallback analysis may leave POS, tag, and morphology unavailable. `explain --details` shows token spans relative to the owning segment and its flow hash. Token spans always slice `segment.text`; they are not offsets into the original source or another segment.
+
+ If spoken wording is wrong, inspect `FlowSegment.text`. If effective language is wrong, inspect the segment and `FlowPlan.linguistics`. If a pause seems missing, distinguish the semantic `PauseIntent` on the segment edge from the consumer's engine-specific timing policy. Exact authored timed breaks remain explicit; semantic strengths do not prescribe a duration.
+diff --git a/docs/format.md b/docs/format.md
+index 9277d47..3f5e0ee 100644
+--- a/docs/format.md
++++ b/docs/format.md
+@@ -24,6 +24,12 @@ text = "Hello world."
+ token.span = [[0, 5], [6, 12]]
+ ```
+
++## Compiler-only segmentation topology
++
++The compiler validates PhraseSplit proposals and owns paragraph, sentence, and sentence-part spans in spoken-text coordinates. Semicolon/context-safe colon boundaries and optional clause/parenthetical proposals may create renderer cuts; language, directive, pause, marker, and media subdivisions retain the owning sentence-part identity internally. If proposals are malformed or incomplete, deterministic fallback is used and non-whitespace text remains covered exactly.
++
++Sentence parts and their indices are deliberately absent from this v5 format. The `flow` contains only executable renderer segments and remains the compact public contract; no schema field, FlowPlan/FlowUnit/FlowSegment shape, or migration rule records private topology. Schema v5 is unchanged.
++
+ ## Executable flow
+
+ Each ordered `flow` entry is a `FlowUnit` with a stable local `hash` and one or more `segment` entries. A segment contains already-prepared speech `text`, an optional language override, local token columns, optional semantic `pause_before` / `pause_after` intents, typed renderer-neutral directives, markers, and an optional heading level. Language defaults to the root `language`; `unit` identifies paragraph or sentence grouping. Consumers render segments in the stored order and do not need compiler lookup tables or segment-ID joins.
+diff --git a/docs/python-api.md b/docs/python-api.md
+index 771b2fc..05d9df2 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -12,6 +12,12 @@ The Python defaults are deliberately spaCy-free and repair-first: `PlannerConfig
+ For an explicit contextual-G2P configuration, use `LinguisticsConfig(use_spacy=True, spacy_model="en_core_web_sm", require_spacy=True)`. The resulting plan records final pass-B token provenance in `linguistic_runs`; no provider document is retained.
+ spaCy enrichment is opt-in through the CLI's `--spacy auto` policy or an explicit `LinguisticsConfig` with a compatible local model. It may provide richer tokenization, POS tags, lemmas, and tags, but UtterPlan never downloads a model implicitly.
+
++## Sentence segmentation and private topology
++
++PhraseSplit is an advisory sentence-boundary provider, not an owner of compiler topology. UtterPlan validates each whole proposal batch, maps accepted run-local offsets once into prepared spoken-text coordinates, then recomputes paragraph and sentence indices from parser paragraph events and accepted boundaries. If PhraseSplit fails or returns malformed/incomplete coverage, deterministic conservative fallback preserves the text and emits diagnostics. Automatic cuts that divide provider-aware lexical content are discarded or merged; the final flow-projection token-edge check remains active.
++
++Semicolon and context-safe colon separators, plus optional trusted clause/parenthetical candidates, form private sentence parts. Renderer-required language, directive, pause, marker, and media cuts subdivide those parts without changing their indices. Exact surface and non-whitespace coverage validation runs in strict and repair renderability modes alike. Parts are not a public field: only the compact ordered v5 `flow` is serialized, and `unit="sentence"` groups by the recomputed sentence topology.
++
+ ## Canonical single-document compiler
+
+ `compile_document` is the shared semantic interpretation boundary for independent
+diff --git a/tests/migration/goldens/multilingual_preparation.json b/tests/migration/goldens/multilingual_preparation.json
+index 6c3f4e0..4ade997 100644
+--- a/tests/migration/goldens/multilingual_preparation.json
++++ b/tests/migration/goldens/multilingual_preparation.json
+@@ -63,8 +63,8 @@
+       "annotation_ids": []
+     },
+     {
+-      "text": "Bonjour.",
+-      "spoken_start": 6,
++      "text": " Bonjour.",
++      "spoken_start": 5,
+       "spoken_end": 14,
+       "language": "fr",
+       "paragraph": 0,
+diff --git a/tests/migration/goldens/ssmd_break.json b/tests/migration/goldens/ssmd_break.json
+index 14d938e..36aa27f 100644
+--- a/tests/migration/goldens/ssmd_break.json
++++ b/tests/migration/goldens/ssmd_break.json
+@@ -60,7 +60,7 @@
+       "language": "en-us",
+       "paragraph": 0,
+       "sentence": 0,
+-      "clause": 1,
++      "clause": 0,
+       "pause_before": {
+         "seconds": 0.0,
+         "events": []
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 0949add..41e0035 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -220,7 +220,7 @@ def test_compile_strict_renderability_reports_source_and_writes_no_plan(
+     assert "Automatic repair: safe;" in captured.err
+
+
+-def test_compile_repair_cli_reports_guaranteed_renderability(
++def test_compile_repair_cli_blocks_unattachable_punctuation_without_loss(
+     tmp_path: Path, capsys: pytest.CaptureFixture[str]
+ ) -> None:
+     source = tmp_path / "repair.txt"
+@@ -244,9 +244,11 @@ def test_compile_repair_cli_reports_guaranteed_renderability(
+     )
+
+     captured = capsys.readouterr()
+-    assert result == 0
+-    assert FlowPlan.load(output).flow
+-    assert "renderability: guaranteed; 1 punctuation segment repaired" in captured.err
++    assert result == 1
++    assert not output.exists()
++    assert "isolated punctuation became its own speech segment" in captured.err
++    assert "Prepared fragment: '.'" in captured.err
++    assert "Automatic repair: safe; remove the isolated punctuation-only segment." in captured.err
+
+
+ def test_top_level_version(capsys: pytest.CaptureFixture[str]) -> None:
+diff --git a/tests/test_cli_batch.py b/tests/test_cli_batch.py
+index cd9c6ea..87dd4b2 100644
+--- a/tests/test_cli_batch.py
++++ b/tests/test_cli_batch.py
+@@ -237,7 +237,7 @@ def test_compile_many_protects_existing_output_and_force_replaces_it(
+     )
+
+
+-def test_compile_many_default_repair_and_strict_mode_are_both_observable(
++def test_compile_many_repair_and_strict_modes_preserve_unattachable_punctuation(
+     tmp_path: Path, capsys: pytest.CaptureFixture[str]
+ ) -> None:
+     source = _write(tmp_path / "chapter.txt", "Hello.\n\n.\n\nWorld.")
+@@ -257,9 +257,13 @@ def test_compile_many_default_repair_and_strict_mode_are_both_observable(
+         ]
+     )
+     repair_output = capsys.readouterr()
+-    assert repair_result == 0
+-    assert "repaired at 3:1" in repair_output.err
+-    assert "removing the punctuation-only segment" in repair_output.err
++    assert repair_result == 1
++    assert "isolated punctuation became its own speech segment" in repair_output.err
++    assert "Prepared fragment: '.'" in repair_output.err
++    assert (
++        "Automatic repair: safe; remove the isolated punctuation-only segment." in repair_output.err
++    )
++    assert not (repair_dir / "chapter.utterplan.toml").exists()
+
+     strict_dir = tmp_path / "strict"
+     strict_result = main(
+diff --git a/tests/test_consumer_contract.py b/tests/test_consumer_contract.py
+index 88984f5..04e008f 100644
+--- a/tests/test_consumer_contract.py
++++ b/tests/test_consumer_contract.py
+@@ -128,8 +128,11 @@ def test_multilingual_and_sentence_units_remain_in_render_order() -> None:
+
+     rendered = _fake_renderer(plan)
+     assert [item[1] for item in rendered] == ["en-us", "fr"]
+-    assert len(plan.flow) == 1
+-    assert len(plan.flow[0].segments) == 2
++    assert len(plan.flow) == 2
++    assert [[segment.text for segment in unit.segments] for unit in plan.flow] == [
++        ["One."],
++        ["Bonjour."],
++    ]
+     assert_public_consumer_contract(plan)
+
+
+diff --git a/tests/test_flow_compilation.py b/tests/test_flow_compilation.py
+index be79757..4a14d0f 100644
+--- a/tests/test_flow_compilation.py
++++ b/tests/test_flow_compilation.py
+@@ -75,12 +75,24 @@ def test_fresh_compilation_converges_with_v4_migration_on_unambiguous_input(
+     ).plan
+     migrated = FlowPlan.from_dict(migrate_v4_to_v5(v4_plan))
+
+-    assert fresh.plan_id == migrated.plan_id
+-    assert fresh.flow == migrated.flow
+-    assert fresh.document == migrated.document
+-    assert fresh.linguistics == migrated.linguistics
+-    assert fresh.language == migrated.language
+-    assert fresh.unit == migrated.unit
++    if fixture_name == "multilingual":
++        # The compiler now preserves the inter-language whitespace on the right-hand
++        # renderer segment instead of dropping it at the run boundary.
++        assert fresh.flow != migrated.flow
++        assert [[segment.text for segment in unit.segments] for unit in fresh.flow] == [
++            ["Hello", " Bonjour."]
++        ]
++        assert fresh.document == migrated.document
++        assert fresh.linguistics == migrated.linguistics
++        assert fresh.language == migrated.language
++        assert fresh.unit == migrated.unit
++    else:
++        assert fresh.plan_id == migrated.plan_id
++        assert fresh.flow == migrated.flow
++        assert fresh.document == migrated.document
++        assert fresh.linguistics == migrated.linguistics
++        assert fresh.language == migrated.language
++        assert fresh.unit == migrated.unit
+
+
+ def test_fresh_compile_localizes_a_token_cut_by_ssmd_semantics() -> None:
+diff --git a/tests/test_linguistics.py b/tests/test_linguistics.py
+index c4e1eda..ad08dee 100644
+--- a/tests/test_linguistics.py
++++ b/tests/test_linguistics.py
+@@ -13,11 +13,9 @@ from utterplan import (
+     PlannerConfig,
+     UtterancePlan,
+ )
+-from utterplan.exceptions import PlanningError
+ from utterplan.explain import format_explanation
+ from utterplan.language import LanguageRun
+ from utterplan.linguistics import LinguisticResourcePool, analyze_run_analyses
+-from utterplan.planner import _split_run
+
+
+ class FakeProviderDoc(list):
+@@ -209,7 +207,7 @@ def test_clausal_boundaries_reuse_provider_document(monkeypatch):
+     assert len(docs) == 1
+     assert detected == [(source, docs[-1])]
+     boundary = next(item for item in plan.boundaries if item.kind == "clausal_comma")
+-    assert boundary.position == source.index(",")
++    assert boundary.position == source.index(",") + 2
+     semantic = next(item for item in plan.semantic_boundaries if item.kind == "clause")
+     assert semantic.position == source.index(",") + 2
+     assert semantic.attrs["detector_start"] == source.index(",")
+@@ -274,8 +272,8 @@ def test_semantic_clause_is_independent_of_pause_activation(monkeypatch):
+     assert [(item.position, item.kind, item.id) for item in clauses] == [
+         (source.index(",") + 2, "clause", "semantic-boundary-000000")
+     ] * 3
+-    assert len(plans[0].segments) == 1
+-    assert plans[0].segments[0].spoken_start < clauses[0].position < plans[0].segments[0].spoken_end
++    assert len(plans[0].segments) == 2
++    assert plans[0].segments[0].spoken_end == clauses[0].position
+     assert not any(
+         segment.pause_before is not None or segment.pause_after is not None
+         for segment in plans[0].segments
+@@ -331,17 +329,6 @@ def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):
+     assert not any(item.kind == "clause" for item in plan.semantic_boundaries)
+
+
+-def test_segmentation_type_error_is_not_a_whole_document_fallback(monkeypatch):
+-    import phrasplit
+-
+-    def broken_split(*args, **kwargs):
+-        raise TypeError("invalid nlp integration")
+-
+-    monkeypatch.setattr(phrasplit, "split_with_offsets", broken_split)
+-    with pytest.raises(PlanningError, match="sentence segmentation integration failed"):
+-        _split_run("One sentence. Two sentences.", "en-us")
+-
+-
+ def _fake_spacy_plan(
+     monkeypatch, *, tag: str = "VBP", morph: str = "Tense=Pres|VerbForm=Fin"
+ ) -> UtterancePlan:
+diff --git a/tests/test_planner.py b/tests/test_planner.py
+index 024ce98..7f6ffd5 100644
+--- a/tests/test_planner.py
++++ b/tests/test_planner.py
+@@ -2,7 +2,7 @@ import pytest
+
+ from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+ from utterplan import PauseConfig, PauseIntent, PlannerConfig, PlanningError
+-from utterplan.planner import _FallbackSplit, _split_closing_quote_boundaries
++from utterplan.exceptions import PlanValidationError
+
+
+ def test_plain_sentences_paragraphs_and_pauses():
+@@ -17,6 +17,28 @@ def test_plain_sentences_paragraphs_and_pauses():
+     assert plan.segments[1].pause_after == PauseIntent("paragraph")
+
+
++def test_sentence_part_edges_split_renderer_segments_and_auto_pause_at_part_boundary():
++    source = "Before; after."
++    plans = [
++        UtterancePlanner(
++            PlannerConfig(
++                language="en-us",
++                text_preparation="identity",
++                pauses=PauseConfig(mode=mode, enabled=enabled),
++            )
++        ).plan(source)
++        for mode, enabled in (("tts", True), ("auto", True), ("auto", False))
++    ]
++    expected_texts = ["Before; ", "after."]
++    for plan in plans:
++        assert [segment.text for segment in plan.segments] == expected_texts
++        assert [segment.clause for segment in plan.segments] == [0, 1]
++        assert plan.semantic_boundaries[0].position == len("Before; ")
++    assert plans[0].segments[0].pause_after is None
++    assert plans[1].segments[0].pause_after == PauseIntent("clause")
++    assert plans[2].segments[0].pause_after is None
++
++
+ def test_ssmd_preparation_and_explicit_directives():
+     plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
+         '[tomato]{ph="təˈmeɪtoʊ"}'
+@@ -98,7 +120,7 @@ def test_unrepresentable_audio_topology_is_rejected(source: str, message: str) -
+         planner.plan(source)
+
+
+-def test_adjacent_audio_annotations_are_distinct_and_supported() -> None:
++def test_adjacent_audio_annotations_report_required_token_conflict() -> None:
+     planner = UtterancePlanner(
+         PlannerConfig(
+             language="en-us",
+@@ -106,18 +128,11 @@ def test_adjacent_audio_annotations_are_distinct_and_supported() -> None:
+             text_preparation="identity",
+         )
+     )
+-    plan = planner.plan('[first]{src="same.wav"}[second]{src="same.wav"}')
+-    audio_segments = [segment for segment in plan.segments if segment.directives.audio is not None]
+
+-    assert len(audio_segments) == 2
+-    first_audio = audio_segments[0].directives.audio
+-    second_audio = audio_segments[1].directives.audio
++    with pytest.raises(PlanValidationError) as exc_info:
++        planner.plan('[first]{src="same.wav"}[second]{src="same.wav"}')
+
+-    assert first_audio is not None
+-    assert second_audio is not None
+-    assert first_audio.src == second_audio.src
+-    assert audio_segments[0].id != audio_segments[1].id
+-    assert audio_segments[0].spoken_start < audio_segments[1].spoken_start
++    assert exc_info.value.code == "segmentation.required_cut_conflict"
+
+
+ def test_audio_fallback_is_atomic_across_sentence_segmentation() -> None:
+@@ -269,17 +284,3 @@ def test_point_audio_at_document_start_uses_following_language_context() -> None
+     media_index = plan.segments.index(media)
+     assert media_index == 0
+     assert plan.segments[media_index + 1].spoken_start == media.spoken_start
+-
+-
+-def test_quote_boundary_repair_preserves_ranges_after_multiple_closing_quotes() -> None:
+-    text = 'He said "One." Next. She said "Two." Then. They said "Three." Finally.'
+-    initial = _FallbackSplit(0, len(text), 0, 0, text)
+-
+-    segments = _split_closing_quote_boundaries([initial], text)
+-
+-    assert len(segments) == 4
+-    assert all(text[item.char_start : item.char_end] == item.text for item in segments)
+-    assert all(
+-        not text[left.char_end : right.char_start].strip()
+-        for left, right in zip(segments, segments[1:], strict=False)
+-    )
+diff --git a/tests/test_renderability_repair.py b/tests/test_renderability_repair.py
+index 231ac59..8b323a0 100644
+--- a/tests/test_renderability_repair.py
++++ b/tests/test_renderability_repair.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+
+ from dataclasses import replace
++from typing import Literal
+
+ import pytest
+
+@@ -72,26 +73,20 @@ def _assess(
+     return replace(issue, repair_assessment=assessment)
+
+
+-def test_repair_is_the_default_and_records_a_source_located_guarantee() -> None:
++def test_repair_mode_preserves_isolated_punctuation_instead_of_dropping_content() -> None:
+     config = PlannerConfig(language="en-US", text_preparation="identity")
+-    plan = UtterancePlanner(config).plan("Hello.\n\n.\n\nWorld.")
+-    repeated = UtterancePlanner(config).plan("Hello.\n\n.\n\nWorld.")
++    planner = UtterancePlanner(config)
++    attempt = planner.compile_attempt("Hello.\n\n.\n\nWorld.")
++    repeated = UtterancePlanner(config).compile_attempt("Hello.\n\n.\n\nWorld.")
+
+     assert config.renderability_mode == "repair"
+-    assert repeated.plan_id == plan.plan_id
+-    assert repeated.to_dict() == plan.to_dict()
+-    assert [segment.text for segment in plan.segments] == ["Hello.", "World."]
+-    assert plan.document_metadata["planning"]["renderability"] == {
+-        "mode": "repair",
+-        "checked_segments": 3,
+-        "repair_count": 1,
+-        "guaranteed": True,
+-    }
+-    repairs = [item for item in plan.diagnostics if item.code == "planning.renderability.repaired"]
+-    assert len(repairs) == 1
+-    assert "by removing the punctuation-only segment" in repairs[0].message
+-    assert repairs[0].line == 3
+-    assert plan.texts.spoken == "Hello.\n\n.\n\nWorld."
++    assert attempt.status == "blocked"
++    assert repeated.attempt_id == attempt.attempt_id
++    assert [segment.text for segment in attempt.candidate.segments] == ["Hello.", ".", "World."]
++    assert attempt.candidate.document_metadata["planning"]["renderability"]["guaranteed"] is False
++    assert not any(item.code == "planning.renderability.repaired" for item in attempt.diagnostics)
++    assert attempt.renderability.issues[0].line == 3
++    assert attempt.candidate.texts.spoken == "Hello.\n\n.\n\nWorld."
+
+
+ def test_default_repairs_exact_comma_space_with_isolated_planner_topology(
+@@ -362,18 +357,18 @@ def test_strict_attempt_retains_blocked_candidate_and_compile_still_raises() ->
+     assert error.value.issues == attempt.renderability.issues
+
+
+-def test_safe_repair_attempt_returns_a_canonical_plan() -> None:
++def test_unattachable_punctuation_remains_in_a_blocked_repair_attempt() -> None:
+     config = PlannerConfig(language="en-US", text_preparation="identity")
+     attempt = UtterancePlanner(config).compile_attempt("Hello.\n\n.\n\nWorld.")
+
+-    assert attempt.status == "repaired"
+-    assert attempt.ok
+-    assert len(attempt.repairs) == 1
+-    assert attempt.repairs[0].repair_assessment is not None
+-    assert attempt.repairs[0].repair_assessment.safe
+-    plan = attempt.candidate.to_plan()
+-    plan.validate()
+-    assert [segment.text for segment in plan.segments] == ["Hello.", "World."]
++    assert attempt.status == "blocked"
++    assert not attempt.ok
++    assert attempt.repairs == ()
++    assert attempt.renderability.issues[0].repair_assessment is not None
++    assert attempt.renderability.issues[0].repair_assessment.safe
++    assert [segment.text for segment in attempt.candidate.segments] == ["Hello.", ".", "World."]
++    with pytest.raises(ValueError, match="blocked planning-attempt draft"):
++        attempt.candidate.to_plan()
+
+
+ def test_unsafe_repair_attempt_is_blocked_and_draft_structure_is_checked() -> None:
+@@ -405,12 +400,12 @@ def test_unsafe_repair_attempt_is_blocked_and_draft_structure_is_checked() -> No
+     ("source", "mode", "expected_status"),
+     [
+         ("Ready.", "strict", "renderable"),
+-        ("Hello.\n\n.\n\nWorld.", "repair", "repaired"),
++        ("Hello.\n\n.\n\nWorld.", "repair", "blocked"),
+         ("€", "strict", "blocked"),
+     ],
+ )
+ def test_planning_attempt_toml_roundtrips_all_outcomes_and_stays_noncanonical(
+-    source: str, mode: str, expected_status: str
++    source: str, mode: Literal["strict", "repair"], expected_status: str
+ ) -> None:
+     config = PlannerConfig(
+         language="en-US",
+diff --git a/tests/test_segment_topology.py b/tests/test_segment_topology.py
+index 434f711..f09ac36 100644
+--- a/tests/test_segment_topology.py
++++ b/tests/test_segment_topology.py
+@@ -186,6 +186,27 @@ def test_explicit_pause_stays_between_speech_segments() -> None:
+     assert stop.id != following.id
+
+
++def test_positive_audio_spans_protect_sentence_and_part_interiors() -> None:
++    whole_audio = _plan('[Before; after]{src="clip.wav"}')
++    assert len(whole_audio.segments) == 1
++    assert whole_audio.segments[0].text == "Before; after"
++    assert whole_audio.segments[0].clause == 0
++    assert whole_audio.segments[0].directives.audio is not None
++    assert any(
++        item.code == "segmentation.atomic_boundary_dropped" for item in whole_audio.diagnostics
++    )
++
++    part_audio = _plan('Before;[after now.]{src="clip.wav"}')
++    assert [segment.clause for segment in part_audio.segments] == [0, 1]
++    audio = next(segment for segment in part_audio.segments if segment.directives.audio is not None)
++    assert audio.clause == 1
++
++    sentence_audio = _plan('[First. Second.]{src="clip.wav"}')
++    assert len(sentence_audio.segments) == 1
++    assert sentence_audio.segments[0].sentence == 0
++    assert sentence_audio.segments[0].text == "First. Second."
++
++
+ def test_audio_adjacent_speech_remains_atomic_and_renderable() -> None:
+     plan = _plan('[Fallback]{src="clip.wav"} [After]{voice="guest"}.')
+
+@@ -198,16 +219,20 @@ def test_audio_adjacent_speech_remains_atomic_and_renderable() -> None:
+     )
+
+
+-def test_audio_boundary_keeps_fallback_atomic_and_attaches_punctuation_forward() -> None:
+-    plan = _plan('[Fallback]{src="clip.wav"}.[After]{voice="guest"}')
++def test_audio_boundary_preserves_unattachable_punctuation_for_renderability() -> None:
++    attempt = _planner().compile_attempt('[Fallback]{src="clip.wav"}.[After]{voice="guest"}')
+
+-    audio_segments = [segment for segment in plan.segments if segment.directives.audio is not None]
++    assert attempt.status == "blocked"
++    assert any(
++        issue.code == "renderability.punctuation_only" for issue in attempt.renderability.issues
++    )
++    audio_segments = [
++        segment for segment in attempt.candidate.segments if segment.directives.audio is not None
++    ]
+     assert len(audio_segments) == 1
+     assert audio_segments[0].text == "Fallback"
+-    speech = next(segment for segment in plan.segments if "After" in segment.text)
+-    assert speech.text == ".After"
+-    assert speech.directives.voice.reference == "guest"
+-    _assert_no_punctuation_only_speech(plan)
++    assert any(segment.text == "." for segment in attempt.candidate.segments)
++    assert any(segment.text == "After" for segment in attempt.candidate.segments)
+
+
+ def test_rich_ssmd_fixture_has_no_punctuation_only_speech_segments() -> None:
+diff --git a/tests/test_segmentation_adapter.py b/tests/test_segmentation_adapter.py
+new file mode 100644
+index 0000000..87c82e7
+--- /dev/null
++++ b/tests/test_segmentation_adapter.py
+@@ -0,0 +1,203 @@
++from __future__ import annotations
++
++import sys
++from types import SimpleNamespace
++from typing import Any
++
++import pytest
++
++from utterplan.segmentation import propose_phrasplit_sentence_boundaries
++
++
++def _proposal(text: str, start: Any, end: Any, *, surface: Any = None) -> SimpleNamespace:
++    return SimpleNamespace(
++        char_start=start,
++        char_end=end,
++        text=text[start:end]
++        if surface is None and type(start) is int and type(end) is int
++        else surface,
++        paragraph_idx=999,
++        sentence_idx=999,
++        clause_idx=999,
++    )
++
++
++def _phrasplit(
++    monkeypatch: pytest.MonkeyPatch, result: Any = None, *, error: Exception | None = None
++):
++    calls: list[tuple[str, dict[str, Any]]] = []
++
++    def split_with_offsets(text: str, **kwargs: Any) -> Any:
++        calls.append((text, kwargs))
++        if error is not None:
++            raise error
++        return result
++
++    monkeypatch.setitem(
++        sys.modules,
++        "phrasplit",
++        SimpleNamespace(split_with_offsets=split_with_offsets),
++    )
++    return calls
++
++
++def test_adapter_validates_spans_and_allows_only_whitespace_gaps(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    text = "  Hello. \tWorld!  "
++    proposals = [_proposal(text, 2, 8), _proposal(text, 10, 16)]
++    calls = _phrasplit(monkeypatch, proposals)
++
++    batch = propose_phrasplit_sentence_boundaries(
++        text,
++        language="en-US",
++        run_start=100,
++        run_id="language-0007",
++    )
++
++    assert not batch.degraded
++    assert batch.repairs == ()
++    assert [candidate.position for candidate in batch.candidates] == [108]
++    assert batch.candidates[0].origin == "phrasplit"
++    assert batch.candidates[0].language_run_id == "language-0007"
++    assert calls == [(text, {"mode": "sentence", "use_spacy": False, "language": "en-us"})]
++
++
++def test_adapter_does_not_promote_language_run_endpoint_to_sentence_boundary(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    text = "Hello bonjour"
++    _phrasplit(monkeypatch, [_proposal(text, 0, len(text))])
++
++    batch = propose_phrasplit_sentence_boundaries(
++        text,
++        language="en",
++        run_start=0,
++        run_id="run-1",
++    )
++
++    assert batch.candidates == ()
++    assert not batch.degraded
++
++
++@pytest.mark.parametrize(
++    "result",
++    (
++        None,
++        17,
++        [_proposal("abc", True, 2)],
++        [_proposal("abc", 0, "2")],
++        [_proposal("abc", 0, 1.5)],
++        [_proposal("abc", -1, 2)],
++        [_proposal("abc", 0, 4)],
++        [_proposal("abc", 1, 1)],
++        [_proposal("abc", 2, 1)],
++        [_proposal("abc", 0, 2, surface="xy")],
++        [_proposal("abc", 0, 2), _proposal("abc", 1, 3)],
++        [_proposal("abc", 1, 3), _proposal("abc", 0, 1)],
++        [_proposal("abc", 0, 1), _proposal("abc", 0, 1)],
++    ),
++)
++def test_adapter_discards_entire_malformed_batch(
++    monkeypatch: pytest.MonkeyPatch, result: Any
++) -> None:
++    _phrasplit(monkeypatch, result)
++
++    batch = propose_phrasplit_sentence_boundaries(
++        "abc",
++        language="en",
++        run_start=20,
++        run_id="run-1",
++    )
++
++    assert batch.degraded
++    assert batch.candidates == ()
++    assert len(batch.repairs) == 1
++    assert batch.repairs[0].code in {
++        "segmentation.phrasplit_failed",
++        "segmentation.phrasplit_invalid",
++    }
++
++
++@pytest.mark.parametrize(
++    ("text", "spans"),
++    (
++        ("xabc", [(1, 4)]),
++        ("abcx", [(0, 3)]),
++        ("abxc", [(0, 2), (3, 4)]),
++        ("a,b", [(0, 1), (2, 3)]),
++    ),
++)
++def test_adapter_rejects_non_whitespace_omissions(
++    monkeypatch: pytest.MonkeyPatch, text: str, spans: list[tuple[int, int]]
++) -> None:
++    _phrasplit(monkeypatch, [_proposal(text, start, end) for start, end in spans])
++
++    batch = propose_phrasplit_sentence_boundaries(
++        text,
++        language="en",
++        run_start=5,
++        run_id="run-1",
++    )
++
++    assert batch.degraded
++    assert batch.repairs[0].code == "segmentation.phrasplit_invalid"
++    assert "uncovered non-whitespace" in batch.repairs[0].message
++
++
++@pytest.mark.parametrize(
++    "error", (TypeError("bad call"), ValueError("bad call"), RuntimeError("bad call"))
++)
++def test_adapter_recovers_from_dependency_call_errors(
++    monkeypatch: pytest.MonkeyPatch, error: Exception
++) -> None:
++    _phrasplit(monkeypatch, error=error)
++
++    batch = propose_phrasplit_sentence_boundaries(
++        "valid prose.",
++        language="en",
++        run_start=0,
++        run_id="run-1",
++    )
++
++    assert batch.degraded
++    assert batch.candidates == ()
++    assert batch.repairs[0].code == "segmentation.phrasplit_failed"
++
++
++def test_adapter_recovers_when_dependency_iterator_raises(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    def broken_iterator():
++        yield _proposal("abc", 0, 1)
++        raise RuntimeError("broken iterator")
++
++    _phrasplit(monkeypatch, broken_iterator())
++
++    batch = propose_phrasplit_sentence_boundaries(
++        "abc",
++        language="en",
++        run_start=0,
++        run_id="run-1",
++    )
++
++    assert batch.degraded
++    assert batch.candidates == ()
++    assert batch.repairs[0].code == "segmentation.phrasplit_failed"
++
++
++def test_empty_text_and_empty_proposals_are_valid(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _phrasplit(monkeypatch, [])
++
++    batch = propose_phrasplit_sentence_boundaries(
++        "",
++        language="en",
++        run_start=0,
++        run_id="run-1",
++    )
++
++    assert batch.candidates == ()
++    assert batch.repairs == ()
++    assert not batch.degraded
+diff --git a/tests/test_segmentation_recovery.py b/tests/test_segmentation_recovery.py
+new file mode 100644
+index 0000000..fe9ea44
+--- /dev/null
++++ b/tests/test_segmentation_recovery.py
+@@ -0,0 +1,114 @@
++from __future__ import annotations
++
++import sys
++from types import SimpleNamespace
++from typing import Any, Literal
++
++import pytest
++
++from utterplan import LinguisticsConfig, PlannerConfig, UtterancePlanner
++
++
++def _set_phrasplit(monkeypatch: pytest.MonkeyPatch, splitter: Any) -> None:
++    monkeypatch.setitem(
++        sys.modules,
++        "phrasplit",
++        SimpleNamespace(split_with_offsets=splitter),
++    )
++
++
++def _config(mode: Literal["strict", "repair"]) -> PlannerConfig:
++    return PlannerConfig(
++        language="en-US",
++        text_preparation="identity",
++        linguistics=LinguisticsConfig(use_spacy=False),
++        renderability_mode=mode,  # type: ignore[arg-type]
++    )
++
++
++def _segment_surfaces(plan: Any) -> list[str]:
++    return [segment.text for unit in plan.flow for segment in unit.segments]
++
++
++@pytest.mark.parametrize("mode", ("strict", "repair"))
++def test_phrasplit_failure_recovers_and_preserves_sentence_topology_in_both_modes(
++    monkeypatch: pytest.MonkeyPatch, mode: Literal["strict", "repair"]
++) -> None:
++    def broken(_text: str, **_kwargs: Any) -> None:
++        raise TypeError("dependency call failed")
++
++    _set_phrasplit(monkeypatch, broken)
++    text = "Hello. World."
++    planner = UtterancePlanner(_config(mode))
++    try:
++        result = planner.compile(text)
++    finally:
++        planner.close()
++
++    assert _segment_surfaces(result.plan) == ["Hello.", "World."]
++    assert "".join(_segment_surfaces(result.plan)) == text.replace(" ", "")
++    diagnostic = next(
++        item for item in result.diagnostics if item.code == "segmentation.phrasplit_failed"
++    )
++    assert diagnostic.severity == "warning"
++
++
++def test_malformed_phrasplit_batch_is_discarded_without_losing_content(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    def malformed(_text: str, **_kwargs: Any) -> list[Any]:
++        return [SimpleNamespace(char_start=0, char_end=5, text="lost!")]
++
++    _set_phrasplit(monkeypatch, malformed)
++    text = "Hello. World."
++    planner = UtterancePlanner(_config("strict"))
++    try:
++        result = planner.compile(text)
++    finally:
++        planner.close()
++
++    surfaces = _segment_surfaces(result.plan)
++    assert "".join(surfaces).replace(" ", "") == text.replace(" ", "")
++    assert [
++        item.message for item in result.diagnostics if item.code == "segmentation.phrasplit_invalid"
++    ]
++
++
++def test_unsafe_automatic_boundary_is_merged_before_successful_attempt_projects(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    def split_inside_token(text: str, **_kwargs: Any) -> list[Any]:
++        return [
++            SimpleNamespace(char_start=0, char_end=4, text=text[:4]),
++            SimpleNamespace(char_start=4, char_end=len(text), text=text[4:]),
++        ]
++
++    _set_phrasplit(monkeypatch, split_inside_token)
++    text = "lifecycle now"
++    planner = UtterancePlanner(_config("strict"))
++    try:
++        attempt = planner.compile_attempt(text)
++        assert attempt.ok
++        # Projection is part of the success contract, not a downstream surprise.
++        from utterplan.flow_projection import project_compiler_plan
++
++        flow = project_compiler_plan(attempt.candidate.to_plan())
++    finally:
++        planner.close()
++
++    assert _segment_surfaces(flow) == [text]
++    assert any(item.code == "segmentation.lexical_boundary_merged" for item in attempt.diagnostics)
++
++
++def test_punctuation_only_paragraph_is_preserved_for_renderability() -> None:
++    planner = UtterancePlanner(_config("strict"))
++    try:
++        attempt = planner.compile_attempt("Hello.\n\n!!!\n\nWorld.")
++    finally:
++        planner.close()
++
++    assert not attempt.ok
++    assert any(
++        issue.code == "renderability.punctuation_only" for issue in attempt.renderability.issues
++    )
++    assert any(segment.text == "!!!" for segment in attempt.candidate.segments)
+diff --git a/tests/test_sentence_topology.py b/tests/test_sentence_topology.py
+new file mode 100644
+index 0000000..8921401
+--- /dev/null
++++ b/tests/test_sentence_topology.py
+@@ -0,0 +1,361 @@
++from __future__ import annotations
++
++import random
++import sys
++from types import SimpleNamespace
++from typing import Any
++
++import pytest
++
++from utterplan.model import BoundaryEvent, TokenAnnotation
++from utterplan.renderability import contains_speech_content
++from utterplan.segmentation import (
++    build_paragraph_regions,
++    build_sentence_topology,
++    validate_non_whitespace_coverage,
++)
++
++
++def _fake_phrasplit(
++    monkeypatch: pytest.MonkeyPatch,
++    results: list[Any] | None = None,
++    *,
++    error: Exception | None = None,
++) -> None:
++    calls = 0
++
++    def split_with_offsets(text: str, **_kwargs: Any) -> list[Any]:
++        nonlocal calls
++        calls += 1
++        if error is not None:
++            raise error
++        if results is not None:
++            return results
++        return [
++            SimpleNamespace(
++                char_start=0, char_end=len(text), text=text, paragraph_idx=42, sentence_idx=99
++            )
++        ]
++
++    monkeypatch.setitem(
++        sys.modules,
++        "phrasplit",
++        SimpleNamespace(split_with_offsets=split_with_offsets),
++    )
++
++
++def _run(start: int, end: int, run_id: str = "run-1", language: str = "en") -> SimpleNamespace:
++    return SimpleNamespace(spoken_start=start, spoken_end=end, id=run_id, language=language)
++
++
++def test_paragraph_regions_use_parser_events_and_keep_global_order() -> None:
++    text = "First.\n\nSecond.\n\nThird."
++    events = (
++        BoundaryEvent("b1", 6, "paragraph"),
++        BoundaryEvent("ignored", 14, "pause"),
++        BoundaryEvent("b2", 15, "paragraph"),
++    )
++
++    regions = build_paragraph_regions(text, events)
++
++    assert [(item.start, item.end, item.paragraph_index) for item in regions] == [
++        (0, 6, 0),
++        (8, 15, 1),
++        (17, 23, 2),
++    ]
++
++
++def test_sentence_indices_are_recomputed_not_copied_from_phrasplit(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    text = "Hello. World."
++    _fake_phrasplit(
++        monkeypatch,
++        [
++            SimpleNamespace(
++                char_start=0, char_end=6, text="Hello.", paragraph_idx=50, sentence_idx=70
++            ),
++            SimpleNamespace(
++                char_start=7, char_end=13, text="World.", paragraph_idx=50, sentence_idx=71
++            ),
++        ],
++    )
++
++    topology = build_sentence_topology(
++        text,
++        (_run(0, len(text)),),
++        (),
++        tokens=(),
++        token_providers=(),
++    )
++
++    assert [
++        (text[item.start : item.end], item.paragraph_index, item.sentence_index)
++        for item in topology.sentences
++    ] == [
++        ("Hello.", 0, 0),
++        ("World.", 0, 1),
++    ]
++    assert [
++        (part.paragraph_index, part.sentence_index, part.part_index) for part in topology.parts
++    ] == [
++        (0, 0, 0),
++        (0, 1, 0),
++    ]
++
++
++def test_sentence_spans_cross_language_runs_without_run_edge_split(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    text = "Hello bonjour."
++    _fake_phrasplit(monkeypatch)
++
++    topology = build_sentence_topology(
++        text,
++        (_run(0, 6, "run-1", "en"), _run(6, len(text), "run-2", "fr")),
++        (),
++        tokens=(),
++        token_providers=(),
++    )
++
++    assert [(text[item.start : item.end], item.sentence_index) for item in topology.sentences] == [
++        (text, 0)
++    ]
++
++
++def test_sentence_parts_keep_semicolon_colon_and_fullwidth_separator_ownership(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _fake_phrasplit(monkeypatch)
++    cases = (
++        ("Hello; world.", ["Hello; ", "world."]),
++        ("Wait: I know.", ["Wait: ", "I know."]),
++        ("等等：我知道。", ["等等：", "我知道。"]),
++        ("Hello; ; world.", ["Hello; ; ", "world."]),
++        ('She said: "hello" and left.', ["She said: ", '"hello" and left.']),
++    )
++    for text, expected_parts in cases:
++        topology = build_sentence_topology(
++            text,
++            (_run(0, len(text)),),
++            (),
++            tokens=(),
++            token_providers=(),
++        )
++        assert [text[part.start : part.end] for part in topology.parts] == expected_parts
++        assert [part.part_index for part in topology.parts] == list(range(len(expected_parts)))
++
++
++def test_part_fallback_protects_numeric_colons_and_url_semicolons(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    text = "It is 12:30. Ratio 3:2 is stable. Visit https://example.com/a;b. Next."
++    _fake_phrasplit(monkeypatch, error=RuntimeError("dependency failed"))
++    topology = build_sentence_topology(
++        text,
++        (_run(0, len(text)),),
++        (),
++        tokens=(),
++        token_providers=(),
++    )
++    assert [text[part.start : part.end] for part in topology.parts] == [
++        "It is 12:30.",
++        "Ratio 3:2 is stable.",
++        "Visit https://example.com/a;b.",
++        "Next.",
++    ]
++
++
++def test_optional_clause_candidates_create_sentence_parts(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    text = "I wanted to go, but it was raining."
++    _fake_phrasplit(monkeypatch)
++    topology = build_sentence_topology(
++        text,
++        (_run(0, len(text)),),
++        (),
++        tokens=(),
++        token_providers=(),
++        optional_part_boundaries=(SimpleNamespace(kind="clause", position=16),),
++    )
++    assert [text[part.start : part.end] for part in topology.parts] == [
++        "I wanted to go, ",
++        "but it was raining.",
++    ]
++
++
++def test_optional_parenthetical_candidates_remain_parts_without_losing_spaces(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    text = "Text (aside) continues."
++    _fake_phrasplit(monkeypatch)
++    topology = build_sentence_topology(
++        text,
++        (_run(0, len(text)),),
++        (),
++        tokens=(),
++        token_providers=(),
++        optional_part_boundaries=(
++            SimpleNamespace(kind="parenthetical", position=5),
++            SimpleNamespace(kind="parenthetical", position=12),
++        ),
++    )
++    assert [text[part.start : part.end] for part in topology.parts] == [
++        "Text ",
++        "(aside)",
++        " continues.",
++    ]
++
++
++def test_unsafe_part_candidate_is_dropped_at_provider_token_edge(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    text = "alphabeta;tail."
++    _fake_phrasplit(monkeypatch)
++    topology = build_sentence_topology(
++        text,
++        (_run(0, len(text)),),
++        (),
++        tokens=(TokenAnnotation(0, len(text) - 1, "alphabeta;tail"),),
++        token_providers=("spacy",),
++    )
++    assert [text[part.start : part.end] for part in topology.parts] == [text]
++    assert any(item.code == "segmentation.part_candidate_dropped" for item in topology.repairs)
++
++
++def test_quote_aware_fallback_attaches_closing_quote_to_sentence(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    text = "“Hello.” She replied."
++    _fake_phrasplit(monkeypatch)
++
++    topology = build_sentence_topology(
++        text,
++        (_run(0, len(text)),),
++        (),
++        tokens=(),
++        token_providers=(),
++    )
++
++    assert [text[item.start : item.end] for item in topology.sentences] == [
++        "“Hello.”",
++        "She replied.",
++    ]
++
++
++@pytest.mark.parametrize(
++    ("text", "expected"),
++    (
++        ("Dr. Smith arrived. Next.", ["Dr. Smith arrived.", "Next."]),
++        ("The value is 3.14. Next.", ["The value is 3.14.", "Next."]),
++        ("Version 1.2.3 works. Next.", ["Version 1.2.3 works.", "Next."]),
++        ("J. R. R. Tolkien wrote. Next.", ["J. R. R. Tolkien wrote.", "Next."]),
++        ("U.S. Army arrived. Next.", ["U.S. Army arrived.", "Next."]),
++        ("e.g. this is fine. Next.", ["e.g. this is fine.", "Next."]),
++        ("中文第一句。中文第二句。", ["中文第一句。", "中文第二句。"]),
++    ),
++)
++def test_conservative_fallback_protects_period_patterns_and_supports_unicode(
++    monkeypatch: pytest.MonkeyPatch, text: str, expected: list[str]
++) -> None:
++    _fake_phrasplit(monkeypatch, error=RuntimeError("dependency failed"))
++
++    topology = build_sentence_topology(
++        text,
++        (_run(0, len(text)),),
++        (),
++        tokens=(),
++        token_providers=(),
++    )
++
++    assert [text[item.start : item.end] for item in topology.sentences] == expected
++    assert topology.degraded
++
++
++def test_unsafe_automatic_candidate_is_dropped_instead_of_snapped(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    text = "lifecycle now"
++    _fake_phrasplit(
++        monkeypatch,
++        [
++            SimpleNamespace(char_start=0, char_end=4, text="life", paragraph_idx=0, sentence_idx=0),
++            SimpleNamespace(
++                char_start=4, char_end=len(text), text="cycle now", paragraph_idx=0, sentence_idx=1
++            ),
++        ],
++    )
++    token = TokenAnnotation(0, 9, "lifecycle")
++
++    topology = build_sentence_topology(
++        text,
++        (_run(0, len(text)),),
++        (),
++        tokens=(token,),
++        token_providers=("fallback",),
++    )
++
++    assert [text[item.start : item.end] for item in topology.sentences] == [text]
++    assert topology.repairs[0].code == "segmentation.lexical_boundary_merged"
++
++
++def test_non_whitespace_coverage_validator_rejects_missing_content() -> None:
++    text = "Hello; world."
++    segments = (
++        SimpleNamespace(id="s1", spoken_start=0, spoken_end=5, text="Hello"),
++        SimpleNamespace(id="s2", spoken_start=7, spoken_end=len(text), text="world."),
++    )
++
++    with pytest.raises(Exception) as exc_info:
++        validate_non_whitespace_coverage(text, segments)
++
++    assert getattr(exc_info.value, "code", None) == "segmentation.content_gap"
++
++
++def test_seeded_fallback_fuzz_is_deterministic_and_covers_all_speech_parts(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    rng = random.Random(20251009)
++    atoms = ("alpha", "Dr.", "3:2", "12:30", "中文", "https://example.com/a;b")
++    separators = ("; ", ": ", "：", ". ", "? ", "… ", ", ")
++    _fake_phrasplit(monkeypatch, error=RuntimeError("dependency failed"))
++
++    for _ in range(60):
++        text = rng.choice(atoms)
++        for _ in range(rng.randint(2, 6)):
++            text += rng.choice(separators) + rng.choice(atoms)
++        text += rng.choice((".", "!", "。", "?”"))
++        topology = build_sentence_topology(
++            text,
++            (_run(0, len(text)),),
++            (),
++            tokens=(),
++            token_providers=(),
++        )
++        repeated = build_sentence_topology(
++            text,
++            (_run(0, len(text)),),
++            (),
++            tokens=(),
++            token_providers=(),
++        )
++        assert topology == repeated
++        assert all(contains_speech_content(text[part.start : part.end]) for part in topology.parts)
++        for sentence in topology.sentences:
++            sentence_parts = [
++                part for part in topology.parts if part.sentence_index == sentence.sentence_index
++            ]
++            assert [part.part_index for part in sentence_parts] == list(range(len(sentence_parts)))
++        validate_non_whitespace_coverage(
++            text,
++            tuple(
++                SimpleNamespace(
++                    id=f"part-{index}",
++                    spoken_start=part.start,
++                    spoken_end=part.end,
++                    text=text[part.start : part.end],
++                )
++                for index, part in enumerate(topology.parts)
++            ),
++        )
+diff --git a/tests/test_ssmd_09_parser.py b/tests/test_ssmd_09_parser.py
+index fe05c22..3f5f0f6 100644
+--- a/tests/test_ssmd_09_parser.py
++++ b/tests/test_ssmd_09_parser.py
+@@ -53,7 +53,12 @@ def test_front_matter_scene_breaks_are_boundaries_not_renderer_text(
+     body: str, scene_break_count: int
+ ) -> None:
+     source = f'---\nssmd_version: "0.9"\ntitle: Demo\n---\n{body}'
+-    plan = _planner().plan(source)
++    if "\\---" in body:
++        attempt = _planner().compile_attempt(source)
++        assert attempt.status == "blocked"
++        plan = attempt.candidate
++    else:
++        plan = _planner().plan(source)
+
+     scene_breaks = [
+         event
+@@ -75,6 +80,10 @@ def test_front_matter_scene_breaks_are_boundaries_not_renderer_text(
+         assert any("---" in segment.text for segment in plan.segments)
+     elif "\\---" in body:
+         assert "---" in plan.texts.structural
++        assert any(segment.text == "---" for segment in plan.segments)
++        assert any(
++            issue.code == "renderability.punctuation_only" for issue in attempt.renderability.issues
++        )
+
+
+ def test_legacy_parser_front_matter_scene_break_uses_clean_to_source_mapping(
+diff --git a/tests/test_token_topology.py b/tests/test_token_topology.py
+new file mode 100644
+index 0000000..9c7b4de
+--- /dev/null
++++ b/tests/test_token_topology.py
+@@ -0,0 +1,73 @@
++from __future__ import annotations
++
++from types import SimpleNamespace
++
++import pytest
++
++from utterplan.exceptions import PlanValidationError
++from utterplan.model import TokenAnnotation
++from utterplan.token_topology import (
++    boundary_splits_lexical_content,
++    find_boundary_conflict,
++    validate_segment_token_edges,
++)
++
++
++@pytest.mark.parametrize(
++    ("text", "position", "provider", "expected"),
++    (
++        ("HelloWorld", 5, "fallback", True),
++        ("Hello;world", 6, "fallback", False),
++        ("Hello;world", 5, "fallback", False),
++        ("12:30", 2, "fallback", False),
++        ("Hello;world", 6, "spacy", True),
++        ("Hello—world", 5, "spacy", True),
++        ("Hello", 0, "fallback", False),
++        ("Hello", 5, "fallback", False),
++    ),
++)
++def test_boundary_safety_preserves_provider_policies(
++    text: str, position: int, provider: str, expected: bool
++) -> None:
++    token = TokenAnnotation(0, len(text), text)
++    assert boundary_splits_lexical_content(position, token=token, provider=provider) is expected
++
++
++def test_find_boundary_conflict_returns_token_provenance_and_coordinates() -> None:
++    token = TokenAnnotation(10, 20, "HelloWorld")
++
++    conflict = find_boundary_conflict(
++        15,
++        tokens=(token,),
++        token_providers=("fallback",),
++    )
++
++    assert conflict is not None
++    assert conflict.token_index == 0
++    assert (conflict.token_start, conflict.token_end) == (10, 20)
++    assert conflict.token_text == "HelloWorld"
++    assert conflict.provider == "fallback"
++    assert conflict.position == 15
++
++
++def test_segment_edge_validation_keeps_projection_guard() -> None:
++    token = TokenAnnotation(0, 5, "hello")
++    segment = SimpleNamespace(id="seg-1", spoken_start=0, spoken_end=3)
++
++    with pytest.raises(PlanValidationError) as exc_info:
++        validate_segment_token_edges((segment,), (token,), ("fallback",))
++
++    assert exc_info.value.code == "token.segment_split"
++    assert "token 0 [0:5] at its end" in str(exc_info.value)
++
++
++def test_segment_edge_validation_accepts_fallback_punctuation_cut() -> None:
++    token = TokenAnnotation(0, 11, "Hello;world")
++    left = SimpleNamespace(id="seg-left", spoken_start=0, spoken_end=6)
++    right = SimpleNamespace(id="seg-right", spoken_start=6, spoken_end=11)
++
++    validate_segment_token_edges(
++        (left, right),
++        (token,),
++        ("fallback",),
++    )
+diff --git a/utterplan/flow_projection.py b/utterplan/flow_projection.py
+index 062e518..1abaf6e 100644
+--- a/utterplan/flow_projection.py
++++ b/utterplan/flow_projection.py
+@@ -14,6 +14,7 @@ from .model import (
+     TokenView,
+     UtterancePlan,
+ )
++from .token_topology import boundary_splits_lexical_content
+
+
+ def project_compiler_plan(plan: UtterancePlan) -> FlowPlan:
+@@ -140,16 +141,8 @@ def _tokens_for_segment(
+         surface = spoken[start:end]
+         provider = token_providers[token_index]
+         if not is_whole:
+-            relative_start = start - token.spoken_start
+-            relative_end = end - token.spoken_start
+-            prefix = token.text[:relative_start]
+-            suffix = token.text[relative_end:]
+-            if provider == "fallback":
+-                split_at_start = _splits_alphanumeric_run(token.text, relative_start)
+-                split_at_end = _splits_alphanumeric_run(token.text, relative_end)
+-            else:
+-                split_at_start = _has_word_character(prefix) and _has_word_character(surface)
+-                split_at_end = _has_word_character(suffix) and _has_word_character(surface)
++            split_at_start = boundary_splits_lexical_content(start, token=token, provider=provider)
++            split_at_end = boundary_splits_lexical_content(end, token=token, provider=provider)
+             if split_at_start:
+                 raise PlanValidationError(
+                     f"compiler segment {segment.id} "
+@@ -192,14 +185,6 @@ def _has_word_character(value: str) -> bool:
+     return any(character.isalnum() for character in value)
+
+
+-def _splits_alphanumeric_run(value: str, position: int) -> bool:
+-    return (
+-        0 < position < len(value)
+-        and value[position - 1].isalnum()
+-        and value[position].isalnum()
+-    )
+-
+-
+ def _token_providers(plan: UtterancePlan) -> tuple[str | None, ...]:
+     providers: list[str | None] = [None] * len(plan.tokens)
+     for run in plan.linguistic_runs:
+diff --git a/utterplan/planner.py b/utterplan/planner.py
+index ca180e1..411cb62 100644
+--- a/utterplan/planner.py
++++ b/utterplan/planner.py
+@@ -1,10 +1,10 @@
+ from __future__ import annotations
+
+ import hashlib
+-import re
+ import unicodedata
+ from collections.abc import Mapping
+ from dataclasses import asdict, replace
++from importlib import import_module
+ from typing import TYPE_CHECKING, Any, Literal
+
+ if TYPE_CHECKING:
+@@ -13,7 +13,12 @@ if TYPE_CHECKING:
+ from .attempts import PlanDraft, PlanningAttempt, PlanningAttemptStatus, planning_attempt_id
+ from .config import PauseConfig, PlannerConfig
+ from .directives import resolve_directives
+-from .exceptions import ConfigurationError, PlanningError, PlanRenderabilityError
++from .exceptions import (
++    ConfigurationError,
++    PlanningError,
++    PlanRenderabilityError,
++    PlanValidationError,
++)
+ from .language import LanguageRun, build_language_runs, language_lookup_key, spans_from_annotations
+ from .linguistics import LinguisticResourcePool, RunAnalysis, analyze_run_analyses
+ from .model import (
+@@ -38,7 +43,20 @@ from .parsers import (
+ from .pauses import boundary_is_active, resolve_pause_intents
+ from .preparation import IdentityTextPreparer, SourceToSpokenMap, SpokenformTextPreparer
+ from .progress import PlannerProgressEvent, ProgressCallback, _notify_progress
+-from .renderability import RenderabilityIssue, RenderabilityReport, preflight_segments
++from .renderability import (
++    RenderabilityIssue,
++    RenderabilityReport,
++    contains_speech_content,
++    preflight_segments,
++)
++from .segmentation import (
++    SegmentationRepair,
++    SentenceTopology,
++    build_paragraph_regions,
++    build_sentence_topology,
++    validate_non_whitespace_coverage,
++)
++from .token_topology import validate_segment_token_edges
+ from .units import make_units
+
+
+@@ -311,9 +329,57 @@ class UtterancePlanner:
+             _detect_linguistic_semantic_boundaries(spoken, runs, pass_b)
+         )
+         boundaries = list(prepared.boundaries)
++        token_providers = _token_providers_for_runs(linguistic_runs, len(tokens))
++        protected_audio_spans = tuple(
++            (annotation.spoken_start, annotation.spoken_end)
++            for annotation in _audio_annotations(prepared.annotations)
++            if annotation.spoken_start is not None
++            and annotation.spoken_end is not None
++            and annotation.spoken_start < annotation.spoken_end
++        )
++        topology = build_sentence_topology(
++            spoken,
++            runs,
++            boundaries,
++            tokens=tokens,
++            token_providers=token_providers,
++            optional_part_boundaries=semantic_boundaries,
++            protected_spans=protected_audio_spans,
++        )
++        part_semantic_boundaries = [
++            SemanticBoundary(
++                "",
++                part.end,
++                "clause",
++                origin="planner",
++                attrs={
++                    "automatic_pause_candidate": True,
++                    "separator_kind": part.boundary_origin,
++                },
++            )
++            for part in topology.parts
++            if part.boundary_origin in {"semicolon", "colon"}
++        ]
++        if part_semantic_boundaries:
++            semantic_boundaries, _ = _canonicalize_semantic_boundaries(
++                [*semantic_boundaries, *part_semantic_boundaries]
++            )
+         boundaries.extend(_semantic_pause_events(semantic_boundaries, start_id=len(boundaries)))
+         segments = _segment(
+-            spoken, runs, prepared.annotations, boundaries, pause_config, document_language
++            spoken,
++            runs,
++            prepared.annotations,
++            boundaries,
++            pause_config,
++            document_language,
++            topology,
++        )
++        validate_non_whitespace_coverage(spoken, segments)
++        validate_segment_token_edges(
++            segments,
++            tokens,
++            token_providers,
++            conflict_code="segmentation.required_cut_conflict",
+         )
+         segments = _attach_structural_ranges(
+             segments, prepared.source_map, len(parsed.structural_text)
+@@ -354,7 +420,9 @@ class UtterancePlanner:
+         if initial_renderability.issues:
+             status = "blocked"
+             if config.renderability_mode == "repair" and all(
+-                issue.repair_assessment is not None and issue.repair_assessment.safe
++                issue.repair_assessment is not None
++                and issue.repair_assessment.safe
++                and issue.repair_assessment.action != "drop"
+                 for issue in initial_renderability.issues
+             ):
+                 segments, renderability_repairs = _repair_renderer_segments(
+@@ -366,6 +434,13 @@ class UtterancePlanner:
+                     replace(segment, id=f"seg-{index:06d}")
+                     for index, segment in enumerate(segments)
+                 ]
++                validate_non_whitespace_coverage(spoken, segments)
++                validate_segment_token_edges(
++                    segments,
++                    tokens,
++                    token_providers,
++                    conflict_code="segmentation.required_cut_conflict",
++                )
+                 segments = _attach_structural_ranges(
+                     segments, prepared.source_map, len(parsed.structural_text)
+                 )
+@@ -433,6 +508,10 @@ class UtterancePlanner:
+             },
+         }
+         diagnostics = list(parsed.diagnostics)
++        diagnostics.extend(
++            _segmentation_repair_diagnostic(repair, prepared.source_map)
++            for repair in topology.repairs
++        )
+         diagnostics.extend(
+             _renderability_repair_diagnostic(issue) for issue in renderability_repairs
+         )
+@@ -647,6 +726,16 @@ def _linguistic_runs(runs: tuple[Any, ...], analyses: tuple[Any, ...]) -> tuple[
+     return tuple(result)
+
+
++def _token_providers_for_runs(
++    linguistic_runs: tuple[LinguisticRun, ...], token_count: int
++) -> tuple[str | None, ...]:
++    providers: list[str | None] = [None] * token_count
++    for run in linguistic_runs:
++        for token_index in range(max(0, run.token_start), min(token_count, run.token_end)):
++            providers[token_index] = run.provider
++    return tuple(providers)
++
++
+ def _segment(
+     text: str,
+     runs: tuple[LanguageRun, ...],
+@@ -654,92 +743,79 @@ def _segment(
+     boundaries: list[BoundaryEvent],
+     pause_config: PauseConfig,
+     default_language: str,
++    topology: SentenceTopology,
+ ) -> list[PlanSegment]:
+-    base_segments = _segment_text(text, runs, annotations, boundaries, pause_config)
++    base_segments = _segment_sentence_parts(
++        text, topology, runs, annotations, boundaries, pause_config
++    )
++    base_segments = _reconcile_non_speech_gaps(
++        text, base_segments, topology, runs, boundaries, default_language
++    )
+     _validate_audio_topology(annotations, runs, base_segments)
+     return _apply_atomic_audio_segments(text, base_segments, runs, annotations, default_language)
+
+
+-def _segment_text(
++def _segment_sentence_parts(
+     text: str,
+-    runs: tuple[Any, ...],
++    topology: SentenceTopology,
++    runs: tuple[LanguageRun, ...],
+     annotations: tuple[AnnotationSpan, ...],
+     boundaries: list[BoundaryEvent],
+     pause_config: PauseConfig,
+ ) -> list[PlanSegment]:
+-    if not text:
+-        return []
+     result: list[PlanSegment] = []
+-    for run in runs:
+-        local_text = text[run.spoken_start : run.spoken_end]
+-        for item in _split_run(local_text, run.language):
+-            local_start = int(getattr(item, "char_start", 0))
+-            local_end = int(getattr(item, "char_end", len(local_text)))
+-            start = run.spoken_start + local_start
+-            end = run.spoken_start + local_end
+-            if end <= start or not text[start:end].strip():
++    for part in topology.parts:
++        start, end = part.start, part.end
++        hard_cuts = {start, end}
++        hard_cuts.update(
++            point
++            for run in runs
++            for point in (run.spoken_start, run.spoken_end)
++            if start < point < end
++        )
++        hard_cuts.update(
++            boundary.position
++            for boundary in boundaries
++            if start < boundary.position < end and boundary_is_active(boundary, pause_config)
++        )
++        hard_cuts.update(
++            point
++            for annotation in _audio_annotations(annotations)
++            for point in (annotation.spoken_start, annotation.spoken_end)
++            if point is not None and start < point < end
++        )
++        semantic_cuts = {
++            point
++            for annotation in annotations
++            for point in (annotation.spoken_start, annotation.spoken_end)
++            if point is not None and start < point < end and _semantic_annotation(annotation)
++        }
++        ordered = _normalize_semantic_cuts(text, hard_cuts=hard_cuts, semantic_cuts=semantic_cuts)
++        for segment_start, segment_end in zip(ordered, ordered[1:], strict=False):
++            if segment_end <= segment_start or not text[segment_start:segment_end].strip():
+                 continue
+-            paragraph = int(getattr(item, "paragraph_idx", 0) or 0)
+-            sentence = int(getattr(item, "sentence_idx", 0) or 0)
+-            clause = int(getattr(item, "clause_idx", 0) or 0)
+-            hard_cuts = {start, end}
+-            hard_cuts.update(
+-                boundary.position
+-                for boundary in boundaries
+-                if start < boundary.position < end and boundary_is_active(boundary, pause_config)
+-            )
+-            hard_cuts.update(
+-                point
+-                for annotation in _audio_annotations(annotations)
+-                for point in (annotation.spoken_start, annotation.spoken_end)
+-                if point is not None and start < point < end
+-            )
+-            semantic_cuts = {
+-                point
+-                for annotation in annotations
+-                for point in (annotation.spoken_start, annotation.spoken_end)
+-                if point is not None and start < point < end and _semantic_annotation(annotation)
+-            }
+-            ordered = _normalize_semantic_cuts(
+-                text,
+-                hard_cuts=hard_cuts,
+-                semantic_cuts=semantic_cuts,
++            language = next(
++                (
++                    run.language
++                    for run in runs
++                    if run.spoken_start <= segment_start < run.spoken_end
++                ),
++                runs[-1].language if runs else "",
+             )
+-            clause_breaks = {
+-                boundary.position
+-                for boundary in boundaries
+-                if start < boundary.position < end and boundary_is_active(boundary, pause_config)
+-            }
+-            clause_breaks.update(
+-                annotation.spoken_end
+-                for annotation in annotations
+-                if (
+-                    annotation.spoken_end is not None
+-                    and start < annotation.spoken_end < end
+-                    and _semantic_annotation(annotation)
+-                    and not _language_annotation(annotation)
++            result.append(
++                PlanSegment(
++                    id=f"seg-{len(result):06d}",
++                    text=text[segment_start:segment_end],
++                    spoken_start=segment_start,
++                    spoken_end=segment_end,
++                    language=language,
++                    paragraph=part.paragraph_index,
++                    sentence=part.sentence_index,
++                    clause=part.part_index,
++                    structural_start=None,
++                    structural_end=None,
+                 )
+             )
+-            current_clause = clause
+-            for part_start, part_end in zip(ordered, ordered[1:], strict=False):
+-                if part_end <= part_start or not text[part_start:part_end].strip():
+-                    continue
+-                result.append(
+-                    PlanSegment(
+-                        id=f"seg-{len(result):06d}",
+-                        text=text[part_start:part_end],
+-                        spoken_start=part_start,
+-                        spoken_end=part_end,
+-                        language=run.language,
+-                        paragraph=paragraph,
+-                        sentence=sentence,
+-                        clause=current_clause,
+-                        structural_start=None,
+-                        structural_end=None,
+-                    )
+-                )
+-                if part_end in clause_breaks:
+-                    current_clause += 1
+     return _coalesce_neutral_punctuation_segments(
+         text,
+         result,
+@@ -749,6 +825,76 @@ def _segment_text(
+     )
+
+
++def _reconcile_non_speech_gaps(
++    text: str,
++    segments: list[PlanSegment],
++    topology: SentenceTopology,
++    runs: tuple[LanguageRun, ...],
++    boundaries: list[BoundaryEvent],
++    default_language: str,
++) -> list[PlanSegment]:
++    result = list(segments)
++    ordered = sorted(segments, key=lambda item: (item.spoken_start, item.spoken_end))
++    gaps: list[tuple[int, int]] = []
++    previous_end = 0
++    for segment in ordered:
++        if text[previous_end : segment.spoken_start].strip():
++            gaps.append((previous_end, segment.spoken_start))
++        previous_end = max(previous_end, segment.spoken_end)
++    if text[previous_end:].strip():
++        gaps.append((previous_end, len(text)))
++
++    for region in build_paragraph_regions(text, boundaries):
++        for gap_start, gap_end in gaps:
++            start = max(region.start, gap_start)
++            end = min(region.end, gap_end)
++            while start < end and text[start].isspace():
++                start += 1
++            while end > start and text[end - 1].isspace():
++                end -= 1
++            if start >= end:
++                continue
++            surface = text[start:end]
++            if contains_speech_content(surface):
++                raise PlanValidationError(
++                    f"speech-bearing prepared text is outside sentence topology [{start}:{end}]",
++                    code="segmentation.content_gap",
++                )
++            paragraph_sentences = [
++                sentence
++                for sentence in topology.sentences
++                if sentence.paragraph_index == region.paragraph_index
++            ]
++            preceding = [sentence for sentence in paragraph_sentences if sentence.end <= start]
++            following = [sentence for sentence in paragraph_sentences if sentence.start >= end]
++            sentence_index = (
++                max(preceding, key=lambda item: item.end).sentence_index
++                if preceding
++                else min(following, key=lambda item: item.start).sentence_index
++                if following
++                else 0
++            )
++            language = next(
++                (run.language for run in runs if run.spoken_start <= start < run.spoken_end),
++                default_language,
++            )
++            result.append(
++                PlanSegment(
++                    id=f"seg-{len(result):06d}",
++                    text=surface,
++                    spoken_start=start,
++                    spoken_end=end,
++                    language=language,
++                    paragraph=region.paragraph_index,
++                    sentence=sentence_index,
++                    clause=0,
++                    structural_start=None,
++                    structural_end=None,
++                )
++            )
++    return sorted(result, key=lambda item: (item.spoken_start, item.spoken_end))
++
++
+ def _is_neutral_punctuation_text(value: str) -> bool:
+     significant = [character for character in value if not character.isspace()]
+     return bool(significant) and all(
+@@ -852,6 +998,8 @@ def _coalesce_neutral_punctuation_segments(
+                 and previous.language == punctuation.language
+                 and not gap.strip()
+                 and previous.paragraph == punctuation.paragraph
++                and previous.sentence == punctuation.sentence
++                and previous.clause == punctuation.clause
+                 and semantic_expansion_allowed(expanded_start, expanded_end)
+             ):
+                 result[index - 1] = replace(
+@@ -877,6 +1025,8 @@ def _coalesce_neutral_punctuation_segments(
+                 and following.language == punctuation.language
+                 and not gap.strip()
+                 and following.paragraph == punctuation.paragraph
++                and following.sentence == punctuation.sentence
++                and following.clause == punctuation.clause
+                 and semantic_expansion_allowed(expanded_start, expanded_end)
+             ):
+                 result[index + 1] = replace(
+@@ -894,6 +1044,8 @@ def _coalesce_neutral_punctuation_segments(
+             or previous.directives.audio is not None
+             or previous.language != following.language
+             or previous.paragraph != following.paragraph
++            or previous.sentence != following.sentence
++            or previous.clause != following.clause
+             or not following.text
+         ):
+             continue
+@@ -1187,120 +1339,13 @@ def _media_context(
+     return default_language, 0, 0, 0
+
+
+-def _split_run(text: str, language: str) -> list[Any]:
+-    try:
+-        import phrasplit
+-
+-        # Sentence topology stays on the deterministic phrasplit path.
+-        items = phrasplit.split_with_offsets(
+-            text, mode="sentence", use_spacy=False, language=language_lookup_key(language)
+-        )
+-    except ImportError:
+-        return [_FallbackSplit(0, len(text), 0, 0)] if text else []
+-    except TypeError as exc:
+-        raise PlanningError("sentence segmentation integration failed") from exc
+-    except (OSError, ValueError):
+-        return [_FallbackSplit(0, len(text), 0, 0)] if text else []
+-    valid: list[Any] = []
+-    previous = 0
+-    for item in items:
+-        start = int(getattr(item, "char_start", -1))
+-        end = int(getattr(item, "char_end", -1))
+-        if (
+-            0 <= start < end <= len(text)
+-            and text[start:end] == str(getattr(item, "text", text[start:end]))
+-            and start >= previous
+-        ):
+-            valid.append(item)
+-            previous = end
+-    if not valid and text:
+-        return [_FallbackSplit(0, len(text), 0, 0, text)]
+-    if any(
+-        text[left.char_end : right.char_start].strip()
+-        for left, right in zip(valid, valid[1:], strict=False)
+-    ):
+-        return [_FallbackSplit(0, len(text), 0, 0, text)]
+-    return _repair_quote_boundaries(_split_closing_quote_boundaries(valid, text), text)
+-def _split_closing_quote_boundaries(items: list[Any], text: str) -> list[Any]:
+-    pattern = re.compile(r'[.!?]["\'»”’]+\s+(?=[A-ZÄÖÜÀ-Þ])')
+-    repaired: list[Any] = []
+-    for item in items:
+-        item_start = int(item.char_start)
+-        item_end = int(item.char_end)
+-        start = item_start
+-        sentence = int(getattr(item, "sentence_idx", 0) or 0)
+-        paragraph = int(getattr(item, "paragraph_idx", 0) or 0)
+-        for match in pattern.finditer(text[item_start:item_end]):
+-            end = item_start + match.start() + len(match.group(0).rstrip())
+-            if end <= start or end >= item_end:
+-                continue
+-            repaired.append(
+-                _FallbackSplit(
+-                    start,
+-                    end,
+-                    paragraph,
+-                    sentence,
+-                    text[start:end],
+-                )
+-            )
+-            sentence += 1
+-            start = item_start + match.end()
+-        if start < item_end:
+-            repaired.append(
+-                _FallbackSplit(
+-                    start,
+-                    item_end,
+-                    paragraph,
+-                    sentence,
+-                    text[start:item_end],
+-                )
+-            )
+-    return repaired
+-
+-
+-def _repair_quote_boundaries(items: list[Any], text: str) -> list[Any]:
+-    repaired: list[Any] = []
+-    closing = "\"'”’)]}"
+-    for item in items:
+-        current = _FallbackSplit(
+-            int(item.char_start),
+-            int(item.char_end),
+-            int(getattr(item, "paragraph_idx", 0) or 0),
+-            int(getattr(item, "sentence_idx", 0) or 0),
+-            text[int(item.char_start) : int(item.char_end)],
+-        )
+-        if (
+-            repaired
+-            and repaired[-1].text.rstrip().endswith((".", "!", "?"))
+-            and current.text.lstrip().startswith(tuple(closing))
+-        ):
+-            previous = repaired[-1]
+-            previous.char_end = current.char_end
+-            previous.text = text[previous.char_start : previous.char_end]
+-        else:
+-            repaired.append(current)
+-    return repaired
+-
+-
+-class _FallbackSplit:
+-    def __init__(
+-        self, char_start: int, char_end: int, paragraph_idx: int, sentence_idx: int, text: str = ""
+-    ) -> None:
+-        self.char_start = char_start
+-        self.char_end = char_end
+-        self.paragraph_idx = paragraph_idx
+-        self.sentence_idx = sentence_idx
+-        self.clause_idx = 0
+-        self.text = text
+-
+-
+ def _detect_linguistic_semantic_boundaries(
+     text: str,
+     runs: tuple[Any, ...],
+     analyses: tuple[RunAnalysis, ...],
+ ) -> list[SemanticBoundary]:
+     try:
+-        import phrasplit
++        phrasplit = import_module("phrasplit")
+     except ImportError:
+         return []
+     result: list[SemanticBoundary] = []
+@@ -1455,17 +1500,20 @@ def _semantic_pause_events(
+ ) -> list[BoundaryEvent]:
+     result: list[BoundaryEvent] = []
+     for boundary in semantic_boundaries:
+-        if boundary.origin != "phrasplit":
++        automatic_part = bool(boundary.attrs.get("automatic_pause_candidate"))
++        if boundary.origin != "phrasplit" and not automatic_part:
+             continue
+         detected_kind = str(boundary.attrs.get("detected_kind", ""))
+         if boundary.kind == "clause":
+             event_kind = "clausal_comma"
+-            position = int(boundary.attrs.get("detector_spoken_start", boundary.position))
++            position = boundary.position
+             event_attrs = {
+                 "detected_kind": detected_kind,
+                 "automatic": True,
+                 "semantic_boundary_id": boundary.id,
+             }
++            if automatic_part:
++                event_attrs["separator_kind"] = boundary.attrs.get("separator_kind", "clause")
+         elif boundary.kind == "parenthetical":
+             event_kind = "parenthetical"
+             position = boundary.position
+@@ -1500,6 +1548,8 @@ def _derive_semantic_topology(
+             kind = "paragraph"
+         elif previous.sentence != current.sentence:
+             kind = "sentence"
++        elif previous.clause != current.clause:
++            kind = "clause"
+         else:
+             continue
+         key = (previous.spoken_end, kind)
+@@ -1682,6 +1732,25 @@ def _repair_renderer_segments(
+     return current, tuple(repairs)
+
+
++def _segmentation_repair_diagnostic(
++    repair: SegmentationRepair,
++    source_map: SourceToSpokenMap,
++) -> Diagnostic:
++    source_start = source_end = None
++    if repair.spoken_start is not None and repair.spoken_end is not None:
++        source_start, source_end = source_map.map_output_span(
++            repair.spoken_start, repair.spoken_end
++        )
++    severity = "warning" if repair.code.startswith("segmentation.phrasplit_") else "info"
++    return Diagnostic(
++        code=repair.code,
++        message=repair.message,
++        severity=severity,
++        source_start=source_start,
++        source_end=source_end,
++    )
++
++
+ def _renderability_repair_diagnostic(issue: RenderabilityIssue) -> Diagnostic:
+     if issue.repair == "drop_non_speech_punctuation":
+         message = f"Repaired isolated punctuation {issue.text!r} by removing the punctuation-only segment."
+diff --git a/utterplan/segmentation.py b/utterplan/segmentation.py
+new file mode 100644
+index 0000000..dad6dd1
+--- /dev/null
++++ b/utterplan/segmentation.py
+@@ -0,0 +1,847 @@
++from __future__ import annotations
++
++import re
++import unicodedata
++from bisect import bisect_right
++from collections.abc import Sequence
++from dataclasses import dataclass
++from importlib import import_module
++from typing import Any, Literal
++
++from .exceptions import PlanValidationError
++from .language import language_lookup_key
++from .renderability import contains_speech_content
++from .token_topology import find_boundary_conflict
++
++BoundaryLevel = Literal["sentence", "part"]
++
++
++@dataclass(frozen=True, slots=True)
++class BoundaryCandidate:
++    position: int
++    level: BoundaryLevel
++    origin: str
++    reason: str
++    confidence: int
++    language_run_id: str | None = None
++
++
++@dataclass(frozen=True, slots=True)
++class ParagraphRegion:
++    start: int
++    end: int
++    paragraph_index: int
++
++
++@dataclass(frozen=True, slots=True)
++class SentenceSpan:
++    start: int
++    end: int
++    paragraph_index: int
++    sentence_index: int
++
++
++@dataclass(frozen=True, slots=True)
++class SentencePart:
++    start: int
++    end: int
++    paragraph_index: int
++    sentence_index: int
++    part_index: int
++    boundary_after: str | None = None
++    boundary_origin: str | None = None
++
++
++@dataclass(frozen=True, slots=True)
++class SegmentationRepair:
++    code: str
++    message: str
++    spoken_start: int | None = None
++    spoken_end: int | None = None
++    original_position: int | None = None
++    repaired_position: int | None = None
++    origin: str | None = None
++
++
++@dataclass(frozen=True, slots=True)
++class SentenceTopology:
++    sentences: tuple[SentenceSpan, ...]
++    parts: tuple[SentencePart, ...]
++    repairs: tuple[SegmentationRepair, ...]
++    degraded: bool = False
++
++
++@dataclass(frozen=True, slots=True)
++class SentenceProposalBatch:
++    candidates: tuple[BoundaryCandidate, ...]
++    repairs: tuple[SegmentationRepair, ...]
++    degraded: bool
++
++
++def propose_phrasplit_sentence_boundaries(
++    text: str,
++    *,
++    language: str,
++    run_start: int,
++    run_id: str,
++) -> SentenceProposalBatch:
++    """Adapt PhraseSplit sentence spans into validated UtterPlan boundary proposals.
++
++    PhraseSplit spans are untrusted proposals, not canonical topology. Whitespace
++    may be omitted between spans or at the edges, but any omitted non-whitespace
++    content invalidates the entire batch. Run endpoints are intentionally not
++    emitted as sentence evidence: language-run boundaries can occur mid-sentence.
++    """
++    try:
++        phrasplit = import_module("phrasplit")
++    except ImportError:
++        return _degraded_batch(
++            "segmentation.phrasplit_unavailable",
++            f"PhraseSplit is unavailable for spoken range {run_start}:{run_start + len(text)}; "
++            "sentence fallback is required",
++            run_start,
++            run_start + len(text),
++        )
++
++    try:
++        raw = phrasplit.split_with_offsets(
++            text,
++            mode="sentence",
++            use_spacy=False,
++            language=language_lookup_key(language),
++        )
++        items = list(raw)
++    except Exception as exc:
++        return _degraded_batch(
++            "segmentation.phrasplit_failed",
++            f"PhraseSplit failed for spoken range {run_start}:{run_start + len(text)} "
++            f"({type(exc).__name__}); sentence fallback is required",
++            run_start,
++            run_start + len(text),
++        )
++
++    validated: list[tuple[int, int, str]] = []
++    previous_end = 0
++    invalid_reason: str | None = None
++    for index, item in enumerate(items):
++        try:
++            start = getattr(item, "char_start", None)
++            end = getattr(item, "char_end", None)
++            surface = getattr(item, "text", None)
++        except Exception:
++            invalid_reason = f"proposal {index} could not be read"
++            break
++
++        if type(start) is not int or type(end) is not int:
++            invalid_reason = f"proposal {index} has non-integer offsets"
++            break
++        if not isinstance(surface, str):
++            invalid_reason = f"proposal {index} has no text surface"
++            break
++        if not 0 <= start < end <= len(text):
++            invalid_reason = f"proposal {index} has out-of-range or empty offsets"
++            break
++        if start < previous_end:
++            invalid_reason = f"proposal {index} overlaps or is out of order"
++            break
++        if surface != text[start:end]:
++            invalid_reason = f"proposal {index} surface does not match its offsets"
++            break
++        if text[previous_end:start].strip():
++            invalid_reason = f"uncovered non-whitespace text at {previous_end}:{start}"
++            break
++        validated.append((start, end, surface))
++        previous_end = end
++
++    if invalid_reason is None and text[previous_end:].strip():
++        invalid_reason = f"uncovered non-whitespace text at {previous_end}:{len(text)}"
++
++    if invalid_reason is not None:
++        return _degraded_batch(
++            "segmentation.phrasplit_invalid",
++            f"Discarded the PhraseSplit proposal batch for spoken range "
++            f"{run_start}:{run_start + len(text)}: {invalid_reason}; "
++            "sentence fallback is required",
++            run_start,
++            run_start + len(text),
++        )
++
++    candidates = tuple(
++        BoundaryCandidate(
++            position=run_start + end,
++            level="sentence",
++            origin="phrasplit",
++            reason="PhraseSplit sentence boundary before another proposal in this language run",
++            confidence=80,
++            language_run_id=run_id,
++        )
++        for _start, end, _surface in validated[:-1]
++    )
++    return SentenceProposalBatch(candidates=candidates, repairs=(), degraded=False)
++
++
++def build_paragraph_regions(
++    spoken: str,
++    boundaries: Sequence[Any],
++) -> tuple[ParagraphRegion, ...]:
++    """Build paragraph containers from parser-provided paragraph events."""
++    positions = {0, len(spoken)}
++    for boundary in boundaries:
++        position = getattr(boundary, "position", None)
++        if (
++            getattr(boundary, "kind", None) == "paragraph"
++            and type(position) is int
++            and 0 < position < len(spoken)
++        ):
++            positions.add(position)
++
++    regions: list[ParagraphRegion] = []
++    ordered = sorted(positions)
++    for start, end in zip(ordered, ordered[1:], strict=False):
++        while start < end and spoken[start].isspace():
++            start += 1
++        while end > start and spoken[end - 1].isspace():
++            end -= 1
++        if start >= end:
++            continue
++        regions.append(ParagraphRegion(start, end, len(regions)))
++    return tuple(regions)
++
++
++def fallback_terminal_candidates(
++    spoken: str,
++    paragraphs: Sequence[ParagraphRegion],
++    *,
++    origin: str = "terminal-punctuation",
++) -> tuple[BoundaryCandidate, ...]:
++    """Find conservative high-confidence sentence boundaries in paragraph spans."""
++    candidates: list[BoundaryCandidate] = []
++    for paragraph in paragraphs:
++        text = spoken
++        position = paragraph.start
++        while position < paragraph.end:
++            char = text[position]
++            if char not in ".!?。｡！？」؟﹖﹗…":
++                position += 1
++                continue
++
++            terminal_start = position
++            if char == ".":
++                while terminal_start > paragraph.start and text[terminal_start - 1] == ".":
++                    terminal_start -= 1
++                terminal_end = position + 1
++                while terminal_end < paragraph.end and text[terminal_end] == ".":
++                    terminal_end += 1
++                dot_count = terminal_end - terminal_start
++                if position != terminal_end - 1:
++                    position += 1
++                    continue
++                if dot_count == 1 and _protected_period(text, position, paragraph.start):
++                    position += 1
++                    continue
++                is_ellipsis = dot_count > 1
++            else:
++                terminal_end = position + 1
++                while terminal_end < paragraph.end and text[terminal_end] in "!?。｡！？」؟﹖﹗":
++                    terminal_end += 1
++                is_ellipsis = char == "…"
++                if is_ellipsis:
++                    while terminal_end < paragraph.end and text[terminal_end] == "…":
++                        terminal_end += 1
++
++            boundary_end = terminal_end
++            has_closing = False
++            while boundary_end < paragraph.end and _is_closing_punctuation(text[boundary_end]):
++                has_closing = True
++                boundary_end += 1
++            whitespace_end = boundary_end
++            while whitespace_end < paragraph.end and text[whitespace_end].isspace():
++                whitespace_end += 1
++            if whitespace_end >= paragraph.end:
++                position = max(position + 1, boundary_end)
++                continue
++            following = text[whitespace_end : paragraph.end]
++            if not contains_speech_content(following):
++                position += 1
++                continue
++
++            next_speech = next((character for character in following if character.isalnum()), "")
++            strong_terminal = char in "!?。｡！？」؟﹖﹗"
++            quote_terminal = has_closing
++            if is_ellipsis or char == ".":
++                strong_terminal = bool(next_speech and next_speech.isupper())
++            if strong_terminal or quote_terminal:
++                candidates.append(
++                    BoundaryCandidate(
++                        position=boundary_end,
++                        level="sentence",
++                        origin=origin,
++                        reason="conservative terminal punctuation fallback",
++                        confidence=70 if quote_terminal else 55,
++                    )
++                )
++            position = max(position + 1, terminal_end)
++    return tuple(candidates)
++
++
++def normalize_sentence_candidates(
++    spoken: str,
++    paragraphs: Sequence[ParagraphRegion],
++    candidates: Sequence[BoundaryCandidate],
++    *,
++    tokens: Sequence[Any],
++    token_providers: Sequence[str | None],
++    protected_spans: Sequence[tuple[int, int]] = (),
++) -> tuple[tuple[SentenceSpan, ...], tuple[SegmentationRepair, ...]]:
++    """Normalize automatic sentence boundaries and assign compiler-owned indices."""
++    ordered_candidates = sorted(
++        candidates,
++        key=lambda item: (item.position, -item.confidence, item.origin, item.reason),
++    )
++    sentences: list[SentenceSpan] = []
++    dropped_lexical = 0
++    dropped_speechless = 0
++    dropped_atomic = 0
++    for paragraph in paragraphs:
++        local = [
++            item for item in ordered_candidates if paragraph.start < item.position < paragraph.end
++        ]
++        unique: list[BoundaryCandidate] = []
++        seen_positions: set[int] = set()
++        for candidate in local:
++            if _inside_protected_span(candidate.position, protected_spans):
++                dropped_atomic += 1
++                continue
++            position = _attach_closing_cluster(spoken, candidate.position, paragraph.end)
++            if _inside_protected_span(position, protected_spans):
++                dropped_atomic += 1
++                continue
++            if not paragraph.start < position < paragraph.end or position in seen_positions:
++                continue
++            seen_positions.add(position)
++            conflict = find_boundary_conflict(
++                position,
++                tokens=tokens,
++                token_providers=token_providers,
++            )
++            if conflict is not None:
++                dropped_lexical += 1
++                continue
++            unique.append(
++                BoundaryCandidate(
++                    position=position,
++                    level="sentence",
++                    origin=candidate.origin,
++                    reason=candidate.reason,
++                    confidence=candidate.confidence,
++                    language_run_id=candidate.language_run_id,
++                )
++            )
++
++        cursor = paragraph.start
++        sentence_index = 0
++        for candidate in unique:
++            boundary = candidate.position
++            if not contains_speech_content(spoken[cursor:boundary]) or not contains_speech_content(
++                spoken[boundary : paragraph.end]
++            ):
++                dropped_speechless += 1
++                continue
++            span_start, span_end = _trim_whitespace(spoken, cursor, boundary)
++            if contains_speech_content(spoken[span_start:span_end]):
++                sentences.append(
++                    SentenceSpan(span_start, span_end, paragraph.paragraph_index, sentence_index)
++                )
++                sentence_index += 1
++            cursor = boundary
++
++        span_start, span_end = _trim_whitespace(spoken, cursor, paragraph.end)
++        if contains_speech_content(spoken[span_start:span_end]):
++            sentences.append(
++                SentenceSpan(span_start, span_end, paragraph.paragraph_index, sentence_index)
++            )
++
++    repairs: list[SegmentationRepair] = []
++    if dropped_lexical:
++        repairs.append(
++            SegmentationRepair(
++                code="segmentation.lexical_boundary_merged",
++                message=f"Dropped {dropped_lexical} automatic sentence boundary candidate(s) "
++                "that split lexical content; merged the surrounding sentence spans",
++                origin="automatic",
++            )
++        )
++    if dropped_speechless:
++        repairs.append(
++            SegmentationRepair(
++                code="segmentation.sentence_candidate_dropped",
++                message=f"Dropped {dropped_speechless} sentence boundary candidate(s) "
++                "that would create a speechless sentence",
++                origin="automatic",
++            )
++        )
++    if dropped_atomic:
++        repairs.append(
++            SegmentationRepair(
++                "segmentation.atomic_boundary_dropped",
++                f"Dropped {dropped_atomic} sentence boundary candidate(s) inside "
++                "positive-width atomic audio spans",
++                origin="automatic",
++            )
++        )
++    return tuple(sentences), tuple(repairs)
++
++
++def detect_part_candidates(
++    spoken: str,
++    sentence: SentenceSpan,
++    optional_boundaries: Sequence[Any] = (),
++) -> tuple[BoundaryCandidate, ...]:
++    """Collect deterministic punctuation and optional trusted clause proposals."""
++    candidates: list[BoundaryCandidate] = []
++    position = sentence.start
++    while position < sentence.end:
++        char = spoken[position]
++        if char in ";；" and not _inside_url_like_token(spoken, position):
++            boundary = _separator_boundary_end(spoken, position + 1, sentence.end)
++            if contains_speech_content(
++                spoken[sentence.start : position]
++            ) and contains_speech_content(spoken[boundary : sentence.end]):
++                candidates.append(
++                    BoundaryCandidate(
++                        boundary,
++                        "part",
++                        "semicolon",
++                        "semicolon sentence-part separator",
++                        90,
++                    )
++                )
++            position += 1
++            continue
++        if char in ":：":
++            if char == ":" and _ascii_colon_has_prose_context(spoken, position, sentence.end):
++                boundary = _separator_boundary_end(spoken, position + 1, sentence.end)
++                if contains_speech_content(
++                    spoken[sentence.start : position]
++                ) and contains_speech_content(spoken[boundary : sentence.end]):
++                    candidates.append(
++                        BoundaryCandidate(
++                            boundary,
++                            "part",
++                            "colon",
++                            "contextual colon sentence-part separator",
++                            75,
++                        )
++                    )
++            elif char == "：" and not _fullwidth_colon_is_numeric(spoken, position):
++                boundary = _separator_boundary_end(spoken, position + 1, sentence.end)
++                if contains_speech_content(
++                    spoken[sentence.start : position]
++                ) and contains_speech_content(spoken[boundary : sentence.end]):
++                    candidates.append(
++                        BoundaryCandidate(
++                            boundary,
++                            "part",
++                            "colon",
++                            "fullwidth colon sentence-part separator",
++                            70,
++                        )
++                    )
++        position += 1
++
++    for boundary in optional_boundaries:
++        kind = getattr(boundary, "kind", None)
++        candidate_position = getattr(boundary, "position", None)
++        if kind not in {"clause", "parenthetical"} or type(candidate_position) is not int:
++            continue
++        if not sentence.start < candidate_position < sentence.end:
++            continue
++        candidates.append(
++            BoundaryCandidate(
++                candidate_position,
++                "part",
++                "phrasplit-clause" if kind == "clause" else "parenthetical",
++                "optional PhraseSplit clause or parenthetical proposal",
++                45,
++                getattr(boundary, "language_run_id", None),
++            )
++        )
++    return tuple(candidates)
++
++
++def normalize_sentence_parts(
++    spoken: str,
++    sentence: SentenceSpan,
++    candidates: Sequence[BoundaryCandidate],
++    *,
++    tokens: Sequence[Any],
++    token_providers: Sequence[str | None],
++    protected_spans: Sequence[tuple[int, int]] = (),
++) -> tuple[tuple[SentencePart, ...], tuple[SegmentationRepair, ...]]:
++    """Normalize part boundaries, keeping separators and horizontal space on the left."""
++    ordered = sorted(
++        (candidate for candidate in candidates if candidate.level == "part"),
++        key=lambda item: (item.position, -item.confidence, item.origin),
++    )
++    unique: list[BoundaryCandidate] = []
++    seen: set[int] = set()
++    dropped_atomic = 0
++    for candidate in ordered:
++        position = candidate.position
++        if _inside_protected_span(position, protected_spans):
++            dropped_atomic += 1
++            continue
++        if not sentence.start < position < sentence.end or position in seen:
++            continue
++        seen.add(position)
++        unique.append(
++            BoundaryCandidate(
++                position,
++                "part",
++                candidate.origin,
++                candidate.reason,
++                candidate.confidence,
++                candidate.language_run_id,
++            )
++        )
++
++    # Collapse runs of separators with no speech between them to their rightmost
++    # edge, so e.g. "Hello; ; world" never creates a punctuation-only part.
++    clustered: list[BoundaryCandidate] = []
++    index = 0
++    while index < len(unique):
++        cluster_end = index
++        while cluster_end + 1 < len(unique) and not contains_speech_content(
++            spoken[unique[cluster_end].position : unique[cluster_end + 1].position]
++        ):
++            cluster_end += 1
++        clustered.append(unique[cluster_end])
++        index = cluster_end + 1
++
++    accepted: list[BoundaryCandidate] = []
++    dropped_lexical = 0
++    dropped_speechless = max(0, len(unique) - len(clustered))
++    cursor = sentence.start
++    for candidate in clustered:
++        position = candidate.position
++        if not contains_speech_content(spoken[cursor:position]) or not contains_speech_content(
++            spoken[position : sentence.end]
++        ):
++            dropped_speechless += 1
++            continue
++        if (
++            find_boundary_conflict(
++                position,
++                tokens=tokens,
++                token_providers=token_providers,
++            )
++            is not None
++        ):
++            dropped_lexical += 1
++            continue
++        accepted.append(candidate)
++        cursor = position
++
++    parts: list[SentencePart] = []
++    cursor = sentence.start
++    for part_index, candidate in enumerate(accepted):
++        parts.append(
++            SentencePart(
++                cursor,
++                candidate.position,
++                sentence.paragraph_index,
++                sentence.sentence_index,
++                part_index,
++                boundary_after=candidate.origin,
++                boundary_origin=candidate.origin,
++            )
++        )
++        cursor = candidate.position
++    parts.append(
++        SentencePart(
++            cursor,
++            sentence.end,
++            sentence.paragraph_index,
++            sentence.sentence_index,
++            len(parts),
++        )
++    )
++
++    repairs: list[SegmentationRepair] = []
++    if dropped_lexical:
++        repairs.append(
++            SegmentationRepair(
++                "segmentation.part_candidate_dropped",
++                f"Dropped {dropped_lexical} automatic sentence-part candidate(s) "
++                "that split lexical content; kept a wider part",
++                sentence.start,
++                sentence.end,
++                origin="automatic",
++            )
++        )
++    if dropped_speechless:
++        repairs.append(
++            SegmentationRepair(
++                "segmentation.part_candidate_dropped",
++                f"Collapsed {dropped_speechless} sentence-part candidate(s) "
++                "that would create a speechless part",
++                sentence.start,
++                sentence.end,
++                origin="automatic",
++            )
++        )
++    if dropped_atomic:
++        repairs.append(
++            SegmentationRepair(
++                "segmentation.atomic_boundary_dropped",
++                f"Dropped {dropped_atomic} sentence-part candidate(s) inside "
++                "positive-width atomic audio spans",
++                sentence.start,
++                sentence.end,
++                origin="automatic",
++            )
++        )
++    return tuple(parts), tuple(repairs)
++
++
++def _ascii_colon_has_prose_context(text: str, position: int, limit: int) -> bool:
++    if position == 0 or position + 1 >= limit:
++        return False
++    if text[position - 1] == ":" or text[position + 1] in ":/\\":
++        return False
++    if text[position - 1].isdigit() and text[position + 1].isdigit():
++        return False
++    next_position = position + 1
++    if _is_horizontal_space(text[next_position]):
++        while next_position < limit and _is_horizontal_space(text[next_position]):
++            next_position += 1
++        return next_position < limit
++    return text[next_position] in "\"'“‘«„‹([{「『（【"
++
++
++def _fullwidth_colon_is_numeric(text: str, position: int) -> bool:
++    return (
++        position > 0
++        and position + 1 < len(text)
++        and text[position - 1].isdigit()
++        and text[position + 1].isdigit()
++    )
++
++
++def _inside_url_like_token(text: str, position: int) -> bool:
++    start = position
++    while start > 0 and not text[start - 1].isspace():
++        start -= 1
++    end = position + 1
++    while end < len(text) and not text[end].isspace():
++        end += 1
++    token = text[start:end]
++    return "://" in token or token.casefold().startswith(("mailto:", "www."))
++
++
++def _separator_boundary_end(text: str, position: int, limit: int) -> int:
++    position = _attach_closing_cluster(text, position, limit)
++    return _consume_horizontal_space(text, position, limit)
++
++
++def _consume_horizontal_space(text: str, position: int, limit: int) -> int:
++    while position < limit and _is_horizontal_space(text[position]):
++        position += 1
++    return position
++
++
++def _is_horizontal_space(character: str) -> bool:
++    return character == "\t" or unicodedata.category(character) == "Zs"
++
++
++def _normalize_protected_spans(
++    spans: Sequence[tuple[int, int]], text_length: int
++) -> tuple[tuple[int, int], ...]:
++    ordered = sorted(
++        (start, end)
++        for start, end in spans
++        if type(start) is int and type(end) is int and 0 <= start < end <= text_length
++    )
++    merged: list[tuple[int, int]] = []
++    for start, end in ordered:
++        if merged and start < merged[-1][1]:
++            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
++        else:
++            merged.append((start, end))
++    return tuple(merged)
++
++
++def _inside_protected_span(position: int, spans: Sequence[tuple[int, int]]) -> bool:
++    index = bisect_right(spans, position, key=lambda span: span[0]) - 1
++    return index >= 0 and spans[index][0] < position < spans[index][1]
++
++
++def build_sentence_topology(
++    spoken: str,
++    runs: Sequence[Any],
++    boundaries: Sequence[Any],
++    *,
++    tokens: Sequence[Any],
++    token_providers: Sequence[str | None],
++    optional_part_boundaries: Sequence[Any] = (),
++    protected_spans: Sequence[tuple[int, int]] = (),
++) -> SentenceTopology:
++    """Build compiler-owned paragraph, sentence, and sentence-part topology."""
++    paragraphs = build_paragraph_regions(spoken, boundaries)
++    protected_spans = _normalize_protected_spans(protected_spans, len(spoken))
++    candidates: list[BoundaryCandidate] = []
++    repairs: list[SegmentationRepair] = []
++    degraded = False
++    for run in runs:
++        batch = propose_phrasplit_sentence_boundaries(
++            spoken[run.spoken_start : run.spoken_end],
++            language=run.language,
++            run_start=run.spoken_start,
++            run_id=run.id,
++        )
++        candidates.extend(batch.candidates)
++        repairs.extend(batch.repairs)
++        degraded = degraded or batch.degraded
++
++    candidates.extend(fallback_terminal_candidates(spoken, paragraphs))
++    sentences, repairs_from_normalization = normalize_sentence_candidates(
++        spoken,
++        paragraphs,
++        candidates,
++        tokens=tokens,
++        token_providers=token_providers,
++        protected_spans=protected_spans,
++    )
++    repairs.extend(repairs_from_normalization)
++
++    parts: list[SentencePart] = []
++    for sentence in sentences:
++        part_candidates = detect_part_candidates(
++            spoken,
++            sentence,
++            optional_boundaries=optional_part_boundaries,
++        )
++        sentence_parts, part_repairs = normalize_sentence_parts(
++            spoken,
++            sentence,
++            part_candidates,
++            tokens=tokens,
++            token_providers=token_providers,
++            protected_spans=protected_spans,
++        )
++        parts.extend(sentence_parts)
++        repairs.extend(part_repairs)
++    return SentenceTopology(tuple(sentences), tuple(parts), tuple(repairs), degraded)
++
++
++def validate_non_whitespace_coverage(spoken: str, segments: Sequence[Any]) -> None:
++    """Validate exact, ordered segment surfaces and complete non-whitespace coverage."""
++    previous_end = 0
++    for segment in sorted(segments, key=lambda item: (item.spoken_start, item.spoken_end)):
++        start, end = segment.spoken_start, segment.spoken_end
++        if not 0 <= start <= end <= len(spoken):
++            raise PlanValidationError(
++                f"segment {segment.id} has invalid spoken span [{start}:{end}]",
++                code="segmentation.segment_span",
++            )
++        if start == end:
++            if segment.text != spoken[start:end]:
++                raise PlanValidationError(
++                    f"zero-width segment {segment.id} has a non-empty surface",
++                    code="segmentation.segment_surface",
++                )
++            continue
++        if start < previous_end:
++            raise PlanValidationError(
++                f"segment {segment.id} overlaps the preceding renderer segment",
++                code="segmentation.segment_overlap",
++            )
++        if segment.text != spoken[start:end]:
++            raise PlanValidationError(
++                f"segment {segment.id} surface differs from spoken text [{start}:{end}]",
++                code="segmentation.segment_surface",
++            )
++        gap = spoken[previous_end:start]
++        if gap.strip():
++            raise PlanValidationError(
++                f"non-whitespace spoken content is uncovered at [{previous_end}:{start}]",
++                code="segmentation.content_gap",
++            )
++        previous_end = end
++    tail = spoken[previous_end:]
++    if tail.strip():
++        raise PlanValidationError(
++            f"non-whitespace spoken content is uncovered at [{previous_end}:{len(spoken)}]",
++            code="segmentation.content_gap",
++        )
++
++
++def _degraded_batch(
++    code: str,
++    message: str,
++    spoken_start: int,
++    spoken_end: int,
++) -> SentenceProposalBatch:
++    return SentenceProposalBatch(
++        candidates=(),
++        repairs=(
++            SegmentationRepair(
++                code=code,
++                message=message,
++                spoken_start=spoken_start,
++                spoken_end=spoken_end,
++                origin="phrasplit",
++            ),
++        ),
++        degraded=True,
++    )
++
++
++def _protected_period(text: str, position: int, paragraph_start: int) -> bool:
++    left = text[paragraph_start:position]
++    token_match = re.search(r"[^\s]+$", left)
++    token = token_match.group(0) if token_match else ""
++    folded = token.casefold().rstrip(".,;:!?\"'”’)]}")
++    if folded in {
++        "dr",
++        "mr",
++        "mrs",
++        "ms",
++        "prof",
++        "sr",
++        "jr",
++        "st",
++        "vs",
++        "etc",
++        "eg",
++        "e.g",
++        "ie",
++        "i.e",
++        "no",
++        "fig",
++        "inc",
++        "dept",
++    }:
++        return True
++    if re.fullmatch(r"(?:\w\.)+\w?", token, flags=re.UNICODE):
++        return True
++    previous = token.rstrip(".")
++    return len(previous) == 1 and previous.isalpha()
++
++
++def _attach_closing_cluster(text: str, position: int, limit: int) -> int:
++    while position < limit and _is_closing_punctuation(text[position]):
++        position += 1
++    return position
++
++
++def _is_closing_punctuation(character: str) -> bool:
++    return character in "\"'»”’)]}】》」』〕〉）］｝〗〙〛"
++
++
++def _trim_whitespace(text: str, start: int, end: int) -> tuple[int, int]:
++    while start < end and text[start].isspace():
++        start += 1
++    while end > start and text[end - 1].isspace():
++        end -= 1
++    return start, end
+diff --git a/utterplan/token_topology.py b/utterplan/token_topology.py
+new file mode 100644
+index 0000000..81c1a4c
+--- /dev/null
++++ b/utterplan/token_topology.py
+@@ -0,0 +1,102 @@
++from __future__ import annotations
++
++from bisect import bisect_right
++from collections.abc import Sequence
++from dataclasses import dataclass
++from typing import Any
++
++from .exceptions import PlanValidationError
++
++
++@dataclass(frozen=True, slots=True)
++class TokenBoundaryConflict:
++    token_index: int
++    token_start: int
++    token_end: int
++    token_text: str
++    provider: str | None
++    position: int
++
++
++def boundary_splits_lexical_content(
++    position: int,
++    *,
++    token: Any,
++    provider: str | None,
++) -> bool:
++    """Return whether a spoken-text boundary divides lexical content in a token.
++
++    Fallback tokenization uses ``\\S+`` spans, so only an alphanumeric pair
++    directly adjacent to the cut is protected. Lexical-provider tokens retain
++    the projection rule: both sides of a partial token must contain a word
++    character for the cut to be unsafe.
++    """
++    start = token.spoken_start
++    end = token.spoken_end
++    if not start < position < end:
++        return False
++
++    relative = position - start
++    if provider == "fallback":
++        return token.text[relative - 1].isalnum() and token.text[relative].isalnum()
++
++    return _has_word_character(token.text[:relative]) and _has_word_character(token.text[relative:])
++
++
++def find_boundary_conflict(
++    position: int,
++    *,
++    tokens: Sequence[Any],
++    token_providers: Sequence[str | None],
++) -> TokenBoundaryConflict | None:
++    """Find the token whose interior is split by a spoken-text position."""
++    token_index = bisect_right(tokens, position, key=lambda item: item.spoken_start) - 1
++    if token_index < 0:
++        return None
++    token = tokens[token_index]
++    provider = token_providers[token_index] if token_index < len(token_providers) else None
++    if not boundary_splits_lexical_content(position, token=token, provider=provider):
++        return None
++    return TokenBoundaryConflict(
++        token_index=token_index,
++        token_start=token.spoken_start,
++        token_end=token.spoken_end,
++        token_text=token.text,
++        provider=provider,
++        position=position,
++    )
++
++
++def validate_segment_token_edges(
++    segments: Sequence[Any],
++    tokens: Sequence[Any],
++    token_providers: Sequence[str | None],
++    *,
++    conflict_code: str = "token.segment_split",
++) -> None:
++    """Raise an error for any unsafe segment edge."""
++    for segment in segments:
++        if segment.spoken_start == segment.spoken_end:
++            continue
++        for side, position in (
++            ("start", segment.spoken_start),
++            ("end", segment.spoken_end),
++        ):
++            conflict = find_boundary_conflict(
++                position,
++                tokens=tokens,
++                token_providers=token_providers,
++            )
++            if conflict is None:
++                continue
++            raise PlanValidationError(
++                f"compiler segment {segment.id} "
++                f"[{segment.spoken_start}:{segment.spoken_end}] splits token "
++                f"{conflict.token_index} "
++                f"[{conflict.token_start}:{conflict.token_end}] at its {side}",
++                code=conflict_code,
++            )
++
++
++def _has_word_character(value: str) -> bool:
++    return any(character.isalnum() for character in value)
