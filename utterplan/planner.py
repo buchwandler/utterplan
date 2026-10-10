@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import hashlib
-import re
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import asdict, replace
+from importlib import import_module
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -13,7 +13,12 @@ if TYPE_CHECKING:
 from .attempts import PlanDraft, PlanningAttempt, PlanningAttemptStatus, planning_attempt_id
 from .config import PauseConfig, PlannerConfig
 from .directives import resolve_directives
-from .exceptions import ConfigurationError, PlanningError, PlanRenderabilityError
+from .exceptions import (
+    ConfigurationError,
+    PlanningError,
+    PlanRenderabilityError,
+    PlanValidationError,
+)
 from .language import LanguageRun, build_language_runs, language_lookup_key, spans_from_annotations
 from .linguistics import LinguisticResourcePool, RunAnalysis, analyze_run_analyses
 from .model import (
@@ -38,7 +43,20 @@ from .parsers import (
 from .pauses import boundary_is_active, resolve_pause_intents
 from .preparation import IdentityTextPreparer, SourceToSpokenMap, SpokenformTextPreparer
 from .progress import PlannerProgressEvent, ProgressCallback, _notify_progress
-from .renderability import RenderabilityIssue, RenderabilityReport, preflight_segments
+from .renderability import (
+    RenderabilityIssue,
+    RenderabilityReport,
+    contains_speech_content,
+    preflight_segments,
+)
+from .segmentation import (
+    SegmentationRepair,
+    SentenceTopology,
+    build_paragraph_regions,
+    build_sentence_topology,
+    validate_non_whitespace_coverage,
+)
+from .token_topology import validate_segment_token_edges
 from .units import make_units
 
 
@@ -311,9 +329,57 @@ class UtterancePlanner:
             _detect_linguistic_semantic_boundaries(spoken, runs, pass_b)
         )
         boundaries = list(prepared.boundaries)
+        token_providers = _token_providers_for_runs(linguistic_runs, len(tokens))
+        protected_audio_spans = tuple(
+            (annotation.spoken_start, annotation.spoken_end)
+            for annotation in _audio_annotations(prepared.annotations)
+            if annotation.spoken_start is not None
+            and annotation.spoken_end is not None
+            and annotation.spoken_start < annotation.spoken_end
+        )
+        topology = build_sentence_topology(
+            spoken,
+            runs,
+            boundaries,
+            tokens=tokens,
+            token_providers=token_providers,
+            optional_part_boundaries=semantic_boundaries,
+            protected_spans=protected_audio_spans,
+        )
+        part_semantic_boundaries = [
+            SemanticBoundary(
+                "",
+                part.end,
+                "clause",
+                origin="planner",
+                attrs={
+                    "automatic_pause_candidate": True,
+                    "separator_kind": part.boundary_origin,
+                },
+            )
+            for part in topology.parts
+            if part.boundary_origin in {"semicolon", "colon"}
+        ]
+        if part_semantic_boundaries:
+            semantic_boundaries, _ = _canonicalize_semantic_boundaries(
+                [*semantic_boundaries, *part_semantic_boundaries]
+            )
         boundaries.extend(_semantic_pause_events(semantic_boundaries, start_id=len(boundaries)))
         segments = _segment(
-            spoken, runs, prepared.annotations, boundaries, pause_config, document_language
+            spoken,
+            runs,
+            prepared.annotations,
+            boundaries,
+            pause_config,
+            document_language,
+            topology,
+        )
+        validate_non_whitespace_coverage(spoken, segments)
+        validate_segment_token_edges(
+            segments,
+            tokens,
+            token_providers,
+            conflict_code="segmentation.required_cut_conflict",
         )
         segments = _attach_structural_ranges(
             segments, prepared.source_map, len(parsed.structural_text)
@@ -354,7 +420,9 @@ class UtterancePlanner:
         if initial_renderability.issues:
             status = "blocked"
             if config.renderability_mode == "repair" and all(
-                issue.repair_assessment is not None and issue.repair_assessment.safe
+                issue.repair_assessment is not None
+                and issue.repair_assessment.safe
+                and issue.repair_assessment.action != "drop"
                 for issue in initial_renderability.issues
             ):
                 segments, renderability_repairs = _repair_renderer_segments(
@@ -366,6 +434,13 @@ class UtterancePlanner:
                     replace(segment, id=f"seg-{index:06d}")
                     for index, segment in enumerate(segments)
                 ]
+                validate_non_whitespace_coverage(spoken, segments)
+                validate_segment_token_edges(
+                    segments,
+                    tokens,
+                    token_providers,
+                    conflict_code="segmentation.required_cut_conflict",
+                )
                 segments = _attach_structural_ranges(
                     segments, prepared.source_map, len(parsed.structural_text)
                 )
@@ -433,6 +508,10 @@ class UtterancePlanner:
             },
         }
         diagnostics = list(parsed.diagnostics)
+        diagnostics.extend(
+            _segmentation_repair_diagnostic(repair, prepared.source_map)
+            for repair in topology.repairs
+        )
         diagnostics.extend(
             _renderability_repair_diagnostic(issue) for issue in renderability_repairs
         )
@@ -647,6 +726,16 @@ def _linguistic_runs(runs: tuple[Any, ...], analyses: tuple[Any, ...]) -> tuple[
     return tuple(result)
 
 
+def _token_providers_for_runs(
+    linguistic_runs: tuple[LinguisticRun, ...], token_count: int
+) -> tuple[str | None, ...]:
+    providers: list[str | None] = [None] * token_count
+    for run in linguistic_runs:
+        for token_index in range(max(0, run.token_start), min(token_count, run.token_end)):
+            providers[token_index] = run.provider
+    return tuple(providers)
+
+
 def _segment(
     text: str,
     runs: tuple[LanguageRun, ...],
@@ -654,92 +743,79 @@ def _segment(
     boundaries: list[BoundaryEvent],
     pause_config: PauseConfig,
     default_language: str,
+    topology: SentenceTopology,
 ) -> list[PlanSegment]:
-    base_segments = _segment_text(text, runs, annotations, boundaries, pause_config)
+    base_segments = _segment_sentence_parts(
+        text, topology, runs, annotations, boundaries, pause_config
+    )
+    base_segments = _reconcile_non_speech_gaps(
+        text, base_segments, topology, runs, boundaries, default_language
+    )
     _validate_audio_topology(annotations, runs, base_segments)
     return _apply_atomic_audio_segments(text, base_segments, runs, annotations, default_language)
 
 
-def _segment_text(
+def _segment_sentence_parts(
     text: str,
-    runs: tuple[Any, ...],
+    topology: SentenceTopology,
+    runs: tuple[LanguageRun, ...],
     annotations: tuple[AnnotationSpan, ...],
     boundaries: list[BoundaryEvent],
     pause_config: PauseConfig,
 ) -> list[PlanSegment]:
-    if not text:
-        return []
     result: list[PlanSegment] = []
-    for run in runs:
-        local_text = text[run.spoken_start : run.spoken_end]
-        for item in _split_run(local_text, run.language):
-            local_start = int(getattr(item, "char_start", 0))
-            local_end = int(getattr(item, "char_end", len(local_text)))
-            start = run.spoken_start + local_start
-            end = run.spoken_start + local_end
-            if end <= start or not text[start:end].strip():
+    for part in topology.parts:
+        start, end = part.start, part.end
+        hard_cuts = {start, end}
+        hard_cuts.update(
+            point
+            for run in runs
+            for point in (run.spoken_start, run.spoken_end)
+            if start < point < end
+        )
+        hard_cuts.update(
+            boundary.position
+            for boundary in boundaries
+            if start < boundary.position < end and boundary_is_active(boundary, pause_config)
+        )
+        hard_cuts.update(
+            point
+            for annotation in _audio_annotations(annotations)
+            for point in (annotation.spoken_start, annotation.spoken_end)
+            if point is not None and start < point < end
+        )
+        semantic_cuts = {
+            point
+            for annotation in annotations
+            for point in (annotation.spoken_start, annotation.spoken_end)
+            if point is not None and start < point < end and _semantic_annotation(annotation)
+        }
+        ordered = _normalize_semantic_cuts(text, hard_cuts=hard_cuts, semantic_cuts=semantic_cuts)
+        for segment_start, segment_end in zip(ordered, ordered[1:], strict=False):
+            if segment_end <= segment_start or not text[segment_start:segment_end].strip():
                 continue
-            paragraph = int(getattr(item, "paragraph_idx", 0) or 0)
-            sentence = int(getattr(item, "sentence_idx", 0) or 0)
-            clause = int(getattr(item, "clause_idx", 0) or 0)
-            hard_cuts = {start, end}
-            hard_cuts.update(
-                boundary.position
-                for boundary in boundaries
-                if start < boundary.position < end and boundary_is_active(boundary, pause_config)
+            language = next(
+                (
+                    run.language
+                    for run in runs
+                    if run.spoken_start <= segment_start < run.spoken_end
+                ),
+                runs[-1].language if runs else "",
             )
-            hard_cuts.update(
-                point
-                for annotation in _audio_annotations(annotations)
-                for point in (annotation.spoken_start, annotation.spoken_end)
-                if point is not None and start < point < end
-            )
-            semantic_cuts = {
-                point
-                for annotation in annotations
-                for point in (annotation.spoken_start, annotation.spoken_end)
-                if point is not None and start < point < end and _semantic_annotation(annotation)
-            }
-            ordered = _normalize_semantic_cuts(
-                text,
-                hard_cuts=hard_cuts,
-                semantic_cuts=semantic_cuts,
-            )
-            clause_breaks = {
-                boundary.position
-                for boundary in boundaries
-                if start < boundary.position < end and boundary_is_active(boundary, pause_config)
-            }
-            clause_breaks.update(
-                annotation.spoken_end
-                for annotation in annotations
-                if (
-                    annotation.spoken_end is not None
-                    and start < annotation.spoken_end < end
-                    and _semantic_annotation(annotation)
-                    and not _language_annotation(annotation)
+            result.append(
+                PlanSegment(
+                    id=f"seg-{len(result):06d}",
+                    text=text[segment_start:segment_end],
+                    spoken_start=segment_start,
+                    spoken_end=segment_end,
+                    language=language,
+                    paragraph=part.paragraph_index,
+                    sentence=part.sentence_index,
+                    clause=part.part_index,
+                    structural_start=None,
+                    structural_end=None,
                 )
             )
-            current_clause = clause
-            for part_start, part_end in zip(ordered, ordered[1:], strict=False):
-                if part_end <= part_start or not text[part_start:part_end].strip():
-                    continue
-                result.append(
-                    PlanSegment(
-                        id=f"seg-{len(result):06d}",
-                        text=text[part_start:part_end],
-                        spoken_start=part_start,
-                        spoken_end=part_end,
-                        language=run.language,
-                        paragraph=paragraph,
-                        sentence=sentence,
-                        clause=current_clause,
-                        structural_start=None,
-                        structural_end=None,
-                    )
-                )
-                if part_end in clause_breaks:
-                    current_clause += 1
     return _coalesce_neutral_punctuation_segments(
         text,
         result,
@@ -747,6 +823,76 @@ def _segment_text(
         pause_config=pause_config,
         annotations=annotations,
     )
+
+
+def _reconcile_non_speech_gaps(
+    text: str,
+    segments: list[PlanSegment],
+    topology: SentenceTopology,
+    runs: tuple[LanguageRun, ...],
+    boundaries: list[BoundaryEvent],
+    default_language: str,
+) -> list[PlanSegment]:
+    result = list(segments)
+    ordered = sorted(segments, key=lambda item: (item.spoken_start, item.spoken_end))
+    gaps: list[tuple[int, int]] = []
+    previous_end = 0
+    for segment in ordered:
+        if text[previous_end : segment.spoken_start].strip():
+            gaps.append((previous_end, segment.spoken_start))
+        previous_end = max(previous_end, segment.spoken_end)
+    if text[previous_end:].strip():
+        gaps.append((previous_end, len(text)))
+
+    for region in build_paragraph_regions(text, boundaries):
+        for gap_start, gap_end in gaps:
+            start = max(region.start, gap_start)
+            end = min(region.end, gap_end)
+            while start < end and text[start].isspace():
+                start += 1
+            while end > start and text[end - 1].isspace():
+                end -= 1
+            if start >= end:
+                continue
+            surface = text[start:end]
+            if contains_speech_content(surface):
+                raise PlanValidationError(
+                    f"speech-bearing prepared text is outside sentence topology [{start}:{end}]",
+                    code="segmentation.content_gap",
+                )
+            paragraph_sentences = [
+                sentence
+                for sentence in topology.sentences
+                if sentence.paragraph_index == region.paragraph_index
+            ]
+            preceding = [sentence for sentence in paragraph_sentences if sentence.end <= start]
+            following = [sentence for sentence in paragraph_sentences if sentence.start >= end]
+            sentence_index = (
+                max(preceding, key=lambda item: item.end).sentence_index
+                if preceding
+                else min(following, key=lambda item: item.start).sentence_index
+                if following
+                else 0
+            )
+            language = next(
+                (run.language for run in runs if run.spoken_start <= start < run.spoken_end),
+                default_language,
+            )
+            result.append(
+                PlanSegment(
+                    id=f"seg-{len(result):06d}",
+                    text=surface,
+                    spoken_start=start,
+                    spoken_end=end,
+                    language=language,
+                    paragraph=region.paragraph_index,
+                    sentence=sentence_index,
+                    clause=0,
+                    structural_start=None,
+                    structural_end=None,
+                )
+            )
+    return sorted(result, key=lambda item: (item.spoken_start, item.spoken_end))
 
 
 def _is_neutral_punctuation_text(value: str) -> bool:
@@ -852,6 +998,8 @@ def _coalesce_neutral_punctuation_segments(
                 and previous.language == punctuation.language
                 and not gap.strip()
                 and previous.paragraph == punctuation.paragraph
+                and previous.sentence == punctuation.sentence
+                and previous.clause == punctuation.clause
                 and semantic_expansion_allowed(expanded_start, expanded_end)
             ):
                 result[index - 1] = replace(
@@ -877,6 +1025,8 @@ def _coalesce_neutral_punctuation_segments(
                 and following.language == punctuation.language
                 and not gap.strip()
                 and following.paragraph == punctuation.paragraph
+                and following.sentence == punctuation.sentence
+                and following.clause == punctuation.clause
                 and semantic_expansion_allowed(expanded_start, expanded_end)
             ):
                 result[index + 1] = replace(
@@ -894,6 +1044,8 @@ def _coalesce_neutral_punctuation_segments(
             or previous.directives.audio is not None
             or previous.language != following.language
             or previous.paragraph != following.paragraph
+            or previous.sentence != following.sentence
+            or previous.clause != following.clause
             or not following.text
         ):
             continue
@@ -1187,120 +1339,13 @@ def _media_context(
     return default_language, 0, 0, 0
 
 
-def _split_run(text: str, language: str) -> list[Any]:
-    try:
-        import phrasplit
-
-        # Sentence topology stays on the deterministic phrasplit path.
-        items = phrasplit.split_with_offsets(
-            text, mode="sentence", use_spacy=False, language=language_lookup_key(language)
-        )
-    except ImportError:
-        return [_FallbackSplit(0, len(text), 0, 0)] if text else []
-    except TypeError as exc:
-        raise PlanningError("sentence segmentation integration failed") from exc
-    except (OSError, ValueError):
-        return [_FallbackSplit(0, len(text), 0, 0)] if text else []
-    valid: list[Any] = []
-    previous = 0
-    for item in items:
-        start = int(getattr(item, "char_start", -1))
-        end = int(getattr(item, "char_end", -1))
-        if (
-            0 <= start < end <= len(text)
-            and text[start:end] == str(getattr(item, "text", text[start:end]))
-            and start >= previous
-        ):
-            valid.append(item)
-            previous = end
-    if not valid and text:
-        return [_FallbackSplit(0, len(text), 0, 0, text)]
-    if any(
-        text[left.char_end : right.char_start].strip()
-        for left, right in zip(valid, valid[1:], strict=False)
-    ):
-        return [_FallbackSplit(0, len(text), 0, 0, text)]
-    return _repair_quote_boundaries(_split_closing_quote_boundaries(valid, text), text)
-def _split_closing_quote_boundaries(items: list[Any], text: str) -> list[Any]:
-    pattern = re.compile(r'[.!?]["\'»”’]+\s+(?=[A-ZÄÖÜÀ-Þ])')
-    repaired: list[Any] = []
-    for item in items:
-        item_start = int(item.char_start)
-        item_end = int(item.char_end)
-        start = item_start
-        sentence = int(getattr(item, "sentence_idx", 0) or 0)
-        paragraph = int(getattr(item, "paragraph_idx", 0) or 0)
-        for match in pattern.finditer(text[item_start:item_end]):
-            end = item_start + match.start() + len(match.group(0).rstrip())
-            if end <= start or end >= item_end:
-                continue
-            repaired.append(
-                _FallbackSplit(
-                    start,
-                    end,
-                    paragraph,
-                    sentence,
-                    text[start:end],
-                )
-            )
-            sentence += 1
-            start = item_start + match.end()
-        if start < item_end:
-            repaired.append(
-                _FallbackSplit(
-                    start,
-                    item_end,
-                    paragraph,
-                    sentence,
-                    text[start:item_end],
-                )
-            )
-    return repaired
-
-
-def _repair_quote_boundaries(items: list[Any], text: str) -> list[Any]:
-    repaired: list[Any] = []
-    closing = "\"'”’)]}"
-    for item in items:
-        current = _FallbackSplit(
-            int(item.char_start),
-            int(item.char_end),
-            int(getattr(item, "paragraph_idx", 0) or 0),
-            int(getattr(item, "sentence_idx", 0) or 0),
-            text[int(item.char_start) : int(item.char_end)],
-        )
-        if (
-            repaired
-            and repaired[-1].text.rstrip().endswith((".", "!", "?"))
-            and current.text.lstrip().startswith(tuple(closing))
-        ):
-            previous = repaired[-1]
-            previous.char_end = current.char_end
-            previous.text = text[previous.char_start : previous.char_end]
-        else:
-            repaired.append(current)
-    return repaired
-
-
-class _FallbackSplit:
-    def __init__(
-        self, char_start: int, char_end: int, paragraph_idx: int, sentence_idx: int, text: str = ""
-    ) -> None:
-        self.char_start = char_start
-        self.char_end = char_end
-        self.paragraph_idx = paragraph_idx
-        self.sentence_idx = sentence_idx
-        self.clause_idx = 0
-        self.text = text
-
-
 def _detect_linguistic_semantic_boundaries(
     text: str,
     runs: tuple[Any, ...],
     analyses: tuple[RunAnalysis, ...],
 ) -> list[SemanticBoundary]:
     try:
-        import phrasplit
+        phrasplit = import_module("phrasplit")
     except ImportError:
         return []
     result: list[SemanticBoundary] = []
@@ -1455,17 +1500,20 @@ def _semantic_pause_events(
 ) -> list[BoundaryEvent]:
     result: list[BoundaryEvent] = []
     for boundary in semantic_boundaries:
-        if boundary.origin != "phrasplit":
+        automatic_part = bool(boundary.attrs.get("automatic_pause_candidate"))
+        if boundary.origin != "phrasplit" and not automatic_part:
             continue
         detected_kind = str(boundary.attrs.get("detected_kind", ""))
         if boundary.kind == "clause":
             event_kind = "clausal_comma"
-            position = int(boundary.attrs.get("detector_spoken_start", boundary.position))
+            position = boundary.position
             event_attrs = {
                 "detected_kind": detected_kind,
                 "automatic": True,
                 "semantic_boundary_id": boundary.id,
             }
+            if automatic_part:
+                event_attrs["separator_kind"] = boundary.attrs.get("separator_kind", "clause")
         elif boundary.kind == "parenthetical":
             event_kind = "parenthetical"
             position = boundary.position
@@ -1500,6 +1548,8 @@ def _derive_semantic_topology(
             kind = "paragraph"
         elif previous.sentence != current.sentence:
             kind = "sentence"
+        elif previous.clause != current.clause:
+            kind = "clause"
         else:
             continue
         key = (previous.spoken_end, kind)
@@ -1680,6 +1730,25 @@ def _repair_renderer_segments(
         del current[index]
         repairs.append(replace(issue, repair="merge_neutral_punctuation"))
     return current, tuple(repairs)
+
+
+def _segmentation_repair_diagnostic(
+    repair: SegmentationRepair,
+    source_map: SourceToSpokenMap,
+) -> Diagnostic:
+    source_start = source_end = None
+    if repair.spoken_start is not None and repair.spoken_end is not None:
+        source_start, source_end = source_map.map_output_span(
+            repair.spoken_start, repair.spoken_end
+        )
+    severity = "warning" if repair.code.startswith("segmentation.phrasplit_") else "info"
+    return Diagnostic(
+        code=repair.code,
+        message=repair.message,
+        severity=severity,
+        source_start=source_start,
+        source_end=source_end,
+    )
 
 
 def _renderability_repair_diagnostic(issue: RenderabilityIssue) -> Diagnostic:

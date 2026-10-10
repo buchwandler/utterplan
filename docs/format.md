@@ -24,6 +24,12 @@ text = "Hello world."
 token.span = [[0, 5], [6, 12]]
 ```
 
+## Compiler-only segmentation topology
+
+The compiler validates PhraseSplit proposals and owns paragraph, sentence, and sentence-part spans in spoken-text coordinates. Semicolon/context-safe colon boundaries and optional clause/parenthetical proposals may create renderer cuts; language, directive, pause, marker, and media subdivisions retain the owning sentence-part identity internally. If proposals are malformed or incomplete, deterministic fallback is used and non-whitespace text remains covered exactly.
+
+Sentence parts and their indices are deliberately absent from this v5 format. The `flow` contains only executable renderer segments and remains the compact public contract; no schema field, FlowPlan/FlowUnit/FlowSegment shape, or migration rule records private topology. Schema v5 is unchanged.
+
 ## Executable flow
 
 Each ordered `flow` entry is a `FlowUnit` with a stable local `hash` and one or more `segment` entries. A segment contains already-prepared speech `text`, an optional language override, local token columns, optional semantic `pause_before` / `pause_after` intents, typed renderer-neutral directives, markers, and an optional heading level. Language defaults to the root `language`; `unit` identifies paragraph or sentence grouping. Consumers render segments in the stored order and do not need compiler lookup tables or segment-ID joins.

@@ -17,6 +17,8 @@ utterplan inspect-trace chapter.trace.toml --preparation --boundaries
 
 Safe punctuation-only repair is the default during compilation. If a semantic blocker prevents repair, the error includes source location, prepared fragment, spoken context, blocked repair reason, and a concrete next action; UtterPlan never guesses symbol pronunciation. Use `--renderability strict` to see safe repair opportunities without applying them. Batch compilation reports each repair and continues with later sources.
 
+Sentence segmentation is a compiler-integrity step, not a renderability repair. PhraseSplit is advisory: dependency failure or a malformed/partial proposal batch produces a `segmentation.phrasplit_*` diagnostic and triggers conservative fallback. Unsafe automatic token-edge candidates are dropped or merged before projection; exact text and non-whitespace coverage are checked in both strict and repair modes. Inspect compiler diagnostics with `compile --trace FILE` and `inspect-trace FILE --boundaries`; sentence-part topology itself is intentionally not persisted in v5.
+
 Use `inspect --tokens` to inspect local `TokenView` values. Fallback analysis may leave POS, tag, and morphology unavailable. `explain --details` shows token spans relative to the owning segment and its flow hash. Token spans always slice `segment.text`; they are not offsets into the original source or another segment.
 
 If spoken wording is wrong, inspect `FlowSegment.text`. If effective language is wrong, inspect the segment and `FlowPlan.linguistics`. If a pause seems missing, distinguish the semantic `PauseIntent` on the segment edge from the consumer's engine-specific timing policy. Exact authored timed breaks remain explicit; semantic strengths do not prescribe a duration.

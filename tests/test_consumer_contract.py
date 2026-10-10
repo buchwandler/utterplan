@@ -128,8 +128,11 @@ def test_multilingual_and_sentence_units_remain_in_render_order() -> None:
 
     rendered = _fake_renderer(plan)
     assert [item[1] for item in rendered] == ["en-us", "fr"]
-    assert len(plan.flow) == 1
-    assert len(plan.flow[0].segments) == 2
+    assert len(plan.flow) == 2
+    assert [[segment.text for segment in unit.segments] for unit in plan.flow] == [
+        ["One."],
+        ["Bonjour."],
+    ]
     assert_public_consumer_contract(plan)
 
 

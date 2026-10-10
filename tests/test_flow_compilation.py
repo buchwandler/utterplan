@@ -75,12 +75,24 @@ def test_fresh_compilation_converges_with_v4_migration_on_unambiguous_input(
     ).plan
     migrated = FlowPlan.from_dict(migrate_v4_to_v5(v4_plan))
 
-    assert fresh.plan_id == migrated.plan_id
-    assert fresh.flow == migrated.flow
-    assert fresh.document == migrated.document
-    assert fresh.linguistics == migrated.linguistics
-    assert fresh.language == migrated.language
-    assert fresh.unit == migrated.unit
+    if fixture_name == "multilingual":
+        # The compiler now preserves the inter-language whitespace on the right-hand
+        # renderer segment instead of dropping it at the run boundary.
+        assert fresh.flow != migrated.flow
+        assert [[segment.text for segment in unit.segments] for unit in fresh.flow] == [
+            ["Hello", " Bonjour."]
+        ]
+        assert fresh.document == migrated.document
+        assert fresh.linguistics == migrated.linguistics
+        assert fresh.language == migrated.language
+        assert fresh.unit == migrated.unit
+    else:
+        assert fresh.plan_id == migrated.plan_id
+        assert fresh.flow == migrated.flow
+        assert fresh.document == migrated.document
+        assert fresh.linguistics == migrated.linguistics
+        assert fresh.language == migrated.language
+        assert fresh.unit == migrated.unit
 
 
 def test_fresh_compile_localizes_a_token_cut_by_ssmd_semantics() -> None:

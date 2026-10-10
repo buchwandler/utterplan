@@ -186,6 +186,27 @@ def test_explicit_pause_stays_between_speech_segments() -> None:
     assert stop.id != following.id
 
 
+def test_positive_audio_spans_protect_sentence_and_part_interiors() -> None:
+    whole_audio = _plan('[Before; after]{src="clip.wav"}')
+    assert len(whole_audio.segments) == 1
+    assert whole_audio.segments[0].text == "Before; after"
+    assert whole_audio.segments[0].clause == 0
+    assert whole_audio.segments[0].directives.audio is not None
+    assert any(
+        item.code == "segmentation.atomic_boundary_dropped" for item in whole_audio.diagnostics
+    )
+
+    part_audio = _plan('Before;[after now.]{src="clip.wav"}')
+    assert [segment.clause for segment in part_audio.segments] == [0, 1]
+    audio = next(segment for segment in part_audio.segments if segment.directives.audio is not None)
+    assert audio.clause == 1
+
+    sentence_audio = _plan('[First. Second.]{src="clip.wav"}')
+    assert len(sentence_audio.segments) == 1
+    assert sentence_audio.segments[0].sentence == 0
+    assert sentence_audio.segments[0].text == "First. Second."
+
+
 def test_audio_adjacent_speech_remains_atomic_and_renderable() -> None:
     plan = _plan('[Fallback]{src="clip.wav"} [After]{voice="guest"}.')
 
@@ -198,16 +219,20 @@ def test_audio_adjacent_speech_remains_atomic_and_renderable() -> None:
     )
 
 
-def test_audio_boundary_keeps_fallback_atomic_and_attaches_punctuation_forward() -> None:
-    plan = _plan('[Fallback]{src="clip.wav"}.[After]{voice="guest"}')
+def test_audio_boundary_preserves_unattachable_punctuation_for_renderability() -> None:
+    attempt = _planner().compile_attempt('[Fallback]{src="clip.wav"}.[After]{voice="guest"}')
 
-    audio_segments = [segment for segment in plan.segments if segment.directives.audio is not None]
+    assert attempt.status == "blocked"
+    assert any(
+        issue.code == "renderability.punctuation_only" for issue in attempt.renderability.issues
+    )
+    audio_segments = [
+        segment for segment in attempt.candidate.segments if segment.directives.audio is not None
+    ]
     assert len(audio_segments) == 1
     assert audio_segments[0].text == "Fallback"
-    speech = next(segment for segment in plan.segments if "After" in segment.text)
-    assert speech.text == ".After"
-    assert speech.directives.voice.reference == "guest"
-    _assert_no_punctuation_only_speech(plan)
+    assert any(segment.text == "." for segment in attempt.candidate.segments)
+    assert any(segment.text == "After" for segment in attempt.candidate.segments)
 
 
 def test_rich_ssmd_fixture_has_no_punctuation_only_speech_segments() -> None:

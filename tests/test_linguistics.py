@@ -13,11 +13,9 @@ from utterplan import (
     PlannerConfig,
     UtterancePlan,
 )
-from utterplan.exceptions import PlanningError
 from utterplan.explain import format_explanation
 from utterplan.language import LanguageRun
 from utterplan.linguistics import LinguisticResourcePool, analyze_run_analyses
-from utterplan.planner import _split_run
 
 
 class FakeProviderDoc(list):
@@ -209,7 +207,7 @@ def test_clausal_boundaries_reuse_provider_document(monkeypatch):
     assert len(docs) == 1
     assert detected == [(source, docs[-1])]
     boundary = next(item for item in plan.boundaries if item.kind == "clausal_comma")
-    assert boundary.position == source.index(",")
+    assert boundary.position == source.index(",") + 2
     semantic = next(item for item in plan.semantic_boundaries if item.kind == "clause")
     assert semantic.position == source.index(",") + 2
     assert semantic.attrs["detector_start"] == source.index(",")
@@ -274,8 +272,8 @@ def test_semantic_clause_is_independent_of_pause_activation(monkeypatch):
     assert [(item.position, item.kind, item.id) for item in clauses] == [
         (source.index(",") + 2, "clause", "semantic-boundary-000000")
     ] * 3
-    assert len(plans[0].segments) == 1
-    assert plans[0].segments[0].spoken_start < clauses[0].position < plans[0].segments[0].spoken_end
+    assert len(plans[0].segments) == 2
+    assert plans[0].segments[0].spoken_end == clauses[0].position
     assert not any(
         segment.pause_before is not None or segment.pause_after is not None
         for segment in plans[0].segments
@@ -329,17 +327,6 @@ def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):
 
     assert not any(item.kind == "clausal_comma" for item in plan.boundaries)
     assert not any(item.kind == "clause" for item in plan.semantic_boundaries)
-
-
-def test_segmentation_type_error_is_not_a_whole_document_fallback(monkeypatch):
-    import phrasplit
-
-    def broken_split(*args, **kwargs):
-        raise TypeError("invalid nlp integration")
-
-    monkeypatch.setattr(phrasplit, "split_with_offsets", broken_split)
-    with pytest.raises(PlanningError, match="sentence segmentation integration failed"):
-        _split_run("One sentence. Two sentences.", "en-us")
 
 
 def _fake_spacy_plan(

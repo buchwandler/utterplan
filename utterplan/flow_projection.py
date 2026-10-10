@@ -14,6 +14,7 @@ from .model import (
     TokenView,
     UtterancePlan,
 )
+from .token_topology import boundary_splits_lexical_content
 
 
 def project_compiler_plan(plan: UtterancePlan) -> FlowPlan:
@@ -140,16 +141,8 @@ def _tokens_for_segment(
         surface = spoken[start:end]
         provider = token_providers[token_index]
         if not is_whole:
-            relative_start = start - token.spoken_start
-            relative_end = end - token.spoken_start
-            prefix = token.text[:relative_start]
-            suffix = token.text[relative_end:]
-            if provider == "fallback":
-                split_at_start = _splits_alphanumeric_run(token.text, relative_start)
-                split_at_end = _splits_alphanumeric_run(token.text, relative_end)
-            else:
-                split_at_start = _has_word_character(prefix) and _has_word_character(surface)
-                split_at_end = _has_word_character(suffix) and _has_word_character(surface)
+            split_at_start = boundary_splits_lexical_content(start, token=token, provider=provider)
+            split_at_end = boundary_splits_lexical_content(end, token=token, provider=provider)
             if split_at_start:
                 raise PlanValidationError(
                     f"compiler segment {segment.id} "
@@ -190,14 +183,6 @@ def _tokens_for_segment(
 
 def _has_word_character(value: str) -> bool:
     return any(character.isalnum() for character in value)
-
-
-def _splits_alphanumeric_run(value: str, position: int) -> bool:
-    return (
-        0 < position < len(value)
-        and value[position - 1].isalnum()
-        and value[position].isalnum()
-    )
 
 
 def _token_providers(plan: UtterancePlan) -> tuple[str | None, ...]:

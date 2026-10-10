@@ -28,6 +28,12 @@ The dependency direction is from SSMD, spokenform, and phrasplit into UtterPlan,
 
 `FlowPlan` is the current v5 executable contract: ordered `FlowUnit` objects each own ordered `FlowSegment` records. Segments include prepared text, effective language, local tokens, semantic pause intents, directives, markers, and optional heading metadata. `DocumentInfo` retains compact portable document information; `LinguisticProvenance` identifies providers without retaining their documents. UtterPlan ends before G2P. Engine/model selection, synthesis, and audio composition happen downstream.
 
+## Compiler-owned segmentation topology
+
+Segmentation has four distinct layers: parser-owned paragraph events define paragraph regions; PhraseSplit supplies advisory sentence-boundary proposals; UtterPlan validates those proposals and owns canonical paragraph, sentence, and private sentence-part spans in prepared spoken-text coordinates; renderer-required language, directive, pause, marker, and media cuts subdivide a part into final segments. Positive-width atomic media spans protect their interiors from automatic sentence/part boundaries; zero-width media events remain renderer operations, not parts. The public v5 `FlowPlan` contains only the resulting compact ordered flow—there is no serialized sentence-parts table.
+
+PhraseSplit failure or an invalid proposal batch falls back to deterministic, conservative terminal scanning. Unsafe automatic cuts inside provider-aware lexical content are merged or dropped before projection; the final flow-projection token-edge check remains defense in depth. Exact surface and non-whitespace coverage checks run before and after applicable repairs. This normalization is independent of `renderability_mode`: strict and repair compilation use the same topology, while renderability mode governs only the existing punctuation-repair policy. See the [coordinate-space contract](coordinate-spaces) for offset ownership.
+
 ## SSMD and preparation
 
 The document parser calls SSMD with `dialect="0.9"` for every SSMD source path, including unversioned fragments selected with `document_format="ssmd"`. UtterPlan does not parse SSMD 0.8 or migrate source. Older documents must first be converted with `ssmd migrate FILE --to 0.9`. The `utterplan migrate` command imports serialized legacy plans and applies schema migrations only.

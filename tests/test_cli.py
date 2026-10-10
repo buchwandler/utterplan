@@ -220,7 +220,7 @@ def test_compile_strict_renderability_reports_source_and_writes_no_plan(
     assert "Automatic repair: safe;" in captured.err
 
 
-def test_compile_repair_cli_reports_guaranteed_renderability(
+def test_compile_repair_cli_blocks_unattachable_punctuation_without_loss(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source = tmp_path / "repair.txt"
@@ -244,9 +244,11 @@ def test_compile_repair_cli_reports_guaranteed_renderability(
     )
 
     captured = capsys.readouterr()
-    assert result == 0
-    assert FlowPlan.load(output).flow
-    assert "renderability: guaranteed; 1 punctuation segment repaired" in captured.err
+    assert result == 1
+    assert not output.exists()
+    assert "isolated punctuation became its own speech segment" in captured.err
+    assert "Prepared fragment: '.'" in captured.err
+    assert "Automatic repair: safe; remove the isolated punctuation-only segment." in captured.err
 
 
 def test_top_level_version(capsys: pytest.CaptureFixture[str]) -> None:

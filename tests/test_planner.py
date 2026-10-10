@@ -2,7 +2,7 @@ import pytest
 
 from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
 from utterplan import PauseConfig, PauseIntent, PlannerConfig, PlanningError
-from utterplan.planner import _FallbackSplit, _split_closing_quote_boundaries
+from utterplan.exceptions import PlanValidationError
 
 
 def test_plain_sentences_paragraphs_and_pauses():
@@ -15,6 +15,28 @@ def test_plain_sentences_paragraphs_and_pauses():
     assert len(plan.units) == 2
     assert plan.segments[0].pause_after == PauseIntent("sentence")
     assert plan.segments[1].pause_after == PauseIntent("paragraph")
+
+
+def test_sentence_part_edges_split_renderer_segments_and_auto_pause_at_part_boundary():
+    source = "Before; after."
+    plans = [
+        UtterancePlanner(
+            PlannerConfig(
+                language="en-us",
+                text_preparation="identity",
+                pauses=PauseConfig(mode=mode, enabled=enabled),
+            )
+        ).plan(source)
+        for mode, enabled in (("tts", True), ("auto", True), ("auto", False))
+    ]
+    expected_texts = ["Before; ", "after."]
+    for plan in plans:
+        assert [segment.text for segment in plan.segments] == expected_texts
+        assert [segment.clause for segment in plan.segments] == [0, 1]
+        assert plan.semantic_boundaries[0].position == len("Before; ")
+    assert plans[0].segments[0].pause_after is None
+    assert plans[1].segments[0].pause_after == PauseIntent("clause")
+    assert plans[2].segments[0].pause_after is None
 
 
 def test_ssmd_preparation_and_explicit_directives():
@@ -98,7 +120,7 @@ def test_unrepresentable_audio_topology_is_rejected(source: str, message: str) -
         planner.plan(source)
 
 
-def test_adjacent_audio_annotations_are_distinct_and_supported() -> None:
+def test_adjacent_audio_annotations_report_required_token_conflict() -> None:
     planner = UtterancePlanner(
         PlannerConfig(
             language="en-us",
@@ -106,18 +128,11 @@ def test_adjacent_audio_annotations_are_distinct_and_supported() -> None:
             text_preparation="identity",
         )
     )
-    plan = planner.plan('[first]{src="same.wav"}[second]{src="same.wav"}')
-    audio_segments = [segment for segment in plan.segments if segment.directives.audio is not None]
 
-    assert len(audio_segments) == 2
-    first_audio = audio_segments[0].directives.audio
-    second_audio = audio_segments[1].directives.audio
+    with pytest.raises(PlanValidationError) as exc_info:
+        planner.plan('[first]{src="same.wav"}[second]{src="same.wav"}')
 
-    assert first_audio is not None
-    assert second_audio is not None
-    assert first_audio.src == second_audio.src
-    assert audio_segments[0].id != audio_segments[1].id
-    assert audio_segments[0].spoken_start < audio_segments[1].spoken_start
+    assert exc_info.value.code == "segmentation.required_cut_conflict"
 
 
 def test_audio_fallback_is_atomic_across_sentence_segmentation() -> None:
@@ -269,17 +284,3 @@ def test_point_audio_at_document_start_uses_following_language_context() -> None
     media_index = plan.segments.index(media)
     assert media_index == 0
     assert plan.segments[media_index + 1].spoken_start == media.spoken_start
-
-
-def test_quote_boundary_repair_preserves_ranges_after_multiple_closing_quotes() -> None:
-    text = 'He said "One." Next. She said "Two." Then. They said "Three." Finally.'
-    initial = _FallbackSplit(0, len(text), 0, 0, text)
-
-    segments = _split_closing_quote_boundaries([initial], text)
-
-    assert len(segments) == 4
-    assert all(text[item.char_start : item.char_end] == item.text for item in segments)
-    assert all(
-        not text[left.char_end : right.char_start].strip()
-        for left, right in zip(segments, segments[1:], strict=False)
-    )

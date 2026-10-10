@@ -53,7 +53,12 @@ def test_front_matter_scene_breaks_are_boundaries_not_renderer_text(
     body: str, scene_break_count: int
 ) -> None:
     source = f'---\nssmd_version: "0.9"\ntitle: Demo\n---\n{body}'
-    plan = _planner().plan(source)
+    if "\\---" in body:
+        attempt = _planner().compile_attempt(source)
+        assert attempt.status == "blocked"
+        plan = attempt.candidate
+    else:
+        plan = _planner().plan(source)
 
     scene_breaks = [
         event
@@ -75,6 +80,10 @@ def test_front_matter_scene_breaks_are_boundaries_not_renderer_text(
         assert any("---" in segment.text for segment in plan.segments)
     elif "\\---" in body:
         assert "---" in plan.texts.structural
+        assert any(segment.text == "---" for segment in plan.segments)
+        assert any(
+            issue.code == "renderability.punctuation_only" for issue in attempt.renderability.issues
+        )
 
 
 def test_legacy_parser_front_matter_scene_break_uses_clean_to_source_mapping(

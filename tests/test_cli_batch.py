@@ -237,7 +237,7 @@ def test_compile_many_protects_existing_output_and_force_replaces_it(
     )
 
 
-def test_compile_many_default_repair_and_strict_mode_are_both_observable(
+def test_compile_many_repair_and_strict_modes_preserve_unattachable_punctuation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source = _write(tmp_path / "chapter.txt", "Hello.\n\n.\n\nWorld.")
@@ -257,9 +257,13 @@ def test_compile_many_default_repair_and_strict_mode_are_both_observable(
         ]
     )
     repair_output = capsys.readouterr()
-    assert repair_result == 0
-    assert "repaired at 3:1" in repair_output.err
-    assert "removing the punctuation-only segment" in repair_output.err
+    assert repair_result == 1
+    assert "isolated punctuation became its own speech segment" in repair_output.err
+    assert "Prepared fragment: '.'" in repair_output.err
+    assert (
+        "Automatic repair: safe; remove the isolated punctuation-only segment." in repair_output.err
+    )
+    assert not (repair_dir / "chapter.utterplan.toml").exists()
 
     strict_dir = tmp_path / "strict"
     strict_result = main(

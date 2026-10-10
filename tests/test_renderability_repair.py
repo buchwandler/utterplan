@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Literal
 
 import pytest
 
@@ -72,26 +73,20 @@ def _assess(
     return replace(issue, repair_assessment=assessment)
 
 
-def test_repair_is_the_default_and_records_a_source_located_guarantee() -> None:
+def test_repair_mode_preserves_isolated_punctuation_instead_of_dropping_content() -> None:
     config = PlannerConfig(language="en-US", text_preparation="identity")
-    plan = UtterancePlanner(config).plan("Hello.\n\n.\n\nWorld.")
-    repeated = UtterancePlanner(config).plan("Hello.\n\n.\n\nWorld.")
+    planner = UtterancePlanner(config)
+    attempt = planner.compile_attempt("Hello.\n\n.\n\nWorld.")
+    repeated = UtterancePlanner(config).compile_attempt("Hello.\n\n.\n\nWorld.")
 
     assert config.renderability_mode == "repair"
-    assert repeated.plan_id == plan.plan_id
-    assert repeated.to_dict() == plan.to_dict()
-    assert [segment.text for segment in plan.segments] == ["Hello.", "World."]
-    assert plan.document_metadata["planning"]["renderability"] == {
-        "mode": "repair",
-        "checked_segments": 3,
-        "repair_count": 1,
-        "guaranteed": True,
-    }
-    repairs = [item for item in plan.diagnostics if item.code == "planning.renderability.repaired"]
-    assert len(repairs) == 1
-    assert "by removing the punctuation-only segment" in repairs[0].message
-    assert repairs[0].line == 3
-    assert plan.texts.spoken == "Hello.\n\n.\n\nWorld."
+    assert attempt.status == "blocked"
+    assert repeated.attempt_id == attempt.attempt_id
+    assert [segment.text for segment in attempt.candidate.segments] == ["Hello.", ".", "World."]
+    assert attempt.candidate.document_metadata["planning"]["renderability"]["guaranteed"] is False
+    assert not any(item.code == "planning.renderability.repaired" for item in attempt.diagnostics)
+    assert attempt.renderability.issues[0].line == 3
+    assert attempt.candidate.texts.spoken == "Hello.\n\n.\n\nWorld."
 
 
 def test_default_repairs_exact_comma_space_with_isolated_planner_topology(
@@ -362,18 +357,18 @@ def test_strict_attempt_retains_blocked_candidate_and_compile_still_raises() -> 
     assert error.value.issues == attempt.renderability.issues
 
 
-def test_safe_repair_attempt_returns_a_canonical_plan() -> None:
+def test_unattachable_punctuation_remains_in_a_blocked_repair_attempt() -> None:
     config = PlannerConfig(language="en-US", text_preparation="identity")
     attempt = UtterancePlanner(config).compile_attempt("Hello.\n\n.\n\nWorld.")
 
-    assert attempt.status == "repaired"
-    assert attempt.ok
-    assert len(attempt.repairs) == 1
-    assert attempt.repairs[0].repair_assessment is not None
-    assert attempt.repairs[0].repair_assessment.safe
-    plan = attempt.candidate.to_plan()
-    plan.validate()
-    assert [segment.text for segment in plan.segments] == ["Hello.", "World."]
+    assert attempt.status == "blocked"
+    assert not attempt.ok
+    assert attempt.repairs == ()
+    assert attempt.renderability.issues[0].repair_assessment is not None
+    assert attempt.renderability.issues[0].repair_assessment.safe
+    assert [segment.text for segment in attempt.candidate.segments] == ["Hello.", ".", "World."]
+    with pytest.raises(ValueError, match="blocked planning-attempt draft"):
+        attempt.candidate.to_plan()
 
 
 def test_unsafe_repair_attempt_is_blocked_and_draft_structure_is_checked() -> None:
@@ -405,12 +400,12 @@ def test_unsafe_repair_attempt_is_blocked_and_draft_structure_is_checked() -> No
     ("source", "mode", "expected_status"),
     [
         ("Ready.", "strict", "renderable"),
-        ("Hello.\n\n.\n\nWorld.", "repair", "repaired"),
+        ("Hello.\n\n.\n\nWorld.", "repair", "blocked"),
         ("€", "strict", "blocked"),
     ],
 )
 def test_planning_attempt_toml_roundtrips_all_outcomes_and_stays_noncanonical(
-    source: str, mode: str, expected_status: str
+    source: str, mode: Literal["strict", "repair"], expected_status: str
 ) -> None:
     config = PlannerConfig(
         language="en-US",

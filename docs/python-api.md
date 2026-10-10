@@ -12,6 +12,12 @@ The Python defaults are deliberately spaCy-free and repair-first: `PlannerConfig
 For an explicit contextual-G2P configuration, use `LinguisticsConfig(use_spacy=True, spacy_model="en_core_web_sm", require_spacy=True)`. The resulting plan records final pass-B token provenance in `linguistic_runs`; no provider document is retained.
 spaCy enrichment is opt-in through the CLI's `--spacy auto` policy or an explicit `LinguisticsConfig` with a compatible local model. It may provide richer tokenization, POS tags, lemmas, and tags, but UtterPlan never downloads a model implicitly.
 
+## Sentence segmentation and private topology
+
+PhraseSplit is an advisory sentence-boundary provider, not an owner of compiler topology. UtterPlan validates each whole proposal batch, maps accepted run-local offsets once into prepared spoken-text coordinates, then recomputes paragraph and sentence indices from parser paragraph events and accepted boundaries. If PhraseSplit fails or returns malformed/incomplete coverage, deterministic conservative fallback preserves the text and emits diagnostics. Automatic cuts that divide provider-aware lexical content are discarded or merged; the final flow-projection token-edge check remains active.
+
+Semicolon and context-safe colon separators, plus optional trusted clause/parenthetical candidates, form private sentence parts. Renderer-required language, directive, pause, marker, and media cuts subdivide those parts without changing their indices. Exact surface and non-whitespace coverage validation runs in strict and repair renderability modes alike. Parts are not a public field: only the compact ordered v5 `flow` is serialized, and `unit="sentence"` groups by the recomputed sentence topology.
+
 ## Canonical single-document compiler
 
 `compile_document` is the shared semantic interpretation boundary for independent

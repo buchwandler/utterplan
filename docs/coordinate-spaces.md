@@ -19,4 +19,8 @@ Trace coordinates use Python string character boundaries (Unicode code points), 
 - `structural_to_spoken` maps structural character boundaries to spoken boundaries; `spoken_to_structural` maps spoken boundaries back to structural boundaries.
 - `PreparationTraceUnit.source_start` / `source_end` address structural text. `PreparationChange.source_start` / `source_end` use structural coordinates; `output_start` / `output_end` use prepared spoken coordinates.
 
+## Compiler-only segmentation coordinates
+
+Paragraph, sentence, and sentence-part spans use half-open Python-character offsets into the prepared global `spoken_text`. PhraseSplit offsets are run-local and are translated to global spoken coordinates exactly once before validation. Renderer segments retain the exact `spoken_text[start:end]` slice; language-run edges and other required renderer cuts do not change their owning paragraph, sentence, or part index. These spans are compiler topology, not fields in the v5 flow. Segmentation diagnostics map their spoken ranges back to exact source coordinates through the compiler's source map.
+
 Diagnostic source offsets use the exact original-source coordinate space. Diagnostic `line` and `column` values are 1-based; columns count Python characters from the start of a line. The trace retains all these maps and source evidence. The executable FlowPlan intentionally does not.
