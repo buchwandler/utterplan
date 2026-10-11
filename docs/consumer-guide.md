@@ -18,7 +18,7 @@ Migration operates on serialized plain data and does not reparse, reprepare, rer
 
 ## Planning defaults
 
-The default text-preparation backend is `spokenform`, pause activation mode is `tts`, and spaCy policy is best-effort `auto`. Auto uses only installed compatible local models in `sm`, `md`, `lg`, `trf` preference order and falls back deterministically if unavailable; provider documents remain internal. Use `--spacy off` to force fallback or a tier flag to require that model.
+The default text-preparation backend is `spokenform`, pause activation mode is `tts`, and spaCy policy is best-effort `auto`. Spokenform preparation is routed through TTSReady `prepare_run()`; the `spokenform` backend label remains stable for plan compatibility. Auto uses only installed compatible local models in `sm`, `md`, `lg`, `trf` preference order and falls back deterministically if unavailable; provider documents remain internal. Use `--spacy off` to force fallback or a tier flag to require that model.
 
 In Python, `PlannerConfig.document_format` defaults to `"plain"`; select `"ssmd"` for SSMD source. `PauseConfig.mode` controls whether eligible semantic pause intents are activated by the compiler. The executable plan carries semantic intent (or an exact authored timed pause), not numeric durations invented from an activation policy. A renderer may interpret supported intents according to its own capabilities.
 
@@ -72,6 +72,7 @@ utterplan inspect-trace chapter.trace.toml --preparation --boundaries
 
 The trace contains source text/hash, structural/prepared text, coordinate maps, preparation changes, diagnostics, and renderability evidence. It is not renderer input, does not affect `FlowPlan.plan_id`, and does not change the resulting plan TOML. See the [coordinate-space contract](coordinate-spaces) for every trace offset's coordinate space.
 The trace contains source text/hash, structural/prepared text, full coordinate maps, preparation changes, diagnostics, and renderability evidence. Compact replacement views are available in v5 segments, but the trace is still needed for original source offsets and complete mappings. The trace is not renderer input, does not affect `FlowPlan.plan_id`, and does not change the executable plan.
+
 ## Directives and media
 
 Voice bindings and directive voice references are logical names, not backend voice IDs; consumers translate them to engine-specific resources. UtterPlan resolves SSMD scopes and defaults but does not choose engine settings or recompute pause policy.

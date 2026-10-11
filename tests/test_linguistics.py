@@ -58,7 +58,9 @@ def test_default_planner_falls_back_when_spacy_cannot_be_imported(monkeypatch):
 
     assert LinguisticsConfig().use_spacy is True
     assert plan.linguistic_runs[0].provider == "fallback"
-    assert all(token.pos is None and token.tag is None and token.morph is None for token in plan.tokens)
+    assert all(
+        token.pos is None and token.tag is None and token.morph is None for token in plan.tokens
+    )
 
 
 def test_default_planner_falls_back_when_no_compatible_model_is_installed(monkeypatch):
@@ -70,7 +72,6 @@ def test_default_planner_falls_back_when_no_compatible_model_is_installed(monkey
     plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello world.")
 
     assert plan.linguistic_runs[0].provider == "fallback"
-
 
 
 def test_default_planner_falls_back_when_auto_model_loading_fails(monkeypatch):
@@ -89,7 +90,9 @@ def test_default_planner_falls_back_when_auto_model_loading_fails(monkeypatch):
 
 def test_explicit_spacy_off_never_inspects_or_loads_spacy(monkeypatch):
     fake_spacy = SimpleNamespace(
-        util=SimpleNamespace(get_installed_models=lambda: pytest.fail("spaCy must not be inspected")),
+        util=SimpleNamespace(
+            get_installed_models=lambda: pytest.fail("spaCy must not be inspected")
+        ),
         load=lambda model: pytest.fail(f"spaCy must not be loaded: {model}"),
     )
     monkeypatch.setitem(sys.modules, "spacy", fake_spacy)
@@ -153,6 +156,7 @@ def test_default_planner_uses_small_installed_spacy_model_and_reuses_it(monkeypa
         "live",
         "Tense=Pres|VerbForm=Fin",
     )
+
 
 def test_spacy_enrichment_does_not_collapse_sentence_topology(monkeypatch):
     class Pipeline:
@@ -381,11 +385,11 @@ def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):
     monkeypatch.setattr(phrasplit, "detect_clause_boundaries", fail_if_called)
     plan = UtterancePlanner(
         PlannerConfig(
-            language="en-us", text_preparation="identity", linguistics=LinguisticsConfig(use_spacy=False)
+            language="en-us",
+            text_preparation="identity",
+            linguistics=LinguisticsConfig(use_spacy=False),
         )
-    ).plan(
-        "I wanted to go, but it was raining."
-    )
+    ).plan("I wanted to go, but it was raining.")
 
     assert not any(item.kind == "clausal_comma" for item in plan.boundaries)
     assert not any(item.kind == "clause" for item in plan.semantic_boundaries)

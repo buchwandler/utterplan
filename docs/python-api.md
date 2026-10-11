@@ -7,7 +7,7 @@ diagnostics describe compilation, and an optional `PreparationTrace` holds compi
 provenance separately. `UtterancePlanner.plan` is also supported and returns the
 same current `FlowPlan` directly.
 
-The Python defaults are repair-first with best-effort spaCy enrichment: `PlannerConfig` uses `spokenform` preparation and `renderability_mode="repair"`, `PauseConfig().mode` is `"tts"`, and `LinguisticsConfig` uses local-model `auto`. Auto prefers installed compatible models `sm`, `md`, `lg`, `trf`, then falls back safely if spaCy or models are unavailable. No model is downloaded.
+The Python defaults are repair-first with best-effort spaCy enrichment: `PlannerConfig` uses `spokenform` preparation through TTSReady and `renderability_mode="repair"`, `PauseConfig().mode` is `"tts"`, and `LinguisticsConfig` uses local-model `auto`. The `spokenform` backend label remains stable for plan compatibility. Auto prefers installed compatible models `sm`, `md`, `lg`, `trf`, then falls back safely if spaCy or models are unavailable. No model is downloaded.
 
 To require a specific installed model, set `require_spacy=True` and configure its model or tier. The plan records final pass-B token provenance in `linguistic_runs`; provider documents are not retained. Set `use_spacy=False` for deterministic opt-out.
 V5 `token.span`, `pos`, `tag`, `lemma`, and `morph` are the authoritative linguistic context for the exact prepared segment text. Consumers should not retokenize or rerun spaCy. Optional replacement spans are local to final prepared `segment.text`; original spellings are stored as provenance strings, while complete source offsets and preparation maps belong in the optional trace sidecar.

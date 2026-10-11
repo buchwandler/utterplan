@@ -1,26 +1,42 @@
 # Architecture
 
-UtterPlan is an engine-independent compiler from one SSMD document (or explicitly selected plain-text document) to an executable speech plan. Consumers compile documents independently; UtterPlan does not load books or manage workspaces.
+UtterPlan is an engine-independent compiler from one SSMD document (or explicitly selected plain-text document) to an executable speech plan. It owns document parsing, language runs, source linguistic analysis, SSMD annotation meanings, coordinate mapping, spoken-text analysis, segmentation, directives, pause intent, and FlowPlan construction. It uses TTSReady for reusable written-to-spoken preparation and stops before G2P, synthesis, and audio. Consumers compile documents independently; UtterPlan does not load books or manage workspaces.
 
 ```text
-one SSMD document / explicit plain text
-                 |
-                 v
-       parse -> language semantics -> spokenform preparation
-                 -> segmentation -> directive resolution
-                 -> semantic pause intent -> internal compiler plan
-                 |                                |
-                 |                                +--> optional trace sidecar
-                 v
-       FlowPlan (ordered units, local segments)
-              /                 \
-       consumer A             consumer B
-                 |
-                 v
-          G2P / renderer / audio
+SSMD / plain text
+       |
+       v
+UtterPlan parsing + language runs + source analysis
+       | provider-neutral token hints + protected spans + explicit profile
+       v
+TTSReady.prepare_run() -> Spokenform normalization
+       |
+       v
+UtterPlan mapping + spoken analysis + segmentation + directives + pauses
+       |
+       v
+FlowPlan (ordered units and local segments)
+       |
+       v
+Readio / VoiceRender / other FlowPlan consumers
+       |
+       v
+G2P / synthesis / audio (downstream)
 ```
 
-The dependency direction is from SSMD, spokenform, and phrasplit into UtterPlan, then from UtterPlan to consumer packages. UtterPlan must not depend on ttsready, Readio, engine registries, G2P packages, model runtimes, or audio packages. Book iteration belongs to consumers and conversion tools.
+Dependency layering (each component uses the dependency above it):
+
+```text
+Spokenform
+    ^
+TTSReady
+    ^
+UtterPlan
+    ^
+Readio / VoiceRender / other FlowPlan consumers
+```
+
+UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady. TTSReady owns the direct Spokenform integration; production UtterPlan code does not import Spokenform. Readio, VoiceRender, and other consumers consume FlowPlan and may perform downstream G2P, synthesis, and audio work. UtterPlan must not depend on those consumer or engine packages, model runtimes, or audio libraries. Book iteration belongs to consumers and conversion tools.
 
 ## Compiler and public plan boundary
 

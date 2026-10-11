@@ -75,7 +75,6 @@ def test_token_facts_are_local_and_surface_verified() -> None:
     assert error.value.code == "migration.token-coordinate-ambiguous"
 
 
-
 def test_v4_replacements_migrate_to_segment_local_compact_views() -> None:
     plan = migrate_v4_to_v5(_fixture("spokenform_offsets.utterplan.json"))
     segment = _segments(plan)[0]
@@ -92,7 +91,11 @@ def test_v4_migration_skips_malformed_and_cross_segment_replacements() -> None:
     malformed = _fixture("spokenform_offsets.utterplan.json")
     malformed["preparation"]["replacements"][0]["kind"] = ""
     plan = migrate_v4_to_v5(malformed)
-    assert all(item["source"] != "Dr." for segment in _segments(plan) for item in segment.get("replacements", []))
+    assert all(
+        item["source"] != "Dr."
+        for segment in _segments(plan)
+        for item in segment.get("replacements", [])
+    )
 
     crossing = _fixture("multilingual.utterplan.json")
     crossing["preparation"]["replacements"] = [

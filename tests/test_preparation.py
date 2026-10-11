@@ -1,7 +1,7 @@
 import sys
 
 import pytest
-import spokenform
+import ttsready
 
 from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
 from utterplan import PauseIntent, PlannerConfig
@@ -10,13 +10,13 @@ from utterplan.exceptions import PlanFormatError
 
 def _record_sequence_fallback_modes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     modes: list[str] = []
-    prepare = spokenform.prepare
+    prepare_run = ttsready.prepare_run
 
     def record(text, **kwargs):
-        modes.append(kwargs["sequence_fallback_mode"])
-        return prepare(text, **kwargs)
+        modes.append(kwargs["profile"].sequence_fallback_mode)
+        return prepare_run(text, **kwargs)
 
-    monkeypatch.setattr(spokenform, "prepare", record)
+    monkeypatch.setattr(ttsready, "prepare_run", record)
     return modes
 
 
@@ -46,13 +46,13 @@ def test_plain_input_forwards_spell_by_default(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.parametrize("value", ["unknown", "null"])
-def test_invalid_sequence_fallback_mode_fails_before_spokenform(
+def test_invalid_sequence_fallback_mode_fails_before_ttsready(
     value: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def fail_if_called(*args, **kwargs):
-        raise AssertionError("spokenform.prepare must not run for invalid metadata")
+        raise AssertionError("ttsready.prepare_run must not run for invalid metadata")
 
-    monkeypatch.setattr(spokenform, "prepare", fail_if_called)
+    monkeypatch.setattr(ttsready, "prepare_run", fail_if_called)
     source = f'---\nssmd_version: "0.9"\nsequence_fallback_mode: {value}\n---\nin-system'
 
     with pytest.raises(PlanFormatError) as error:
@@ -60,10 +60,10 @@ def test_invalid_sequence_fallback_mode_fails_before_spokenform(
     assert error.value.code == "header.sequence_fallback_mode_invalid"
 
 
-def test_identity_preparation_keeps_sequence_fallback_mode_without_spokenform(
+def test_identity_preparation_keeps_sequence_fallback_mode_without_ttsready(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(sys.modules, "spokenform", None)
+    monkeypatch.setitem(sys.modules, "ttsready", None)
     source = '---\nssmd_version: "0.9"\nsequence_fallback_mode: preserve\n---\nin-system'
     plan = UtterancePlanner(
         PlannerConfig(

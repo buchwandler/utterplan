@@ -183,7 +183,9 @@ def _tokens_for_segment(
     return tuple(result)
 
 
-def _replacement_views_for_segment(plan: UtterancePlan, segment: Any) -> tuple[ReplacementView, ...]:
+def _replacement_views_for_segment(
+    plan: UtterancePlan, segment: Any
+) -> tuple[ReplacementView, ...]:
     views: list[ReplacementView] = []
     for raw in plan.preparation.replacements:
         if not isinstance(raw, Mapping):

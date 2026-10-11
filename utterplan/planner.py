@@ -41,7 +41,7 @@ from .parsers import (
     effective_sequence_fallback_mode,
 )
 from .pauses import boundary_is_active, resolve_pause_intents
-from .preparation import IdentityTextPreparer, SourceToSpokenMap, SpokenformTextPreparer
+from .preparation import IdentityTextPreparer, SourceToSpokenMap, TTSReadyTextPreparer
 from .progress import PlannerProgressEvent, ProgressCallback, _notify_progress
 from .renderability import (
     RenderabilityIssue,
@@ -214,7 +214,7 @@ class UtterancePlanner:
         preparer = (
             IdentityTextPreparer()
             if config.text_preparation == "identity"
-            else SpokenformTextPreparer(sequence_fallback_mode=fallback_mode)
+            else TTSReadyTextPreparer(sequence_fallback_mode=fallback_mode)
         )
         prepared = preparer.prepare(
             parsed.structural_text,

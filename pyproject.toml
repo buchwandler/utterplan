@@ -14,7 +14,7 @@ keywords = ["tts", "text-to-speech", "ssmd", "speech markup"]
 dependencies = [
   "phrasplit>=0.3.9,<0.4",
   "ssmd>=0.9.3,<0.10",
-  "spokenform>=0.4.3,<0.5",
+  "ttsready>=0.2.2,<0.3",
   "typing_extensions>=4.0",
   "tomlkit>=0.13,<1",
  ]

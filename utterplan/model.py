@@ -2027,9 +2027,13 @@ class FlowPlan:
                             )
                         replacements.append(
                             ReplacementView(
-                                _expect(raw_replacement.get("start"), int, f"{replacement_path}.start"),
+                                _expect(
+                                    raw_replacement.get("start"), int, f"{replacement_path}.start"
+                                ),
                                 _expect(raw_replacement.get("end"), int, f"{replacement_path}.end"),
-                                _expect(raw_replacement.get("source"), str, f"{replacement_path}.source"),
+                                _expect(
+                                    raw_replacement.get("source"), str, f"{replacement_path}.source"
+                                ),
                                 raw_replacement.get("kind"),
                                 raw_replacement.get("rule"),
                             )

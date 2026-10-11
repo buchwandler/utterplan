@@ -71,7 +71,12 @@ def test_pause_config_default_is_tts():
 
 def test_pass_a_tokens_counts_tokens_not_language_runs():
     plan = UtterancePlanner(
-        PlannerConfig(language="en-us", document_format="plain", text_preparation="identity", linguistics=LinguisticsConfig(use_spacy=False))
+        PlannerConfig(
+            language="en-us",
+            document_format="plain",
+            text_preparation="identity",
+            linguistics=LinguisticsConfig(use_spacy=False),
+        )
     ).plan("One two three.")
 
     assert plan.document_metadata["planning"]["pass_a_tokens"] == 3

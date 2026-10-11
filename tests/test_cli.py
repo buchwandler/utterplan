@@ -46,8 +46,6 @@ def test_compile_cli_defaults() -> None:
     assert args.renderability == "repair"
 
 
-
-
 def test_spacy_cli_policies_preserve_auto_off_and_required_tiers() -> None:
     parser = build_parser()
     assert parser.parse_args(["compile", "Hello.", "--lang", "en"]).spacy == "auto"
@@ -62,6 +60,7 @@ def test_spacy_cli_policies_preserve_auto_off_and_required_tiers() -> None:
         assert config.use_spacy is True
         assert config.spacy_model_size == tier
         assert config.require_spacy is True
+
 
 def test_compile_literal_text_to_stdout_toml(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["compile", "Hello world.", "--lang", "en-us"]) == 0

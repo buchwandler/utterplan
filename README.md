@@ -9,7 +9,7 @@ UtterPlan is the canonical, engine-independent semantic compiler from one SSMD
 document (or explicitly selected plain-text document) to an executable speech
 plan. It produces deterministic prepared text, ordered flow units, segment-local
 semantics, pause intents, portable document metadata, and typed directives for
-independent consumers such as ttsready and Readio. It does not manage or modify book workspaces; `compile-book` reads an SSMDBook manifest only to discover selected source chapters. It stops before G2P, synthesis, and audio.
+independent downstream consumers such as Readio, VoiceRender, and other FlowPlan users. It does not manage or modify book workspaces; `compile-book` reads an SSMDBook manifest only to discover selected source chapters. It uses TTSReady for written-to-spoken preparation and stops before G2P, synthesis, and audio.
 
 ## CLI
 

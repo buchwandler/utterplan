@@ -163,7 +163,12 @@ def test_shared_fixture_has_one_canonical_v5_interpretation() -> None:
     result = compile_document(
         source,
         input_format="ssmd",
-        config=PlannerConfig(language="fr-FR", document_format="ssmd", text_preparation="identity", linguistics=LinguisticsConfig(use_spacy=False)),
+        config=PlannerConfig(
+            language="fr-FR",
+            document_format="ssmd",
+            text_preparation="identity",
+            linguistics=LinguisticsConfig(use_spacy=False),
+        ),
     )
 
     assert result.plan.plan_id == expected.plan_id

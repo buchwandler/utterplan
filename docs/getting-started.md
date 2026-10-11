@@ -41,7 +41,7 @@ Without `-o`, the complete canonical TOML plan is written to stdout. Status mess
 
 ## Defaults and linguistic resources
 
-The default compile policy is `spokenform` for text preparation, `tts` for pause activation, and best-effort spaCy `auto`. Auto mode uses only an already-installed compatible model, preferring `sm`, `md`, `lg`, then `trf`; if spaCy or a compatible model is unavailable, planning continues with deterministic fallback tokens. UtterPlan never downloads models.
+The default compile policy is `spokenform` for written-to-spoken preparation through TTSReady, `tts` for pause activation, and best-effort spaCy `auto`. The `spokenform` label remains stable for plan compatibility. Auto mode uses only an already-installed compatible model, preferring `sm`, `md`, `lg`, then `trf`; if spaCy or a compatible model is unavailable, planning continues with deterministic fallback tokens. UtterPlan never downloads models.
 
 Use `--spacy off` to force fallback, or `--spacy sm|md|lg|trf` to require a specific local tier. Python `LinguisticsConfig` has the same best-effort default. Install the optional library with `python -m pip install 'utterplan[spacy]'` when needed; install language model packages separately.
 Language model packages remain explicit environment dependencies; UtterPlan never downloads them.

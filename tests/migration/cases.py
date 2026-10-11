@@ -13,7 +13,12 @@ class MigrationCase:
 
 
 FALLBACK_LINGUISTICS = LinguisticsConfig(use_spacy=False)
-PLAIN = PlannerConfig(language="en-us", document_format="plain", renderability_mode="strict", linguistics=FALLBACK_LINGUISTICS)
+PLAIN = PlannerConfig(
+    language="en-us",
+    document_format="plain",
+    renderability_mode="strict",
+    linguistics=FALLBACK_LINGUISTICS,
+)
 IDENTITY = PlannerConfig(
     language="en-us",
     document_format="plain",
@@ -28,7 +33,12 @@ AUTO = PlannerConfig(
     renderability_mode="strict",
     linguistics=FALLBACK_LINGUISTICS,
 )
-SSMD = PlannerConfig(language="en-us", document_format="ssmd", renderability_mode="strict", linguistics=FALLBACK_LINGUISTICS)
+SSMD = PlannerConfig(
+    language="en-us",
+    document_format="ssmd",
+    renderability_mode="strict",
+    linguistics=FALLBACK_LINGUISTICS,
+)
 SSMD_IDENTITY = PlannerConfig(
     language="en-us",
     document_format="ssmd",

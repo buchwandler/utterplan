@@ -59,9 +59,8 @@ def test_art_replacement_projects_to_compact_segment_local_v5_provenance() -> No
     )
     assert restored_replacement == replacement
     assert restored_replacement.surface(restored_segment.text) == "A R T"
-    assert (
-        f'[{replacement.start}:{replacement.end}] "A R T" <- "ART"'
-        in format_explanation(restored)
+    assert f'[{replacement.start}:{replacement.end}] "A R T" <- "ART"' in format_explanation(
+        restored
     )
 
     example = FlowPlan(
@@ -82,6 +81,7 @@ def test_art_replacement_projects_to_compact_segment_local_v5_provenance() -> No
     example_toml = example.to_toml()
     assert "replacement.span = [[17, 22]]" in example_toml
     assert 'replacement.source = ["ART"]' in example_toml
+
 
 def test_multiple_replacements_keep_ordered_parallel_columns_and_round_trip() -> None:
     flow = _compile_flow("Dr. bought 5 kg.")
@@ -141,15 +141,12 @@ def test_replacement_view_and_flow_segment_validate_local_spans() -> None:
         FlowSegment("short", "en-us", replacements=(ReplacementView(0, 6, "source"),))
 
 
-
 def test_v5_replacement_columns_reject_invalid_cardinality_bounds_and_sparse_indexes() -> None:
     flow = _compile_flow("Dr. bought 5 kg.")
     base = to_v5_toml_data(flow)
 
     invalid_bounds = deepcopy(base)
-    segment = next(
-        item for item in invalid_bounds["flow"][0]["segment"] if "replacement" in item
-    )
+    segment = next(item for item in invalid_bounds["flow"][0]["segment"] if "replacement" in item)
     segment["replacement"]["span"][0][1] = len(segment["text"]) + 1
     with pytest.raises(PlanFormatError, match="replacement span"):
         from_v5_toml_data(invalid_bounds)
@@ -170,7 +167,6 @@ def test_v5_replacement_columns_reject_invalid_cardinality_bounds_and_sparse_ind
     segment["replacement"]["kind"] = [[count, "abbreviation"]]
     with pytest.raises(PlanFormatError, match="sparse replacement indices"):
         from_v5_toml_data(invalid_sparse_index)
-
 
 
 def test_replacement_provenance_does_not_change_hashes_but_token_semantics_do() -> None:

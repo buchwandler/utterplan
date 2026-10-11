@@ -161,6 +161,8 @@ def _token_columns(segment: Any) -> dict[str, Any]:
     if morph:
         columns["morph"] = morph
     return columns
+
+
 def _replacement_columns(segment: Any) -> dict[str, Any]:
     replacements = segment.replacements
     if not replacements:
@@ -174,8 +176,6 @@ def _replacement_columns(segment: Any) -> dict[str, Any]:
         if values:
             columns[field] = values
     return columns
-
-
 
 
 def _segment_to_wire(segment: Any, default_language: str) -> dict[str, Any]:
@@ -381,7 +381,9 @@ def _replacements_from_wire(value: Any, text: str, path: str) -> list[dict[str, 
             or len(span) != 2
             or any(type(point) is not int for point in span)
         ):
-            raise _error("replacement span must be [start, end]", code="replacement.span", path=span_path)
+            raise _error(
+                "replacement span must be [start, end]", code="replacement.span", path=span_path
+            )
         start, end = span
         if start < 0 or end < start or end > len(text):
             raise _error(
@@ -453,9 +455,7 @@ def _segment_from_wire(value: Any, default_language: str, path: str) -> dict[str
         "tokens": _tokens_from_wire(value["token"], text, f"{path}.token")
         if "token" in value
         else [],
-        "replacements": _replacements_from_wire(
-            value["replacement"], text, f"{path}.replacement"
-        )
+        "replacements": _replacements_from_wire(value["replacement"], text, f"{path}.replacement")
         if "replacement" in value
         else [],
         "markers": value.get("marker", []),
