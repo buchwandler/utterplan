@@ -18,7 +18,7 @@ Migration operates on serialized plain data and does not reparse, reprepare, rer
 
 ## Planning defaults
 
-The default text-preparation backend is `spokenform`, pause activation mode is `tts`, and the default CLI linguistic-resource policy is `spacy off`. Deterministic fallback tokenization and analysis do not require an installed spaCy model. `spacy auto` is opt-in; it may expose richer tokenization, POS, lemmas, and tags, but provider documents remain internal.
+The default text-preparation backend is `spokenform`, pause activation mode is `tts`, and spaCy policy is best-effort `auto`. Auto uses only installed compatible local models in `sm`, `md`, `lg`, `trf` preference order and falls back deterministically if unavailable; provider documents remain internal. Use `--spacy off` to force fallback or a tier flag to require that model.
 
 In Python, `PlannerConfig.document_format` defaults to `"plain"`; select `"ssmd"` for SSMD source. `PauseConfig.mode` controls whether eligible semantic pause intents are activated by the compiler. The executable plan carries semantic intent (or an exact authored timed pause), not numeric durations invented from an activation policy. A renderer may interpret supported intents according to its own capabilities.
 
@@ -34,6 +34,7 @@ In Python, `PlannerConfig.document_format` defaults to `"plain"`; select `"ssmd"
 - `markers` and optional `heading` metadata already localized to the owning segment.
 
 Token offsets are half-open Python-character ranges into the owning `segment.text`. Do not use them to slice document text or add offsets from another segment. Consumers render flow units and segments in their stored order.
+Token `pos`, `tag`, `lemma`, and `morph` describe that exact prepared text and are the authoritative downstream linguistic context. Consumers should pass them through rather than retokenizing or rerunning spaCy. Optional replacements are provenance only: their output spans are segment-local, source values are original spellings, and they are excluded from executable hashes and synthesis inputs.
 
 ```python
 from utterplan import FlowPlan
@@ -57,7 +58,7 @@ for unit in plan.flow:
         )
 ```
 
-`FlowPlan.document` retains compact document information such as format, title, SSMD version, and portable semantics. `FlowPlan.linguistics` identifies analysis provider/model provenance without retaining provider state. Source text, source locations, compiler diagnostics, preparation mappings, and renderability details are intentionally not executable-plan fields.
+`FlowPlan.document` retains compact document information such as format, title, SSMD version, and portable semantics. `FlowPlan.linguistics` identifies analysis provider/model provenance without retaining provider state. Compact replacement views preserve local prepared-text spans and original spellings; full source text, source offsets, complete preparation mappings, compiler diagnostics, and renderability details belong only in an optional trace sidecar.
 
 ## Optional compiler trace
 
@@ -70,7 +71,7 @@ utterplan inspect-trace chapter.trace.toml --preparation --boundaries
 ```
 
 The trace contains source text/hash, structural/prepared text, coordinate maps, preparation changes, diagnostics, and renderability evidence. It is not renderer input, does not affect `FlowPlan.plan_id`, and does not change the resulting plan TOML. See the [coordinate-space contract](coordinate-spaces) for every trace offset's coordinate space.
-
+The trace contains source text/hash, structural/prepared text, full coordinate maps, preparation changes, diagnostics, and renderability evidence. Compact replacement views are available in v5 segments, but the trace is still needed for original source offsets and complete mappings. The trace is not renderer input, does not affect `FlowPlan.plan_id`, and does not change the executable plan.
 ## Directives and media
 
 Voice bindings and directive voice references are logical names, not backend voice IDs; consumers translate them to engine-specific resources. UtterPlan resolves SSMD scopes and defaults but does not choose engine settings or recompute pause policy.

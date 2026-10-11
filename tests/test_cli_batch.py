@@ -309,3 +309,4 @@ def test_compile_many_parser_defaults_to_repair_and_continue() -> None:
     args = build_parser().parse_args(["compile-many", "one.txt", "--output-dir", "plans"])
     assert args.renderability == "repair"
     assert args.fail_fast is False
+    assert args.spacy == "auto"

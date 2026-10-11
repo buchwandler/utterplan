@@ -1577,6 +1577,48 @@ class TokenView:
 
 
 @dataclass(frozen=True, slots=True)
+class ReplacementView:
+    """Compact provenance for one transformed span in prepared segment text."""
+
+    start: int
+    end: int
+    source: str
+    kind: str | None = None
+    rule: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.start) is not int or type(self.end) is not int:
+            raise ValueError("replacement span coordinates must be integers")
+        if self.start < 0 or self.end < self.start:
+            raise ValueError("replacement span must be ordered and non-negative")
+        if not isinstance(self.source, str):
+            raise ValueError("replacement source must be a string")
+        for field_name in ("kind", "rule"):
+            value = getattr(self, field_name)
+            if value is not None and (not isinstance(value, str) or not value):
+                raise ValueError(f"replacement {field_name} must be a non-empty string or None")
+
+    def surface(self, text: str) -> str:
+        """Derive the prepared surface from its owning segment text."""
+        if self.end > len(text):
+            raise ValueError("replacement span is outside segment text")
+        return text[self.start : self.end]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in (
+                ("start", self.start),
+                ("end", self.end),
+                ("source", self.source),
+                ("kind", self.kind),
+                ("rule", self.rule),
+            )
+            if value is not None
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class FlowSegment:
     """One atomic renderer operation in the ordered executable flow."""
 
@@ -1588,6 +1630,7 @@ class FlowSegment:
     tokens: tuple[TokenView, ...] = ()
     markers: tuple[str, ...] = ()
     heading: int | None = None
+    replacements: tuple[ReplacementView, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.text, str):
@@ -1615,6 +1658,13 @@ class FlowSegment:
             if token.start < previous_end:
                 raise ValueError("token spans must be ordered and non-overlapping")
             previous_end = token.end
+        if not isinstance(self.replacements, tuple) or any(
+            not isinstance(item, ReplacementView) for item in self.replacements
+        ):
+            raise ValueError("segment replacements must be a tuple of ReplacementView values")
+        for index, replacement in enumerate(self.replacements):
+            if replacement.end > len(self.text):
+                raise ValueError(f"replacement {index} span is outside segment text")
         if self.heading is not None and (type(self.heading) is not int or self.heading < 1):
             raise ValueError("heading must be a positive integer")
 
@@ -1632,6 +1682,8 @@ class FlowSegment:
             result["pause_after"] = self.pause_after.to_dict()
         if self.heading is not None:
             result["heading"] = self.heading
+        if self.replacements:
+            result["replacements"] = [item.to_dict() for item in self.replacements]
         return result
 
 
@@ -1895,6 +1947,7 @@ class FlowPlan:
                     "tokens",
                     "markers",
                     "heading",
+                    "replacements",
                 }
                 unknown_segment = set(raw_segment) - allowed_segment
                 if unknown_segment:
@@ -1950,6 +2003,37 @@ class FlowPlan:
                                 raw_token.get("morph"),
                             )
                         )
+                    raw_replacements = raw_segment.get("replacements", [])
+                    if not isinstance(raw_replacements, (list, tuple)):
+                        raise PlanFormatError(
+                            "segment replacements must be an array",
+                            code="replacement.type",
+                            path=segment_path,
+                        )
+                    replacements: list[ReplacementView] = []
+                    for replacement_index, raw_replacement in enumerate(raw_replacements):
+                        replacement_path = f"{segment_path}.replacements[{replacement_index}]"
+                        if not isinstance(raw_replacement, Mapping):
+                            raise PlanFormatError(
+                                "replacement must be an object",
+                                code="replacement.type",
+                                path=replacement_path,
+                            )
+                        if set(raw_replacement) - {"start", "end", "source", "kind", "rule"}:
+                            raise PlanFormatError(
+                                "unknown replacement fields",
+                                code="field.unknown",
+                                path=replacement_path,
+                            )
+                        replacements.append(
+                            ReplacementView(
+                                _expect(raw_replacement.get("start"), int, f"{replacement_path}.start"),
+                                _expect(raw_replacement.get("end"), int, f"{replacement_path}.end"),
+                                _expect(raw_replacement.get("source"), str, f"{replacement_path}.source"),
+                                raw_replacement.get("kind"),
+                                raw_replacement.get("rule"),
+                            )
+                        )
                     raw_markers = raw_segment.get("markers", [])
                     if not isinstance(raw_markers, (list, tuple)) or any(
                         not isinstance(marker, str) or not marker for marker in raw_markers
@@ -1971,6 +2055,7 @@ class FlowPlan:
                             tokens=tuple(tokens),
                             markers=tuple(raw_markers),
                             heading=raw_segment.get("heading"),
+                            replacements=tuple(replacements),
                         )
                     )
                 except PlanFormatError:

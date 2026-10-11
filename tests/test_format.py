@@ -74,7 +74,7 @@ def test_toml_output_is_plain_engine_independent_flow_data() -> None:
     assert "phonemes" not in text
     assert "numpy" not in text
     assert "schema_version = 5" in text
-    assert "source =" not in text
+    assert not any(line.startswith("source =") for line in text.splitlines())
     assert "token_indices" not in text
 
 

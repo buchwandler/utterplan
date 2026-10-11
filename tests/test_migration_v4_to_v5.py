@@ -75,6 +75,37 @@ def test_token_facts_are_local_and_surface_verified() -> None:
     assert error.value.code == "migration.token-coordinate-ambiguous"
 
 
+
+def test_v4_replacements_migrate_to_segment_local_compact_views() -> None:
+    plan = migrate_v4_to_v5(_fixture("spokenform_offsets.utterplan.json"))
+    segment = _segments(plan)[0]
+    replacements = segment["replacements"]
+
+    assert replacements[0]["source"] == "Dr."
+    assert segment["text"][replacements[0]["start"] : replacements[0]["end"]] == "Doctor"
+    assert replacements[1]["source"] == "5 kg"
+    assert segment["text"][replacements[1]["start"] : replacements[1]["end"]] == "five kilograms"
+    assert "preparation" not in plan
+
+
+def test_v4_migration_skips_malformed_and_cross_segment_replacements() -> None:
+    malformed = _fixture("spokenform_offsets.utterplan.json")
+    malformed["preparation"]["replacements"][0]["kind"] = ""
+    plan = migrate_v4_to_v5(malformed)
+    assert all(item["source"] != "Dr." for segment in _segments(plan) for item in segment.get("replacements", []))
+
+    crossing = _fixture("multilingual.utterplan.json")
+    crossing["preparation"]["replacements"] = [
+        {
+            "source": "whole document",
+            "output_start": 0,
+            "output_end": len(crossing["texts"]["spoken"]),
+        }
+    ]
+    plan = migrate_v4_to_v5(crossing)
+    assert all("replacements" not in segment for segment in _segments(plan))
+
+
 def test_pause_migration_uses_provenance_not_numeric_thresholds() -> None:
     plan = migrate_v4_to_v5(_fixture("ssmd_breaks.utterplan.json"))
     segments = _segments(plan)

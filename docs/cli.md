@@ -125,7 +125,7 @@ utterplan explain chapter.utterplan.toml
 utterplan explain chapter.utterplan.toml --details
 ```
 
-The default output explains executable flow: prepared segment text, unit order, effective languages, semantic pause intents, headings, markers, and typed directives. Compiler source diagnostics and preparation provenance are intentionally absent from the plan unless a trace sidecar was saved. Add `--details` for local token offsets, flow hashes, plan identity, and trace preparation mappings. Pass `--trace PATH` to attach a matching sidecar; the TOML trace can also be read independently with `inspect-trace`.
+The explanation presents executable flow: prepared segment text, unit order, effective languages, semantic pause intents, headings, markers, and typed directives. Compact replacement views may preserve local output spans and original spellings, but complete compiler source diagnostics and preparation maps are intentionally absent unless a trace sidecar was saved. Add `--details` for local token offsets, flow hashes, plan identity, and trace preparation mappings. Pass `--trace PATH` to attach a matching sidecar; the TOML trace can also be read independently with `inspect-trace`.
 
 ## Inspect a persisted planning attempt
 
@@ -154,11 +154,11 @@ inspect-only draft, not a canonical plan, and is rejected by `FlowPlan.load()`.
   spaCy use, or a required model tier.
 - `--renderability repair|strict` defaults to safe punctuation-only repair. Semantic blockers remain failures with source context and an actionable next step; strict mode reports safe repair opportunities without applying them.
 
-The default spaCy policy is `off`, so the CLI does not depend on whichever optional model happens to be installed.
+The default spaCy policy is `auto`: inspect only already-installed compatible local models in `sm`, `md`, `lg`, `trf` preference order. If spaCy or every compatible model is unavailable, compilation continues with deterministic fallback; no model is downloaded.
 
-The complete defaults are `--text-preparation spokenform`, `--pause-mode tts`, and `--spacy off`. `spokenform` is the default text-preparation backend, while `tts` is the default pause mode. `--spacy off` uses UtterPlan's deterministic fallback tokenizer and analysis and does not require an installed spaCy model.
+The complete defaults are `--text-preparation spokenform`, `--pause-mode tts`, and `--spacy auto`. `auto` is best-effort and uses a compatible local model when available; otherwise it safely falls back.
 
-Use `--spacy auto` only as an opt-in enrichment policy. If a compatible local model is available, it may provide richer tokenization, POS tags, lemmas, and tags; `auto` is not the default and no model is downloaded automatically.
+Use `--spacy off` to force deterministic fallback. `--spacy sm|md|lg|trf` requires that local model tier and fails if it is unavailable. V5 token columns carry final prepared-text linguistic context; the optional `replacement` fields describe local output spans, not source coordinates. Preserve the trace sidecar for full source maps and preparation diagnostics.
 
 ## Other commands
 

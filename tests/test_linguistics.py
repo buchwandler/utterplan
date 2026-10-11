@@ -52,49 +52,107 @@ def test_provider_documents_are_not_serialized():
     assert "spacy.tokens" not in serialized
 
 
-def test_default_planner_does_not_load_spacy(monkeypatch):
-    def fail_if_loaded(*args, **kwargs):
-        raise AssertionError("default planning must not load spaCy")
-
-    monkeypatch.setattr(LinguisticResourcePool, "pipeline", fail_if_loaded)
+def test_default_planner_falls_back_when_spacy_cannot_be_imported(monkeypatch):
+    monkeypatch.setitem(sys.modules, "spacy", None)
     plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello world.")
 
+    assert LinguisticsConfig().use_spacy is True
+    assert plan.linguistic_runs[0].provider == "fallback"
+    assert all(token.pos is None and token.tag is None and token.morph is None for token in plan.tokens)
+
+
+def test_default_planner_falls_back_when_no_compatible_model_is_installed(monkeypatch):
+    fake_spacy = SimpleNamespace(
+        util=SimpleNamespace(get_installed_models=lambda: []),
+        load=lambda model: pytest.fail(f"unexpected model load: {model}"),
+    )
+    monkeypatch.setitem(sys.modules, "spacy", fake_spacy)
+    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello world.")
+
+    assert plan.linguistic_runs[0].provider == "fallback"
+
+
+
+def test_default_planner_falls_back_when_auto_model_loading_fails(monkeypatch):
+    def fail_load(model):
+        raise OSError("model cannot load")
+
+    fake_spacy = SimpleNamespace(
+        util=SimpleNamespace(get_installed_models=lambda: ["en_core_web_sm"]),
+        load=fail_load,
+    )
+    monkeypatch.setitem(sys.modules, "spacy", fake_spacy)
+    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello world.")
+
+    assert plan.linguistic_runs[0].provider == "fallback"
+
+
+def test_explicit_spacy_off_never_inspects_or_loads_spacy(monkeypatch):
+    fake_spacy = SimpleNamespace(
+        util=SimpleNamespace(get_installed_models=lambda: pytest.fail("spaCy must not be inspected")),
+        load=lambda model: pytest.fail(f"spaCy must not be loaded: {model}"),
+    )
+    monkeypatch.setitem(sys.modules, "spacy", fake_spacy)
+    config = PlannerConfig(language="en-us", linguistics=LinguisticsConfig(use_spacy=False))
+    plan = UtterancePlanner(config).plan("Hello world.")
+
+    assert plan.linguistic_runs[0].provider == "fallback"
     assert plan.texts.spoken == "Hello world."
     assert all(token.pos is None and token.tag is None for token in plan.tokens)
 
 
-def test_spacy_auto_uses_fake_compatible_local_model(monkeypatch):
+def test_default_planner_uses_small_installed_spacy_model_and_reuses_it(monkeypatch):
     loaded_models = []
+    model_names = ["en_core_web_lg", "en_core_web_trf", "en_core_web_sm"]
 
     class Pipeline:
-        def __init__(self):
-            self.last_doc = None
+        meta = {"version": "1.0"}
 
         def __call__(self, text):
-            self.last_doc = [
-                SimpleNamespace(idx=0, text=text, pos_="NOUN", tag_="NN", lemma_=text.lower())
-            ]
-            return self.last_doc
+            tags = {
+                "I": ("PRON", "PRP", "I", "Case=Nom"),
+                "live": ("VERB", "VBP", "live", "Tense=Pres|VerbForm=Fin"),
+                "here.": ("ADV", "RB", "here", ""),
+            }
+            return FakeProviderDoc(
+                text,
+                [
+                    SimpleNamespace(
+                        idx=match.start(),
+                        text=match.group(0),
+                        pos_=tags.get(match.group(0), ("X", "", "", ""))[0],
+                        tag_=tags.get(match.group(0), ("X", "", "", ""))[1],
+                        lemma_=tags.get(match.group(0), ("X", "", "", ""))[2],
+                        morph=tags.get(match.group(0), ("X", "", "", ""))[3],
+                    )
+                    for match in re.finditer(r"\S+", text)
+                ],
+            )
 
     pipeline = Pipeline()
-
     fake_spacy = SimpleNamespace(
-        util=SimpleNamespace(get_installed_models=lambda: ["en_core_web_sm"]),
+        __version__="3.7.0",
+        util=SimpleNamespace(get_installed_models=lambda: model_names),
         load=lambda model: loaded_models.append(model) or pipeline,
     )
     monkeypatch.setitem(sys.modules, "spacy", fake_spacy)
+    planner = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity"))
 
-    analysis = LinguisticResourcePool().analyze(
-        "Hello",
-        LanguageRun("lang-0", 0, 5, "en-us"),
-        PlannerConfig(language="en-us").linguistics.__class__(use_spacy=True),
-    )
+    first = planner.plan("I live here.")
+    second = planner.plan("I live here.")
+    live = next(token for token in first.tokens if token.text == "live")
 
+    assert LinguisticsConfig().use_spacy is True
     assert loaded_models == ["en_core_web_sm"]
-    assert analysis.model_name == "en_core_web_sm"
-    assert analysis.provider_doc is pipeline.last_doc
-    assert analysis.tokens[0].pos == "NOUN"
-
+    assert first.linguistic_runs[0].provider == "spacy"
+    assert first.linguistic_runs[0].model == "en_core_web_sm"
+    assert second.linguistic_runs[0].provider == "spacy"
+    assert (live.pos, live.tag, live.lemma, live.morph) == (
+        "VERB",
+        "VBP",
+        "live",
+        "Tense=Pres|VerbForm=Fin",
+    )
 
 def test_spacy_enrichment_does_not_collapse_sentence_topology(monkeypatch):
     class Pipeline:
@@ -321,7 +379,11 @@ def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):
         raise AssertionError("fallback analysis must not infer syntactic clauses")
 
     monkeypatch.setattr(phrasplit, "detect_clause_boundaries", fail_if_called)
-    plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(
+    plan = UtterancePlanner(
+        PlannerConfig(
+            language="en-us", text_preparation="identity", linguistics=LinguisticsConfig(use_spacy=False)
+        )
+    ).plan(
         "I wanted to go, but it was raining."
     )
 
@@ -403,7 +465,9 @@ def test_fake_spacy_fields_and_provenance_survive_roundtrip(monkeypatch):
 
 
 def test_fallback_provenance_is_explicit():
-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("I live here.")
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", linguistics=LinguisticsConfig(use_spacy=False))
+    ).plan("I live here.")
     assert plan.linguistic_runs[0].provider == "fallback"
     assert plan.linguistic_runs[0].model is None
     assert all(

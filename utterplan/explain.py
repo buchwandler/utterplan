@@ -89,6 +89,14 @@ def format_explanation(
         lines.append(f"  Unit {unit_index}")
         for segment_index, segment in enumerate(unit.segments, start=1):
             lines.append(f"    {segment_index}. [{segment.language}] {_quote(segment.text)}")
+            if segment.replacements:
+                lines.append("       replacements:")
+                for replacement in segment.replacements:
+                    lines.append(
+                        f"         [{replacement.start}:{replacement.end}] "
+                        f"{_quote(replacement.surface(segment.text))} <- "
+                        f"{_quote(replacement.source)}"
+                    )
             if segment.heading is not None:
                 lines.append(f"       heading: level {segment.heading}")
             if segment.markers:

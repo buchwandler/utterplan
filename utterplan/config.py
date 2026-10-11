@@ -25,7 +25,7 @@ class PauseConfig:
 
 @dataclass(frozen=True, slots=True)
 class LinguisticsConfig:
-    use_spacy: bool | None = None
+    use_spacy: bool | None = True
     spacy_model: str | None = None
     spacy_model_size: Literal["sm", "md", "lg", "trf"] | None = None
     require_spacy: bool = False

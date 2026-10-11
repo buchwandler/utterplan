@@ -26,6 +26,4 @@ python-api
 changelog
 ```
 
-The package version and the UtterPlan schema version are independent. The
-current interchange schema is version `4`; schemas v1, v2, and v3 remain
-available as immutable historical resources with sequential migration paths.
+The package version and the UtterPlan schema version are independent. The current interchange schema is version `5`; schemas v1–v4 remain available as immutable historical resources with sequential migration paths.

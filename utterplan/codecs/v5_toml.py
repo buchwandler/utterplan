@@ -161,6 +161,21 @@ def _token_columns(segment: Any) -> dict[str, Any]:
     if morph:
         columns["morph"] = morph
     return columns
+def _replacement_columns(segment: Any) -> dict[str, Any]:
+    replacements = segment.replacements
+    if not replacements:
+        return {}
+    columns: dict[str, Any] = {
+        "span": [[item.start, item.end] for item in replacements],
+        "source": [item.source for item in replacements],
+    }
+    for field in ("kind", "rule"):
+        values = _sparse_column(replacements, field)
+        if values:
+            columns[field] = values
+    return columns
+
+
 
 
 def _segment_to_wire(segment: Any, default_language: str) -> dict[str, Any]:
@@ -180,6 +195,9 @@ def _segment_to_wire(segment: Any, default_language: str) -> dict[str, Any]:
     token = _token_columns(segment)
     if token:
         result["token"] = token
+    replacement = _replacement_columns(segment)
+    if replacement:
+        result["replacement"] = replacement
     return result
 
 
@@ -222,29 +240,32 @@ def _decode_sparse(
     field: str,
     count: int,
     path: str,
+    record: str = "token",
 ) -> dict[int, str]:
     if not isinstance(raw, list):
-        raise _error(f"token {field} must be an array", code="token.column", path=path)
+        raise _error(f"{record} {field} must be an array", code=f"{record}.column", path=path)
     result: dict[int, str] = {}
     previous = -1
     for entry_index, entry in enumerate(raw):
         entry_path = f"{path}[{entry_index}]"
         if not isinstance(entry, list) or len(entry) != 2:
             raise _error(
-                "sparse token entries must be [index, value] pairs",
-                code="token.sparse",
+                f"sparse {record} entries must be [index, value] pairs",
+                code=f"{record}.sparse",
                 path=entry_path,
             )
         index, value = entry
         if type(index) is not int or not 0 <= index < count or index <= previous:
             raise _error(
-                "sparse token indices must be valid, unique, and ascending",
-                code="token.sparse",
+                f"sparse {record} indices must be valid, unique, and ascending",
+                code=f"{record}.sparse",
                 path=entry_path,
             )
         if not isinstance(value, str):
             raise _error(
-                "sparse token values must be strings", code="token.column", path=entry_path
+                f"sparse {record} values must be strings",
+                code=f"{record}.column",
+                path=entry_path,
             )
         result[index] = value
         previous = index
@@ -328,6 +349,81 @@ def _tokens_from_wire(value: Any, text: str, path: str) -> list[dict[str, Any]]:
     return tokens
 
 
+def _replacements_from_wire(value: Any, text: str, path: str) -> list[dict[str, Any]]:
+    if not isinstance(value, Mapping):
+        raise _error("replacement block must be an object", code="replacement.type", path=path)
+    unknown = set(value) - {"span", "source", "kind", "rule"}
+    if unknown:
+        raise _error(
+            f"unknown replacement columns: {sorted(unknown)}",
+            code="field.unknown",
+            path=path,
+        )
+    spans = value.get("span")
+    sources = value.get("source")
+    if not isinstance(spans, list) or not isinstance(sources, list):
+        raise _error(
+            "replacement span and source columns are required",
+            code="replacement.column",
+            path=path,
+        )
+    if len(spans) != len(sources):
+        raise _error(
+            "replacement span and source columns must have equal lengths",
+            code="replacement.column",
+            path=path,
+        )
+    normalized_spans: list[tuple[int, int]] = []
+    for index, span in enumerate(spans):
+        span_path = f"{path}.span[{index}]"
+        if (
+            not isinstance(span, list)
+            or len(span) != 2
+            or any(type(point) is not int for point in span)
+        ):
+            raise _error("replacement span must be [start, end]", code="replacement.span", path=span_path)
+        start, end = span
+        if start < 0 or end < start or end > len(text):
+            raise _error(
+                "replacement span must be ordered and within segment text",
+                code="replacement.span",
+                path=span_path,
+            )
+        normalized_spans.append((start, end))
+    if any(not isinstance(source, str) for source in sources):
+        raise _error(
+            "replacement source values must be strings",
+            code="replacement.column",
+            path=f"{path}.source",
+        )
+    optional: dict[str, dict[int, str]] = {}
+    for field in ("kind", "rule"):
+        if field not in value:
+            continue
+        values = _decode_sparse(
+            value[field],
+            field=field,
+            count=len(normalized_spans),
+            path=f"{path}.{field}",
+            record="replacement",
+        )
+        if any(not item for item in values.values()):
+            raise _error(
+                f"replacement {field} values must be non-empty",
+                code="replacement.column",
+                path=f"{path}.{field}",
+            )
+        optional[field] = values
+    result = []
+    for index, (start, end) in enumerate(normalized_spans):
+        item: dict[str, Any] = {"start": start, "end": end, "source": sources[index]}
+        for field, values in optional.items():
+            if index in values:
+                item[field] = values[index]
+        result.append(item)
+    return result
+
+
 def _segment_from_wire(value: Any, default_language: str, path: str) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise _error("flow segment must be a table", code="flow.segment", path=path)
@@ -340,6 +436,7 @@ def _segment_from_wire(value: Any, default_language: str, path: str) -> dict[str
         "heading",
         "token",
         *_DIRECTIVE_KEYS,
+        "replacement",
     }
     unknown = set(value) - allowed
     if unknown:
@@ -355,6 +452,11 @@ def _segment_from_wire(value: Any, default_language: str, path: str) -> dict[str
         "directives": {key: _plain(value[key]) for key in _DIRECTIVE_KEYS if key in value},
         "tokens": _tokens_from_wire(value["token"], text, f"{path}.token")
         if "token" in value
+        else [],
+        "replacements": _replacements_from_wire(
+            value["replacement"], text, f"{path}.replacement"
+        )
+        if "replacement" in value
         else [],
         "markers": value.get("marker", []),
     }
@@ -476,9 +578,9 @@ def dumps_v5_toml(plan: FlowPlan) -> str:
         for segment in unit["segment"]:
             segment_table = tomlkit.table()
             for key, value in segment.items():
-                if key == "token":
+                if key in {"token", "replacement"}:
                     for column, values in value.items():
-                        segment_table[DottedKey([tomlkit.key("token"), tomlkit.key(column)])] = (
+                        segment_table[DottedKey([tomlkit.key(key), tomlkit.key(column)])] = (
                             _toml_value(values)
                         )
                 else:

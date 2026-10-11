@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from utterplan import FlowPlan, PlannerConfig, compile_attempt
-from utterplan.cli import build_parser, main
+from utterplan import FlowPlan, LinguisticsConfig, PlannerConfig, compile_attempt
+from utterplan.cli import _linguistics_config, build_parser, main
 from utterplan.migration import migrate_plan_data
 
 
@@ -41,10 +41,27 @@ def test_compile_cli_defaults() -> None:
 
     assert args.text_preparation == "spokenform"
     assert args.pause_mode == "tts"
-    assert args.spacy == "off"
+    assert args.spacy == "auto"
 
     assert args.renderability == "repair"
 
+
+
+
+def test_spacy_cli_policies_preserve_auto_off_and_required_tiers() -> None:
+    parser = build_parser()
+    assert parser.parse_args(["compile", "Hello.", "--lang", "en"]).spacy == "auto"
+    assert parser.parse_args(["compile", "Hello.", "--lang", "en", "--spacy", "off"]).spacy == "off"
+    assert parser.parse_args(["compile-many", "one.txt", "--output-dir", "plans"]).spacy == "auto"
+    assert parser.parse_args(["compile-book", "book.ssmdbook"]).spacy == "auto"
+
+    assert _linguistics_config("auto") == LinguisticsConfig(use_spacy=True, require_spacy=False)
+    assert _linguistics_config("off") == LinguisticsConfig(use_spacy=False)
+    for tier in ("sm", "md", "lg", "trf"):
+        config = _linguistics_config(tier)
+        assert config.use_spacy is True
+        assert config.spacy_model_size == tier
+        assert config.require_spacy is True
 
 def test_compile_literal_text_to_stdout_toml(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["compile", "Hello world.", "--lang", "en-us"]) == 0
@@ -291,7 +308,7 @@ def test_inspect_tokens_shows_linguistic_fields(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     output = tmp_path / "plan.utterplan.toml"
-    assert main(["compile", "Hello.", "--lang", "en-us", "-o", str(output)]) == 0
+    assert main(["compile", "Hello.", "--lang", "en-us", "--spacy", "off", "-o", str(output)]) == 0
     capsys.readouterr()
     assert main(["inspect", str(output), "--tokens"]) == 0
     captured = capsys.readouterr()

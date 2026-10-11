@@ -11,6 +11,7 @@ from .model import (
     FlowUnit,
     LinguisticProvenance,
     PauseIntent,
+    ReplacementView,
     TokenView,
     UtterancePlan,
 )
@@ -83,6 +84,7 @@ def project_compiler_plan(plan: UtterancePlan) -> FlowPlan:
                         )
                     ),
                     heading=headings.get(segment.id),
+                    replacements=_replacement_views_for_segment(plan, segment),
                 )
             )
         flow.append(FlowUnit(tuple(unit_segments)))
@@ -179,6 +181,44 @@ def _tokens_for_segment(
             )
         )
     return tuple(result)
+
+
+def _replacement_views_for_segment(plan: UtterancePlan, segment: Any) -> tuple[ReplacementView, ...]:
+    views: list[ReplacementView] = []
+    for raw in plan.preparation.replacements:
+        if not isinstance(raw, Mapping):
+            continue
+        output_start = raw.get("output_start")
+        output_end = raw.get("output_end")
+        source = raw.get("source")
+        kind = raw.get("kind")
+        rule = raw.get("rule")
+        if (
+            type(output_start) is not int
+            or type(output_end) is not int
+            or output_start > output_end
+            or not isinstance(source, str)
+            or (kind is not None and (not isinstance(kind, str) or not kind))
+            or (rule is not None and (not isinstance(rule, str) or not rule))
+        ):
+            continue
+        owners = [
+            candidate
+            for candidate in plan.segments
+            if candidate.spoken_start <= output_start and output_end <= candidate.spoken_end
+        ]
+        if len(owners) != 1 or owners[0].id != segment.id:
+            continue
+        views.append(
+            ReplacementView(
+                start=output_start - segment.spoken_start,
+                end=output_end - segment.spoken_start,
+                source=source,
+                kind=kind,
+                rule=rule,
+            )
+        )
+    return tuple(sorted(views, key=lambda item: (item.start, item.end, item.source)))
 
 
 def _has_word_character(value: str) -> bool:

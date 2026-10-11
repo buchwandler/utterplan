@@ -26,7 +26,7 @@ A future adapter can use only public v5 flow fields:
 - `segment.markers` and optional `segment.heading`;
 - compact `plan.document` and `plan.linguistics` metadata.
 
-Token offsets are local to the owning `segment.text`. A consumer must not use compiler source offsets or retokenize the document. Provider/model provenance is descriptive; when contextual G2P requires a specific provider, the adapter must fail clearly or use its documented non-contextual fallback.
+Token offsets are local to the owning `segment.text`. A consumer must not use compiler source offsets. Optional replacement spans slice prepared text and record original spellings; they are not source offsets. Preserve the trace sidecar for exact source locations and complete preparation mappings.
 
 ```python
 for unit in plan.flow:
@@ -35,7 +35,7 @@ for unit in plan.flow:
         phonemizer(segment.text, segment.language, tokens)
 ```
 
-The renderer must not rerun spaCy or infer missing POS/tag values. No JSON serialization is required for in-process use.
+Use the V5 token fields as authoritative context: pass available `pos`, `tag`, `lemma`, and `morph` through unchanged rather than rerunning spaCy or inferring tags. Default `auto` uses installed compatible local models, preferring `sm`, `md`, `lg`, `trf`, and safely falls back if unavailable; model packages are never downloaded. When fields are unavailable, follow the adapter's documented non-contextual fallback.
 
 ## Pause behavior
 

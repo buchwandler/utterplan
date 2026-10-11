@@ -7,10 +7,10 @@ diagnostics describe compilation, and an optional `PreparationTrace` holds compi
 provenance separately. `UtterancePlanner.plan` is also supported and returns the
 same current `FlowPlan` directly.
 
-The Python defaults are deliberately spaCy-free and repair-first: `PlannerConfig` uses `spokenform` text preparation and `renderability_mode="repair"`, while `PauseConfig().mode` is `"tts"`. The CLI additionally defaults to the `spacy off` linguistic-resource policy, which uses deterministic fallback tokenization and analysis without requiring an installed spaCy model.
+The Python defaults are repair-first with best-effort spaCy enrichment: `PlannerConfig` uses `spokenform` preparation and `renderability_mode="repair"`, `PauseConfig().mode` is `"tts"`, and `LinguisticsConfig` uses local-model `auto`. Auto prefers installed compatible models `sm`, `md`, `lg`, `trf`, then falls back safely if spaCy or models are unavailable. No model is downloaded.
 
-For an explicit contextual-G2P configuration, use `LinguisticsConfig(use_spacy=True, spacy_model="en_core_web_sm", require_spacy=True)`. The resulting plan records final pass-B token provenance in `linguistic_runs`; no provider document is retained.
-spaCy enrichment is opt-in through the CLI's `--spacy auto` policy or an explicit `LinguisticsConfig` with a compatible local model. It may provide richer tokenization, POS tags, lemmas, and tags, but UtterPlan never downloads a model implicitly.
+To require a specific installed model, set `require_spacy=True` and configure its model or tier. The plan records final pass-B token provenance in `linguistic_runs`; provider documents are not retained. Set `use_spacy=False` for deterministic opt-out.
+V5 `token.span`, `pos`, `tag`, `lemma`, and `morph` are the authoritative linguistic context for the exact prepared segment text. Consumers should not retokenize or rerun spaCy. Optional replacement spans are local to final prepared `segment.text`; original spellings are stored as provenance strings, while complete source offsets and preparation maps belong in the optional trace sidecar.
 
 ## Sentence segmentation and private topology
 

@@ -248,6 +248,76 @@ def _token_views(
     return result
 
 
+def _replacement_views(
+    preparation: Mapping[str, Any],
+    segment: Mapping[str, Any],
+    segments: list[Mapping[str, Any]],
+    spoken: str,
+) -> list[dict[str, Any]]:
+    records = preparation.get("replacements", preparation.get("replacement", []))
+    if not isinstance(records, (list, tuple)):
+        return []
+    segment_id = segment.get("id")
+    views: list[dict[str, Any]] = []
+    for raw in records:
+        if not isinstance(raw, Mapping):
+            continue
+        span = raw.get("output_span")
+        if span is not None:
+            if (
+                not isinstance(span, (list, tuple))
+                or len(span) != 2
+                or any(type(point) is not int for point in span)
+            ):
+                continue
+            output_start, output_end = span
+        else:
+            output_start = raw.get("output_start")
+            output_end = raw.get("output_end")
+        source = raw.get("source")
+        kind = raw.get("kind")
+        rule = raw.get("rule")
+        if (
+            type(output_start) is not int
+            or type(output_end) is not int
+            or output_start < 0
+            or output_end < output_start
+            or output_end > len(spoken)
+            or not isinstance(source, str)
+            or (kind is not None and (not isinstance(kind, str) or not kind))
+            or (rule is not None and (not isinstance(rule, str) or not rule))
+        ):
+            continue
+        owners = []
+        for candidate in segments:
+            start = candidate.get("spoken_start")
+            end = candidate.get("spoken_end")
+            text = candidate.get("text")
+            if (
+                type(start) is int
+                and type(end) is int
+                and isinstance(text, str)
+                and 0 <= start <= end <= len(spoken)
+                and spoken[start:end] == text
+                and start <= output_start
+                and output_end <= end
+            ):
+                owners.append(candidate)
+        if len(owners) != 1 or owners[0].get("id") != segment_id:
+            continue
+        view: dict[str, Any] = {
+            "start": output_start - cast(int, segment["spoken_start"]),
+            "end": output_end - cast(int, segment["spoken_start"]),
+            "source": source,
+        }
+        if kind is not None:
+            view["kind"] = kind
+        if rule is not None:
+            view["rule"] = rule
+        views.append(view)
+    return sorted(views, key=lambda item: (item["start"], item["end"], item["source"]))
+
+
 def _locate_segment(
     position: int,
     segments: list[Mapping[str, Any]],
@@ -373,6 +443,8 @@ def migrate_v4_to_v5(data: Mapping[str, Any]) -> dict[str, Any]:
     spoken = texts.get("spoken")
     if not isinstance(spoken, str):
         raise _error("spoken text must be a string", "$.texts.spoken")
+    preparation_value = source.get("preparation", {})
+    preparation = preparation_value if isinstance(preparation_value, Mapping) else {}
 
     tokens = _list(source.get("tokens"), "$.tokens")
     boundaries = _list(source.get("boundaries"), "$.boundaries")
@@ -537,6 +609,9 @@ def migrate_v4_to_v5(data: Mapping[str, Any]) -> dict[str, Any]:
                     )
                 ],
             }
+            replacement_views = _replacement_views(preparation, segment, segments, spoken)
+            if replacement_views:
+                flow_segment["replacements"] = replacement_views
             for edge in ("pause_before", "pause_after"):
                 pause = _pause_intent(
                     segment.get(edge),

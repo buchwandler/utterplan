@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from utterplan import PauseConfig, PlannerConfig
+from utterplan import LinguisticsConfig, PauseConfig, PlannerConfig
 
 
 @dataclass(frozen=True)
@@ -12,24 +12,28 @@ class MigrationCase:
     config: PlannerConfig
 
 
-PLAIN = PlannerConfig(language="en-us", document_format="plain", renderability_mode="strict")
+FALLBACK_LINGUISTICS = LinguisticsConfig(use_spacy=False)
+PLAIN = PlannerConfig(language="en-us", document_format="plain", renderability_mode="strict", linguistics=FALLBACK_LINGUISTICS)
 IDENTITY = PlannerConfig(
     language="en-us",
     document_format="plain",
     text_preparation="identity",
     renderability_mode="strict",
+    linguistics=FALLBACK_LINGUISTICS,
 )
 AUTO = PlannerConfig(
     language="en-us",
     document_format="plain",
     pauses=PauseConfig(mode="auto"),
     renderability_mode="strict",
+    linguistics=FALLBACK_LINGUISTICS,
 )
-SSMD = PlannerConfig(language="en-us", document_format="ssmd", renderability_mode="strict")
+SSMD = PlannerConfig(language="en-us", document_format="ssmd", renderability_mode="strict", linguistics=FALLBACK_LINGUISTICS)
 SSMD_IDENTITY = PlannerConfig(
     language="en-us",
     document_format="ssmd",
     text_preparation="identity",
+    linguistics=FALLBACK_LINGUISTICS,
     renderability_mode="strict",
 )
 

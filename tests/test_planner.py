@@ -1,7 +1,7 @@
 import pytest
 
 from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
-from utterplan import PauseConfig, PauseIntent, PlannerConfig, PlanningError
+from utterplan import LinguisticsConfig, PauseConfig, PauseIntent, PlannerConfig, PlanningError
 from utterplan.exceptions import PlanValidationError
 
 
@@ -71,7 +71,7 @@ def test_pause_config_default_is_tts():
 
 def test_pass_a_tokens_counts_tokens_not_language_runs():
     plan = UtterancePlanner(
-        PlannerConfig(language="en-us", document_format="plain", text_preparation="identity")
+        PlannerConfig(language="en-us", document_format="plain", text_preparation="identity", linguistics=LinguisticsConfig(use_spacy=False))
     ).plan("One two three.")
 
     assert plan.document_metadata["planning"]["pass_a_tokens"] == 3

@@ -112,7 +112,7 @@ class LinguisticResourcePool:
             return None
         base = language.split("-", 1)[0].lower()
         families = (f"{base}_core_web_", f"{base}_core_news_")
-        for suffix in ("trf", "lg", "md", "sm"):
+        for suffix in ("sm", "md", "lg", "trf"):
             for family in families:
                 candidate = family + suffix
                 if candidate in installed:

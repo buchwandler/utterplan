@@ -21,6 +21,7 @@ TEXT = "Hello world."
 
 
 def _identity_config(**kwargs: object) -> PlannerConfig:
+    kwargs.setdefault("linguistics", LinguisticsConfig(use_spacy=False))
     return PlannerConfig(
         language="en-us",
         document_format="plain",

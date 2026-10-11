@@ -373,6 +373,7 @@ def test_compile_book_parser_exposes_shared_options_but_no_input_format() -> Non
     assert args.chapters == "1,3-5"
     assert args.language == "en-US"
     assert args.output_dir is None
+    assert args.spacy == "auto"
     with pytest.raises(SystemExit):
         build_parser().parse_args(["compile-book", "book.ssmdbook", "--input-format", "ssmd"])
 
@@ -444,7 +445,7 @@ def test_compile_book_localizes_fallback_boundaries_with_default_settings(
         },
     )
 
-    result = main(["compile-book", str(root), "--chapters", "5-6"])
+    result = main(["compile-book", str(root), "--chapters", "5-6", "--spacy", "off"])
     capsys.readouterr()
 
     assert result == 0

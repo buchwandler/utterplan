@@ -4,7 +4,7 @@ import unicodedata
 from pathlib import Path
 
 from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
-from utterplan import PauseIntent, PlannerConfig, classify_segment
+from utterplan import LinguisticsConfig, PauseIntent, PlannerConfig, classify_segment
 from utterplan.model import AudioDirective, PlanSegment, SegmentDirectives, TokenAnnotation
 from utterplan.planner import _is_neutral_punctuation_text
 
@@ -15,6 +15,7 @@ def _planner() -> UtterancePlanner:
             language="en-us",
             document_format="ssmd",
             text_preparation="identity",
+            linguistics=LinguisticsConfig(use_spacy=False),
         )
     )
 

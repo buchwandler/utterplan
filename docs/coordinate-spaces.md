@@ -6,6 +6,8 @@ Schema v5 keeps the executable plan compact: token coordinates are local to each
 
 `FlowSegment.text` is the prepared speech text for that segment. Each `TokenView.start` and `TokenView.end` is a half-open Python-character offset into that segment's text. Slice a token with `segment.text[token.start:token.end]`. Do not add a unit, segment, document, or compiler offset to these values. Token membership is stored locally in `segment.tokens`; there are no plan-global token indices or lookup joins.
 
+Optional `replacement.span` entries use this same segment-local coordinate space: they slice the final prepared text. The paired `replacement.source` value is the original spelling, not a source offset. Thus a prepared output such as `A R T` can record source `ART` while the exact original source location and complete transformation maps remain available only in the optional trace sidecar.
+
 Pauses, directives, markers, and optional heading levels are attached directly to their owning flow-segment edge or segment. They have no independent text coordinate. Flow-unit and segment order is the render order.
 
 ## Optional trace coordinates

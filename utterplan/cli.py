@@ -103,8 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
     compile_parser.add_argument(
         "--spacy",
         choices=("auto", "off", "sm", "md", "lg", "trf"),
-        default="off",
-        help="linguistic-resource policy; default is the deterministic fallback",
+        default="auto",
+        help="linguistic-resource policy; default auto uses a compatible local spaCy model when available and falls back safely",
     )
     compile_parser.add_argument("-o", "--output", type=Path, help="write the plan to this file")
     compile_parser.add_argument(
@@ -143,8 +143,8 @@ def build_parser() -> argparse.ArgumentParser:
     batch_parser.add_argument(
         "--spacy",
         choices=("auto", "off", "sm", "md", "lg", "trf"),
-        default="off",
-        help="linguistic-resource policy; default is the deterministic fallback",
+        default="auto",
+        help="linguistic-resource policy; default auto uses a compatible local spaCy model when available and falls back safely",
     )
     batch_parser.add_argument("--force", action="store_true", help="replace existing plan files")
     batch_parser.add_argument(
@@ -192,8 +192,8 @@ def build_parser() -> argparse.ArgumentParser:
     book_parser.add_argument(
         "--spacy",
         choices=("auto", "off", "sm", "md", "lg", "trf"),
-        default="off",
-        help="linguistic-resource policy; default is the deterministic fallback",
+        default="auto",
+        help="linguistic-resource policy; default auto uses a compatible local spaCy model when available and falls back safely",
     )
     book_parser.add_argument("--force", action="store_true", help="replace existing plan files")
     book_parser.add_argument(

@@ -69,4 +69,6 @@ An SSMDBook directory is an editable workspace. If a selected chapter was edited
 - `--spacy auto|off|sm|md|lg|trf`
 - `--force`, `--fail-fast`, and `--report PATH`
 
+`compile-book` uses the same best-effort spaCy `auto` default as `compile`: installed models are preferred in `sm`, `md`, `lg`, `trf` order and missing resources fall back safely. `--spacy off` forces fallback; explicit tier flags require that local model.
+
 Chapter input is SSMD by contract, so `compile-book` deliberately has no `--input-format` option. When no `--language` is supplied, a selected chapter must declare its language in SSMD metadata.

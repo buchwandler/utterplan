@@ -99,13 +99,13 @@ Normal plan loading is TOML-only: `FlowPlan.load()` and plan-inspection commands
 
 ## Planning defaults
 
-The minimal CLI defaults are explicit: `spokenform` is the default text-preparation backend, `tts` is the default pause activation mode, and `spacy off` is the default linguistic-resource policy. With `spacy off`, UtterPlan uses its deterministic fallback tokenizer and analysis and does not depend on an installed spaCy model.
+The CLI and Python planner default to best-effort spaCy enrichment (`auto`). UtterPlan prefers an already-installed compatible model in `sm`, `md`, `lg`, `trf` order; if spaCy or every compatible local model is unavailable, planning continues with deterministic fallback tokens. UtterPlan never downloads models. Use `--spacy off` or `LinguisticsConfig(use_spacy=False)` to opt out, or request an explicit tier to require that local model.
 
 Python `PlannerConfig` defaults to `document_format="plain"`; set it to `"ssmd"` when a Python string contains SSMD source.
 
 Python `PlannerConfig.renderability_mode` also defaults to safe punctuation-only repair; choose `"strict"` to reject every repair opportunity. Neither mode guesses a symbol's pronunciation or crosses semantic blockers.
 
-`spacy auto` is opt-in. When enabled and a compatible local model is available, UtterPlan may expose richer tokenization, POS tags, lemmas, and tags; `auto` is not the default.
+V5 `token.span`, `pos`, `tag`, `lemma`, and `morph` describe the prepared `segment.text` and are the downstream linguistic context; consumers should not retokenize or rerun spaCy. Optional `replacement.span` / `replacement.source` records compact preparation provenance (for example, `A R T` from `ART`): spans index final prepared segment text, while full source coordinates and maps remain in the optional trace sidecar. Replacement provenance does not change executable hashes or synthesis inputs.
 
 ## Python API
 

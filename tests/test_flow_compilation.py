@@ -67,6 +67,7 @@ def test_fresh_compilation_converges_with_v4_migration_on_unambiguous_input(
             mode=old_pauses.get("mode", "tts"),
             enabled=old_pauses.get("enabled", True),
         ),
+        linguistics=LinguisticsConfig(use_spacy=False),
     )
     fresh = compile_document(
         v4_plan["source"]["text"],

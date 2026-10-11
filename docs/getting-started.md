@@ -41,10 +41,12 @@ Without `-o`, the complete canonical TOML plan is written to stdout. Status mess
 
 ## Defaults and linguistic resources
 
-The default compile policy is `spokenform` for text preparation, `tts` for pause activation, and `spacy off` for linguistic resources. The fallback path records `linguistics[*].provider = "fallback"` and leaves unavailable POS, tag, and morphology empty. It does not require an installed spaCy model.
+The default compile policy is `spokenform` for text preparation, `tts` for pause activation, and best-effort spaCy `auto`. Auto mode uses only an already-installed compatible model, preferring `sm`, `md`, `lg`, then `trf`; if spaCy or a compatible model is unavailable, planning continues with deterministic fallback tokens. UtterPlan never downloads models.
 
-`--spacy auto` is an explicit opt-in. With a compatible local model, final pass-B tokens may contain POS, tag, lemma, and morphology, and the plan records the actual provider, model, and known versions. `sm`, `md`, `lg`, and `trf` require the requested local model. UtterPlan never downloads models automatically.
-Install the optional library with `python -m pip install 'utterplan[spacy]'` when needed. Language model packages remain explicit environment dependencies and are never downloaded by UtterPlan.
+Use `--spacy off` to force fallback, or `--spacy sm|md|lg|trf` to require a specific local tier. Python `LinguisticsConfig` has the same best-effort default. Install the optional library with `python -m pip install 'utterplan[spacy]'` when needed; install language model packages separately.
+Language model packages remain explicit environment dependencies; UtterPlan never downloads them.
+
+Final V5 token fields (`pos`, `tag`, `lemma`, and `morph`) describe prepared segment text and are the downstream linguistic context. Optional replacement spans are local to that final text; preserve the trace sidecar for full source-coordinate maps and preparation diagnostics.
 
 ```bash
 utterplan compile "Hello world." --lang en-us -o hello.utterplan.toml
@@ -115,7 +117,7 @@ UtterPlan parses SSMD dialect 0.9 only, including canonical fragments without a 
 
 The compiled plan preserves compact document metadata, effective directives, and semantic pause intent. Audio and extension references are descriptive data only; consumers decide how to interpret them.
 
-The plan stores prepared segment text and local token spans, not source-level structural text or dense maps. Preserve compiler details in an optional trace sidecar:
+The plan stores prepared segment text and local token spans, plus optional compact replacement views with segment-local output spans and original spellings. It does not store structural source text or dense source/preparation maps; preserve an optional trace sidecar for those details:
 
 ```bash
 utterplan compile chapter.ssmd.md -o chapter.utterplan.toml --trace chapter.trace.toml

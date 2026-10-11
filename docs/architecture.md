@@ -26,7 +26,7 @@ The dependency direction is from SSMD, spokenform, and phrasplit into UtterPlan,
 
 `compile_document` returns a `CompileResult` containing the current immutable `FlowPlan`, renderer-independent diagnostics, and an optional `PreparationTrace`. `UtterancePlanner.plan` also returns `FlowPlan`. Compiler-only normalized graph state remains private. When requested, the trace retains source text/hash, coordinate maps, preparation provenance, diagnostics, and renderability evidence in a separate versioned TOML sidecar. Trace state is not renderer input and does not affect plan identity or TOML.
 
-`FlowPlan` is the current v5 executable contract: ordered `FlowUnit` objects each own ordered `FlowSegment` records. Segments include prepared text, effective language, local tokens, semantic pause intents, directives, markers, and optional heading metadata. `DocumentInfo` retains compact portable document information; `LinguisticProvenance` identifies providers without retaining their documents. UtterPlan ends before G2P. Engine/model selection, synthesis, and audio composition happen downstream.
+`FlowPlan` is the current v5 executable contract: ordered `FlowUnit` objects each own ordered `FlowSegment` records. Segments include prepared text, effective language, local tokens with authoritative linguistic facts, optional compact replacement views, semantic pause intents, directives, markers, and optional heading metadata. Replacement spans are local to the final prepared segment text; full source maps remain in the optional trace. `DocumentInfo` retains compact portable document information; `LinguisticProvenance` identifies providers without retaining their documents. UtterPlan ends before G2P. Engine/model selection, synthesis, and audio composition happen downstream.
 
 ## Compiler-owned segmentation topology
 
@@ -40,7 +40,7 @@ The document parser calls SSMD with `dialect="0.9"` for every SSMD source path, 
 
 SSMD header language is authoritative over a fallback. The CLI can omit `--language` when the header declares a language; plain input always needs a fallback. A fallback never forces or rewrites document semantics.
 
-Preparation creates structural and spoken representations internally. The executable FlowPlan retains only prepared segment text; it does not retain the exact source string, structural text, dense source-to-spoken maps, parser annotations, or global compiler token tables. These diagnostics/provenance survive only when an optional trace is requested. See the [coordinate-space contract](coordinate-spaces).
+Preparation creates structural and spoken representations internally. The executable FlowPlan retains prepared segment text and compact segment-local replacement views, but not the complete source string, structural text, full source-to-spoken maps, parser annotations, or global compiler token tables. Detailed diagnostics and complete provenance mappings remain in an optional trace. See the [coordinate-space contract](coordinate-spaces).
 
 ## Pause and directive semantics
 
