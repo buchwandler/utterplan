@@ -15,6 +15,20 @@ GOLDENS = ROOT / "goldens"
 
 def _semantic_projection(plan: Any) -> dict[str, Any]:
     data = plan.to_dict()
+    metadata = dict(data["document_metadata"])
+    for key in ("text_preparation_mode", "text_preparation_requested"):
+        metadata.pop(key, None)
+    planning = metadata.get("planning")
+    if isinstance(planning, dict):
+        planning = dict(planning)
+        for key in (
+            "text_preparation_mode",
+            "segmentation_repair_count",
+            "degraded_linguistics",
+            "linguistic_passes",
+        ):
+            planning.pop(key, None)
+        metadata["planning"] = planning
     return {
         "texts": data["texts"],
         "preparation": {
@@ -68,7 +82,7 @@ def _semantic_projection(plan: Any) -> dict[str, Any]:
             {key: marker[key] for key in ("name", "spoken_position", "attrs")}
             for marker in data["markers"]
         ],
-        "document_metadata": data["document_metadata"],
+        "document_metadata": metadata,
         "language_detection": data["document_metadata"].get("language_detection"),
     }
 
@@ -113,6 +127,21 @@ def test_migration_goldens_match_semantic_plan_output() -> None:
         expected = json.loads(path.read_text(encoding="utf-8"))
         actual = _semantic_projection(UtterancePlanner(case.config).plan(case.text))
         for key, expected_value in expected.items():
+            if key == "document_metadata":
+                expected_value = dict(expected_value)
+                for metadata_key in ("text_preparation_mode", "text_preparation_requested"):
+                    expected_value.pop(metadata_key, None)
+                expected_planning = expected_value.get("planning")
+                if isinstance(expected_planning, dict):
+                    expected_planning = dict(expected_planning)
+                    for metadata_key in (
+                        "text_preparation_mode",
+                        "segmentation_repair_count",
+                        "degraded_linguistics",
+                        "linguistic_passes",
+                    ):
+                        expected_planning.pop(metadata_key, None)
+                    expected_value["planning"] = expected_planning
             if key == "segments":
                 expected_value = [
                     {

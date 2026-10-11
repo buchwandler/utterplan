@@ -39,7 +39,7 @@ def _write_legacy_json(path: Path) -> dict[str, object]:
 def test_compile_cli_defaults() -> None:
     args = build_parser().parse_args(["compile", "Hello world.", "--lang", "en"])
 
-    assert args.text_preparation == "spokenform"
+    assert args.text_preparation == "auto"
     assert args.pause_mode == "tts"
     assert args.spacy == "auto"
 
@@ -66,7 +66,7 @@ def test_compile_literal_text_to_stdout_toml(capsys: pytest.CaptureFixture[str])
     assert main(["compile", "Hello world.", "--lang", "en-us"]) == 0
     payload = _payload(capsys)
     assert payload["format"] == "utterplan"
-    assert payload["schema_version"] == 5
+    assert payload["schema_version"] == 6
     assert payload["flow"]
 
 
@@ -456,7 +456,7 @@ def test_validate_reports_current_schema_for_toml_plans(
     capsys.readouterr()
     assert main(["validate", str(source)]) == 0
     captured = capsys.readouterr()
-    assert "schema version: 5" in captured.out
+    assert "schema version: 6" in captured.out
     assert "plan ID: sha256:" in captured.out
     assert "migration required" not in captured.out
 

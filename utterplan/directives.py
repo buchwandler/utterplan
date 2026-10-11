@@ -25,6 +25,7 @@ def resolve_directives(
     annotations: tuple[AnnotationSpan, ...],
     *,
     voice_defaults: Mapping[str, Any] | None = None,
+    consumed_substitutions: frozenset[str] = frozenset(),
 ) -> PlanSegment:
     core_start, core_end = _semantic_core_bounds(segment)
     selected = sorted(
@@ -78,7 +79,7 @@ def resolve_directives(
                     _first(attrs, "format"),
                     _first(attrs, "detail"),
                 )
-        elif tag == "sub":
+        elif tag == "sub" and annotation.id not in consumed_substitutions:
             alias = _first(attrs, "sub")
             if alias is not None:
                 substitution = SubstitutionDirective(alias)

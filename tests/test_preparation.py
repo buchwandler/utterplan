@@ -33,7 +33,9 @@ def test_sequence_fallback_mode_is_forwarded(
 ) -> None:
     modes = _record_sequence_fallback_modes(monkeypatch)
     source = f'---\nssmd_version: "0.9"\n{setting}---\nin-system'
-    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(source)
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="spokenform")
+    ).plan(source)
 
     assert modes == [expected]
     assert plan.document_metadata["sequence_fallback_mode"] == expected
@@ -154,7 +156,9 @@ def test_author_speech_annotations_are_protected_and_keep_source_offsets():
         '[tomato]{ph="təˈmeɪtoʊ"} '
         '[AWS]{phonemes="eɪ dʌbəljuː ɛs"} ordinary 5 kg.'
     )
-    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(source)
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="spokenform")
+    ).plan(source)
 
     assert plan.texts.spoken == ("H2O 31.12.2024 04/05/2024 tomato AWS ordinary five kilograms.")
     protected = [

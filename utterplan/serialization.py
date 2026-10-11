@@ -17,11 +17,14 @@ def to_dict(plan: UtterancePlan | FlowPlan) -> dict[str, Any]:
 
 
 def from_dict(data: Mapping[str, Any]) -> FlowPlan:
-    """Load current v5 semantics, migrating supported historical JSON mappings."""
+    """Load current v6 semantics, migrating supported historical plain mappings."""
     if data.get("schema_version") == CURRENT_SCHEMA_VERSION:
-        return FlowPlan.from_dict(data)
-    migrated = migrate_plan_data(data)
-    return FlowPlan.from_dict(migrated.data)
+        plan = FlowPlan.from_dict(data)
+    else:
+        migrated = migrate_plan_data(data)
+        plan = FlowPlan.from_dict(migrated.data)
+    plan.validate()
+    return plan
 
 
 def to_toml(plan: UtterancePlan | FlowPlan) -> str:
@@ -30,10 +33,10 @@ def to_toml(plan: UtterancePlan | FlowPlan) -> str:
 
 
 def from_toml(value: str) -> FlowPlan:
-    """Deserialize and migrate a supported TOML plan to the current v5 model."""
+    """Deserialize and migrate a supported TOML plan to the current v6 model."""
     result = loads_toml(value)
     if not isinstance(result, FlowPlan):
-        raise ValueError("TOML did not decode to a current v5 FlowPlan")
+        raise ValueError("TOML did not decode to a current FlowPlan")
     return result
 
 

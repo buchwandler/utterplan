@@ -24,6 +24,7 @@ from utterplan import (
 from utterplan.codecs.v4_toml import decode_v4_toml_data
 from utterplan.exceptions import PlanFormatError, PlanMigrationError, UnsupportedSchemaError
 from utterplan.hashing import FLOW_HASH_SCHEMA
+from utterplan.migration import migrate_plan_data
 from utterplan.migrations import migrate_v4_to_v5
 from utterplan.toml_codec import dumps_toml, from_toml_data, loads_toml, to_toml_data
 
@@ -78,7 +79,7 @@ def _plan() -> FlowPlan:
     )
 
 
-def test_v5_toml_roundtrip_is_deterministic_and_semantically_identical() -> None:
+def test_current_v6_toml_roundtrip_is_deterministic_and_semantically_identical() -> None:
     plan = _plan()
     text = dumps_toml(plan)
     restored = loads_toml(text)
@@ -98,7 +99,7 @@ def test_toml_is_compact_local_and_columnar() -> None:
     text = dumps_toml(plan)
     segment = wire["flow"][0]["segment"][0]
 
-    assert wire["schema_version"] == 5
+    assert wire["schema_version"] == 6
     assert wire["hash_schema"] == FLOW_HASH_SCHEMA
     assert segment["token"]["span"] == [[0, 2], [3, 7], [8, 15]]
     assert segment["token"]["pos"] == ["PRON", "NOUN", "VERB"]
@@ -108,7 +109,7 @@ def test_toml_is_compact_local_and_columnar() -> None:
     assert 'pause_after = {type = "timed", time = "500ms"}' in text
     assert "[[flow]]" in text and "[[flow.segment]]" in text
     assert "token_stream" not in text
-    assert "source =" not in text
+    assert "[source]" not in text
     assert "config" not in text
     assert "segment_ids" not in text
     assert "token_indices" not in text
@@ -146,7 +147,7 @@ def test_metadata_and_warnings_do_not_change_plan_identity() -> None:
     assert loads_toml(dumps_toml(updated)).plan_id == plan.plan_id
 
 
-def test_v5_model_rejects_identity_and_content_hash_mismatches() -> None:
+def test_v6_model_rejects_identity_and_content_hash_mismatches() -> None:
     plan = _plan()
     wrong_identity = plan.to_dict()
     wrong_identity["language"] = "de-DE"
@@ -161,16 +162,16 @@ def test_v5_model_rejects_identity_and_content_hash_mismatches() -> None:
     assert error.value.code == "flow.hash"
 
 
-def test_version_router_reads_frozen_v4_toml_and_projects_to_v5() -> None:
+def test_version_router_reads_frozen_v4_toml_and_projects_to_v6() -> None:
     raw = V4_TOML.read_text(encoding="utf-8")
     frozen = decode_v4_toml_data(tomlkit.parse(raw).unwrap())
     before = copy.deepcopy(frozen)
     migrated = loads_toml(raw)
 
     assert isinstance(migrated, FlowPlan)
-    assert migrated.schema_version == 5
+    assert migrated.schema_version == 6
     assert frozen == before
-    assert migrated.to_dict() == migrate_v4_to_v5(frozen)
+    assert migrated.to_dict() == migrate_plan_data(migrate_v4_to_v5(frozen)).data
 
 
 def test_v4_toml_with_ambiguous_token_coordinates_fails_safely() -> None:
@@ -179,7 +180,7 @@ def test_v4_toml_with_ambiguous_token_coordinates_fails_safely() -> None:
     assert error.value.code == "migration.token-coordinate-ambiguous"
 
 
-def test_v5_toml_from_legacy_v4_mapping_uses_the_current_wire_shape() -> None:
+def test_v5_model_from_legacy_v4_mapping_uses_the_current_v6_wire_shape() -> None:
     import json
 
     legacy = json.loads(V4_JSON.read_text(encoding="utf-8"))
@@ -188,7 +189,7 @@ def test_v5_toml_from_legacy_v4_mapping_uses_the_current_wire_shape() -> None:
     restored = from_toml_data(wire)
 
     assert isinstance(restored, FlowPlan)
-    assert restored.to_dict() == v5.to_dict()
+    assert restored.to_dict() == migrate_plan_data(v5.to_dict()).data
 
 
 @pytest.mark.parametrize(
@@ -221,6 +222,6 @@ def test_unknown_root_fields_and_future_schema_are_rejected() -> None:
         from_toml_data(wire)
 
     wire = to_toml_data(_plan())
-    wire["schema_version"] = 6
+    wire["schema_version"] = 7
     with pytest.raises(UnsupportedSchemaError):
         from_toml_data(wire)

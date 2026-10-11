@@ -56,7 +56,7 @@ class SSMDConfig:
 class PlannerConfig:
     language: str
     document_format: Literal["plain", "ssmd"] = "plain"
-    text_preparation: Literal["spokenform", "identity"] = "spokenform"
+    text_preparation: Literal["auto", "ssmd", "spokenform", "identity"] = "auto"
     unit: Literal["paragraph", "sentence"] = "paragraph"
     pauses: PauseConfig = field(default_factory=PauseConfig)
     linguistics: LinguisticsConfig = field(default_factory=LinguisticsConfig)
@@ -71,8 +71,10 @@ class PlannerConfig:
             raise ConfigurationError("language must be a non-empty string")
         if self.document_format not in {"plain", "ssmd"}:
             raise ConfigurationError("document_format must be 'plain' or 'ssmd'")
-        if self.text_preparation not in {"spokenform", "identity"}:
-            raise ConfigurationError("text_preparation must be 'spokenform' or 'identity'")
+        if self.text_preparation not in {"auto", "ssmd", "spokenform", "identity"}:
+            raise ConfigurationError(
+                "text_preparation must be 'auto', 'ssmd', 'spokenform', or 'identity'"
+            )
         if self.unit not in {"paragraph", "sentence"}:
             raise ConfigurationError("unit must be 'paragraph' or 'sentence'")
         if self.overlap_mode not in {"snap", "strict"}:
@@ -87,6 +89,24 @@ class PlannerConfig:
         ):
             raise ConfigurationError("language_aliases must contain only string keys and values")
         _validate_bool(self.diagnostics, "diagnostics")
+
+
+ResolvedTextPreparation = Literal["ssmd", "spokenform", "identity"]
+
+
+def resolve_text_preparation_mode(requested: str, document_format: str) -> ResolvedTextPreparation:
+    """Resolve the format-sensitive preparation default after parsing format is known."""
+    if requested == "auto":
+        return "ssmd" if document_format == "ssmd" else "spokenform"
+    if requested == "ssmd":
+        if document_format != "ssmd":
+            raise ConfigurationError("text_preparation='ssmd' requires SSMD input")
+        return "ssmd"
+    if requested == "spokenform":
+        return "spokenform"
+    if requested == "identity":
+        return "identity"
+    raise ConfigurationError("text_preparation must be 'auto', 'ssmd', 'spokenform', or 'identity'")
 
 
 def semantic_config(config: PlannerConfig | Mapping[str, object]) -> dict[str, object]:

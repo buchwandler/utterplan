@@ -9,7 +9,7 @@ import pytest
 
 from utterplan import UtterancePlanner
 from utterplan.exceptions import PlanMigrationError
-from utterplan.hashing import FLOW_HASH_SCHEMA, flow_plan_id, flow_unit_hash
+from utterplan.hashing import V5_FLOW_HASH_SCHEMA, flow_plan_id, flow_unit_hash
 from utterplan.migrations import migrate_v4_to_v5, migration_registry
 
 FIXTURES = Path(__file__).parent / "migration" / "fixtures" / "v4"
@@ -43,7 +43,7 @@ def test_v4_fixtures_project_deterministically_without_mutating_input() -> None:
         assert source == before
         assert first == second
         assert first["schema_version"] == 5
-        assert first["hash_schema"] == FLOW_HASH_SCHEMA
+        assert first["hash_schema"] == V5_FLOW_HASH_SCHEMA
         assert first["plan_id"] == flow_plan_id(first)
         assert all(unit["hash"] == flow_unit_hash(unit["segments"]) for unit in first["flow"])
         assert not {

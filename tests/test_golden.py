@@ -13,16 +13,16 @@ HISTORICAL_TOML = sorted(
 COMPREHENSIVE_SOURCE = ROOT / "fixtures" / "ssmd_09_comprehensive.ssmd"
 
 
-def test_historical_toml_goldens_migrate_to_current_v5_and_round_trip() -> None:
+def test_historical_toml_goldens_migrate_to_current_v6_and_round_trip() -> None:
     assert HISTORICAL_TOML
     for path in HISTORICAL_TOML:
         plan = FlowPlan.load(path)
-        assert plan.schema_version == 5
+        assert plan.schema_version == 6
         assert FlowPlan.from_toml(plan.to_toml()) == plan
         assert FlowPlan.from_dict(plan.to_dict()) == plan
 
 
-def test_canonical_ssmd_09_compiles_to_deterministic_v5_flow() -> None:
+def test_canonical_ssmd_09_compiles_to_deterministic_v6_flow() -> None:
     source = COMPREHENSIVE_SOURCE.read_text(encoding="utf-8")
     config = PlannerConfig(
         language="en-us",
@@ -35,8 +35,8 @@ def test_canonical_ssmd_09_compiles_to_deterministic_v5_flow() -> None:
     repeated = planner.plan(source)
 
     assert plan == repeated
-    assert plan.schema_version == 5
-    assert plan.plan_id == "sha256:ebb8ca70464ab7534d74f0fcf2d79af2c02d5498b73de6f21d7a62d6c7d32e46"
+    assert plan.schema_version == 6
+    assert plan.plan_id == "sha256:28d882fe67611c7258cdbb222506837d4a5f703cb8cffdef7693b41940407f02"
     assert plan.document.format == "ssmd"
     assert plan.document.ssmd_version == "0.9"
     assert plan.document.title == "Renderer-neutral SSMD 0.9 contract"
@@ -59,7 +59,6 @@ def test_canonical_ssmd_09_compiles_to_deterministic_v5_flow() -> None:
     assert inner.directives.prosody.pitch == "high"
     assert any(segment.pause_after == PauseIntent("timed", "500ms") for segment in segments)
     assert any(segment.heading == 2 and "checkpoint" in segment.markers for segment in segments)
-    assert not {"source", "texts", "annotations", "semantic_boundaries"}.intersection(
-        plan.to_dict()
-    )
+    assert {"texts", "annotations", "semantic_boundaries"}.isdisjoint(plan.to_dict())
+    assert plan.source is not None and plan.source.text == source
     assert FlowPlan.from_toml(plan.to_toml()) == plan

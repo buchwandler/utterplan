@@ -171,7 +171,9 @@ def test_voice_change_pause_uses_logical_voice_in_one_language() -> None:
 
 def test_prepared_contract_uses_spoken_coordinates_and_public_token_fields() -> None:
     source = 'Dr. Smith [has]{emphasis="moderate"} 5 kg.'
-    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(source)
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="spokenform")
+    ).plan(source)
     assert plan.texts.spoken == "Doctor Smith has five kilograms."
     annotation = plan.annotations[0]
     assert annotation.spoken_start == 12

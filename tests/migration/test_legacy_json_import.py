@@ -32,7 +32,7 @@ def test_frozen_v4_json_fixtures_import_only_to_toml(
             assert "imported" in capsys.readouterr().err
             assert destination.suffix == ".toml"
             migrated = FlowPlan.load(destination)
-            assert migrated.schema_version == 5
+            assert migrated.schema_version == 6
             assert FlowPlan.from_toml(destination.read_text(encoding="utf-8")) == migrated
 
         assert source.read_text(encoding="utf-8") == original_text

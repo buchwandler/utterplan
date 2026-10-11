@@ -1,7 +1,7 @@
 # UtterPlan development rules
 
 1. UtterPlan is engine-independent.
-2. `.utterplan.toml` schema v5 is the current inter-package contract; historical JSON schemas v1–v4 remain migration inputs only.
+2. `.utterplan.toml` schema v6 is the current inter-package contract; schema-v5 TOML and historical JSON schemas v1–v4 remain sequential migration inputs.
 3. Python objects may not contain semantic state that cannot survive file roundtrip.
 4. UtterPlan ends before G2P.
 5. Core code must not import PyKokoro, PiperSynth, kokorog2p, piperg2p, ONNX Runtime, or audio packages.
@@ -12,7 +12,7 @@
 10. Schema changes require explicit compatibility review.
 11. Repository tests must be self-contained and must not require sibling consumer checkouts.
 12. Consumer-specific compatibility testing belongs in the consumer repository.
-13. Released schema files are immutable and retained under versioned paths; v5 has no historical JSON Schema resource.
+13. Released schema files are immutable and retained under versioned paths; schemas v5 and v6 have no JSON Schema resources.
 14. Every supported older schema must retain a sequential migration path to current.
 15. Migrations operate on serialized plain data and may not call parser, planner, G2P, renderer, or audio stages.
 16. Schema changes require frozen historical fixture coverage, deterministic migration tests, and package artifact checks.

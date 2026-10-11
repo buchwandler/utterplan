@@ -14,7 +14,7 @@ from utterplan import (
 
 
 def _fake_renderer(plan: FlowPlan) -> list[tuple[str, str, tuple[str, ...], PauseIntent | None]]:
-    """Consume only local v5 flow, without compiler lookup tables or joins."""
+    """Consume only local v6 flow, without compiler lookup tables or joins."""
     rendered = []
     for unit in plan.flow:
         for segment in unit.segments:
@@ -31,10 +31,9 @@ def _fake_renderer(plan: FlowPlan) -> list[tuple[str, str, tuple[str, ...], Paus
 
 def assert_public_consumer_contract(plan: FlowPlan) -> None:
     serialized = plan.to_dict()
-    assert serialized["schema_version"] == 5
+    assert serialized["schema_version"] == 6
     assert "flow" in serialized
     assert not {
-        "source",
         "texts",
         "tokens",
         "segments",
@@ -156,7 +155,7 @@ def test_zero_width_media_is_available_from_the_owning_segment() -> None:
     assert_public_consumer_contract(plan)
 
 
-def test_shared_fixture_has_one_canonical_v5_interpretation() -> None:
+def test_shared_fixture_has_one_canonical_v5_semantic_interpretation() -> None:
     fixtures = Path(__file__).parent / "fixtures"
     source = (fixtures / "canonical_consumer_contract.ssmd").read_text(encoding="utf-8")
     expected = FlowPlan.load(fixtures / "canonical_consumer_contract.expected.toml")
@@ -171,7 +170,8 @@ def test_shared_fixture_has_one_canonical_v5_interpretation() -> None:
         ),
     )
 
-    assert result.plan.plan_id == expected.plan_id
+    assert result.plan.plan_id != expected.plan_id  # V5 has no exact-source identity
+    assert result.plan.source is not None and result.plan.source.text == source
     assert result.plan.flow == expected.flow
     assert result.plan.document == expected.document
     assert result.plan.linguistics == expected.linguistics

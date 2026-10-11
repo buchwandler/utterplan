@@ -55,7 +55,7 @@ def format_explanation(
     details: bool = False,
     trace: PreparationTrace | None = None,
 ) -> str:
-    """Explain executable v5 flow, with compiler provenance only when trace is supplied."""
+    """Explain executable v6 flow, source provenance, and compiler details when a trace is supplied."""
     lines = ["UtterPlan explanation", "", "Plan"]
     lines.append(f"  schema: {plan.schema_version}")
     lines.append(f"  default language: {plan.language}")
@@ -66,6 +66,17 @@ def format_explanation(
     lines.append(f"  document format: {plan.document.format or 'unknown'}")
     if plan.document.title:
         lines.append(f"  title: {_quote(plan.document.title)}")
+    if plan.source is not None:
+        lines.extend(
+            [
+                "Source record",
+                f"  format: {plan.source.format}",
+                f"  sha256: {plan.source.sha256}",
+            ]
+        )
+        if details:
+            lines.append(f"  raw source: {_quote(plan.source.text)}")
+        lines.append("")
     if details:
         lines.append(f"  plan id: {plan.plan_id}")
         producer = plan.producer
@@ -97,6 +108,13 @@ def format_explanation(
                         f"{_quote(replacement.surface(segment.text))} <- "
                         f"{_quote(replacement.source)}"
                     )
+                    metadata = [
+                        f"kind={replacement.kind}" if replacement.kind else "",
+                        f"rule={replacement.rule}" if replacement.rule else "",
+                    ]
+                    metadata = [item for item in metadata if item]
+                    if metadata:
+                        lines[-1] += f" ({', '.join(metadata)})"
             if segment.heading is not None:
                 lines.append(f"       heading: level {segment.heading}")
             if segment.markers:

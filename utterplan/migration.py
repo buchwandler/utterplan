@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from importlib import import_module
 from typing import Any
 
 from .exceptions import (
@@ -180,6 +181,7 @@ def migrate_plan_data(
             path="$.schema_version",
         )
 
+    import_module(".migrations", __package__)
     working, steps = _apply_migration_chain(
         original,
         target_version=target,

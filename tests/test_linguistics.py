@@ -525,7 +525,7 @@ def test_identity_preparation_analyzes_once_and_preserves_plan(
     assert len(calls) == 1
     assert observed.plan_id == baseline.plan_id
     assert observed.to_toml() == baseline.to_toml()
-    assert observed.document_metadata["planning"]["linguistic_passes"] == 2
+    assert observed.document_metadata["planning"]["linguistic_passes"] == 1
     skipped = next(
         event
         for event in events

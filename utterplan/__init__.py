@@ -86,6 +86,7 @@ from .versioning import (
     SCHEMA_VERSION,
     SUPPORTED_SCHEMA_VERSIONS,
     V4_SCHEMA_VERSION,
+    V5_SCHEMA_VERSION,
 )
 
 __all__ = [
@@ -173,6 +174,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "JSON_SCHEMA_VERSIONS",
     "V4_SCHEMA_VERSION",
+    "V5_SCHEMA_VERSION",
     "CURRENT_SCHEMA_VERSION",
     "SUPPORTED_SCHEMA_VERSIONS",
     "MigrationResult",

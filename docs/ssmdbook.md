@@ -1,6 +1,6 @@
 # Compiling chapters from an SSMDBook
 
-UtterPlan's `compile-book` command accepts an editable `.ssmdbook` workspace as a collection of independent SSMD 0.9 chapter sources. It reads the workspace manifest to discover chapter paths and source numbers, then delegates the selected documents to the existing incremental batch compiler. Each successful chapter becomes its own canonical UtterPlan v5 plan; UtterPlan does not create a combined book plan or modify the source workspace.
+UtterPlan's `compile-book` command accepts an editable `.ssmdbook` workspace as a collection of independent SSMD 0.9 chapter sources. It reads the workspace manifest to discover chapter paths and source numbers, then delegates the selected documents to the existing incremental batch compiler. Each successful chapter becomes its own canonical UtterPlan v6 plan; UtterPlan does not create a combined book plan or modify the source workspace.
 
 ## Quick start
 
@@ -37,6 +37,8 @@ utterplan compile-book chapters --chapters 1,3-5
 
 Use `--output-dir PATH` to choose another plan directory. The output directory and report path are preflighted for collisions. Plans are protected if they already exist unless `--force` is supplied. The normal batch behavior continues after a chapter failure; use `--fail-fast` to skip later chapters after the first failure. The TOML `compile-report.toml` records each selected item and its outcome; it is operational metadata, not a FlowPlan.
 
+The version-2 report records each successful chapter's resolved preparation mode, repair count, ordered structured repair diagnostics, and whether linguistic token metadata was degraded. Source ranges in diagnostics refer to Python-character positions in the original chapter file. These details do not change per-chapter atomic writes or incremental failure behavior.
+
 ## Workspace discovery and selection
 
 `INPUT` must be either:
@@ -63,7 +65,7 @@ An SSMDBook directory is an editable workspace. If a selected chapter was edited
 
 - `--language` / `--lang`
 - `--unit paragraph|sentence`
-- `--text-preparation spokenform|identity`
+- `--text-preparation auto|ssmd|spokenform|identity`
 - `--pause-mode tts|manual|auto`
 - `--renderability strict|repair`
 - `--spacy auto|off|sm|md|lg|trf`

@@ -17,17 +17,17 @@ PACKAGE_SCHEMA_PATH = Path(__file__).resolve().parent / "schemas" / "v4.schema.j
 
 
 def validate_data(value: Any) -> FlowPlan:
-    """Validate or migrate a semantic mapping into the current v5 flow model."""
+    """Validate or migrate a semantic mapping into the current v6 flow model."""
     return from_dict(value)
 
 
 def validate_toml(value: str) -> FlowPlan:
-    """Validate a current v5 or migratable v4 TOML plan."""
+    """Validate a current v6 or migratable v4/v5 TOML plan."""
     return loads_toml(value)
 
 
 def validate_file(path: str | Path) -> FlowPlan:
-    """Validate a saved v5 or migratable v4 TOML plan file."""
+    """Validate a saved v6 or migratable v4/v5 TOML plan file."""
     return load_toml(path)
 
 

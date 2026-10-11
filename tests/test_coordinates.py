@@ -4,7 +4,9 @@ from utterplan import PlannerConfig
 
 def test_spokenform_mapping_keeps_structural_and_spoken_ranges_distinct():
     source = '[Dr. Smith bought 5 kg on Jan. 4.]{emphasis="moderate"}'
-    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(source)
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="spokenform")
+    ).plan(source)
     assert plan.texts.structural != plan.texts.spoken
     annotation = plan.annotations[0]
     assert (annotation.structural_start, annotation.structural_end) == (0, 32)
@@ -14,9 +16,9 @@ def test_spokenform_mapping_keeps_structural_and_spoken_ranges_distinct():
 
 
 def test_marker_after_replacement_maps_to_spoken_position():
-    plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
-        "Dr. @mark Smith."
-    )
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", document_format="ssmd", text_preparation="spokenform")
+    ).plan("Dr. @mark Smith.")
     assert plan.texts.spoken == "Doctor Smith."
     assert plan.markers[0].spoken_position == len("Doctor")
 

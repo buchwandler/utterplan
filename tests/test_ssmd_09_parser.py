@@ -377,7 +377,7 @@ def test_sequence_fallback_mode_roundtrips_and_is_part_of_plan_identity() -> Non
 
     restored = type(plan).from_dict(plan.to_dict())
     assert restored.document_metadata["sequence_fallback_mode"] == "preserve"
-    assert FlowPlan.from_toml(_planner().compile(source).plan.to_toml()).schema_version == 5
+    assert FlowPlan.from_toml(_planner().compile(source).plan.to_toml()).schema_version == 6
 
     changed_policy = replace(
         plan,

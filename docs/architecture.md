@@ -42,11 +42,11 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady. TTSReady owns the
 
 `compile_document` returns a `CompileResult` containing the current immutable `FlowPlan`, renderer-independent diagnostics, and an optional `PreparationTrace`. `UtterancePlanner.plan` also returns `FlowPlan`. Compiler-only normalized graph state remains private. When requested, the trace retains source text/hash, coordinate maps, preparation provenance, diagnostics, and renderability evidence in a separate versioned TOML sidecar. Trace state is not renderer input and does not affect plan identity or TOML.
 
-`FlowPlan` is the current v5 executable contract: ordered `FlowUnit` objects each own ordered `FlowSegment` records. Segments include prepared text, effective language, local tokens with authoritative linguistic facts, optional compact replacement views, semantic pause intents, directives, markers, and optional heading metadata. Replacement spans are local to the final prepared segment text; full source maps remain in the optional trace. `DocumentInfo` retains compact portable document information; `LinguisticProvenance` identifies providers without retaining their documents. UtterPlan ends before G2P. Engine/model selection, synthesis, and audio composition happen downstream.
+`FlowPlan` is the current v6 executable contract: ordered `FlowUnit` objects each own ordered `FlowSegment` records. Segments include prepared text, effective language, local tokens with authoritative linguistic facts, optional compact replacement views, semantic pause intents, directives, markers, and optional heading metadata. Replacement spans are local to the final prepared segment text; full source maps remain in the optional trace. `DocumentInfo` retains compact portable document information; `LinguisticProvenance` identifies providers without retaining their documents. UtterPlan ends before G2P. Engine/model selection, synthesis, and audio composition happen downstream.
 
 ## Compiler-owned segmentation topology
 
-Segmentation has four distinct layers: parser-owned paragraph events define paragraph regions; PhraseSplit supplies advisory sentence-boundary proposals; UtterPlan validates those proposals and owns canonical paragraph, sentence, and private sentence-part spans in prepared spoken-text coordinates; renderer-required language, directive, pause, marker, and media cuts subdivide a part into final segments. Positive-width atomic media spans protect their interiors from automatic sentence/part boundaries; zero-width media events remain renderer operations, not parts. The public v5 `FlowPlan` contains only the resulting compact ordered flow—there is no serialized sentence-parts table.
+Segmentation has four distinct layers: parser-owned paragraph events define paragraph regions; PhraseSplit supplies advisory sentence-boundary proposals; UtterPlan validates those proposals and owns canonical paragraph, sentence, and private sentence-part spans in prepared spoken-text coordinates; renderer-required language, directive, pause, marker, and media cuts subdivide a part into final segments. Positive-width atomic media spans protect their interiors from automatic sentence/part boundaries; zero-width media events remain renderer operations, not parts. The public v6 `FlowPlan` contains only the resulting compact ordered flow—there is no serialized sentence-parts table.
 
 PhraseSplit failure or an invalid proposal batch falls back to deterministic, conservative terminal scanning. Unsafe automatic cuts inside provider-aware lexical content are merged or dropped before projection; the final flow-projection token-edge check remains defense in depth. Exact surface and non-whitespace coverage checks run before and after applicable repairs. This normalization is independent of `renderability_mode`: strict and repair compilation use the same topology, while renderability mode governs only the existing punctuation-repair policy. See the [coordinate-space contract](coordinate-spaces) for offset ownership.
 
@@ -56,7 +56,9 @@ The document parser calls SSMD with `dialect="0.9"` for every SSMD source path, 
 
 SSMD header language is authoritative over a fallback. The CLI can omit `--language` when the header declares a language; plain input always needs a fallback. A fallback never forces or rewrites document semantics.
 
-Preparation creates structural and spoken representations internally. The executable FlowPlan retains prepared segment text and compact segment-local replacement views, but not the complete source string, structural text, full source-to-spoken maps, parser annotations, or global compiler token tables. Detailed diagnostics and complete provenance mappings remain in an optional trace. See the [coordinate-space contract](coordinate-spaces).
+Preparation `auto` resolves after the input format is known: plain text uses TTSReady/Spokenform, while SSMD uses the SSMD-authoritative preparer to apply reviewed `sub` aliases exactly once. SSMD compilation in this mode does not call Spokenform; explicit `spokenform` remains an opt-in legacy path and emits a warning.
+
+Preparation creates structural and spoken representations internally. The executable FlowPlan retains prepared segment text and compact segment-local replacement views, and v6 stores the exact raw input once in its optional `PlanSource` record; it does not retain structural text or full source-to-spoken maps, parser annotations, or global compiler token tables. Detailed diagnostics and complete provenance mappings remain in an optional trace. See the [coordinate-space contract](coordinate-spaces).
 
 ## Pause and directive semantics
 
@@ -66,20 +68,20 @@ Typed directives are renderer-neutral values resolved from SSMD scopes and voice
 
 ## Identity and determinism
 
-Plan identity is deterministic and renderer-independent. The v5 `plan_id` hashes executable flow and compact portable metadata rather than source text or TOML formatting. Flow-unit hashes use `utterplan-flow-v1` over local ordered segment semantics. Trace data, provider documents, model sessions, diagnostics, producer/package version, G2P output, and audio do not define executable identity. Package version is independent of explicit plan `schema_version`.
+Plan identity is deterministic and renderer-independent. The v6 `plan_id` includes the exact UTF-8 SHA-256 digest of optional raw source, plus executable flow and compact portable metadata; it never hashes TOML formatting. Flow-unit hashes remain `utterplan-flow-v1` over local ordered segment semantics, so source-only changes do not invalidate renderer-facing unit caches. Trace data, provider documents, model sessions, diagnostics, producer/package version, G2P output, and audio do not define executable identity. Package version is independent of explicit plan `schema_version`.
 
 ## Persistence compatibility boundary
 
-Current plans persist as deterministic `.utterplan.toml` files with schema v5; `FlowPlan.load()` accepts TOML only. The v5 TOML codec validates and constructs `FlowPlan`. Schema v5 deliberately has no JSON Schema resource or current JSON plan format. Frozen JSON Schema definitions for historical schemas v1–v4 remain under versioned resources.
+Current plans persist as deterministic `.utterplan.toml` files with schema v6; `FlowPlan.load()` accepts TOML only. The v6 TOML codec validates and constructs `FlowPlan`, and reads frozen v5 TOML through the sequential v5-to-v6 migration. Schemas v5 and v6 have no JSON Schema resources or current JSON plan format. Frozen JSON Schema definitions for historical schemas v1–v4 remain under versioned resources.
 
 ```text
 current plan:
-.utterplan.toml -- TOML decode / schema-v5 validation --> FlowPlan --> consumer
+.utterplan.toml -- TOML decode / schema-v6 validation (or sequential v5 migration) --> FlowPlan --> consumer
 
 legacy saved plan:
 .utterplan.json -- explicit `utterplan migrate` --> current .utterplan.toml
 ```
 
-Migration is not planning. Supported historical plans migrate through the registered sequential chain v1 -> v2 -> v3 -> v4 -> v5. Every step operates on serialized plain data and does not rerun source parsing, preparation, NLP, planning, G2P, rendering, or audio processing. The v4-to-v5 projection verifies token spans and pause evidence and fails rather than guessing. Downgrades are not supported.
+Migration is not planning. Supported historical plans migrate through the registered sequential chain v1 -> v2 -> v3 -> v4 -> v5 -> v6. Every step operates on serialized plain data and does not rerun source parsing, preparation, NLP, planning, G2P, rendering, or audio processing. The v4-to-v5 projection verifies token spans and pause evidence and fails rather than guessing; v5-to-v6 preserves executable semantics and never invents unavailable source text. Downgrades are not supported.
 
 `compile-many` orchestrates independent source documents in order. Each successful FlowPlan is validated and atomically saved before the next source is processed; ordinary failures are reported and later inputs continue unless fail-fast is requested. Its TOML report is operational data, not a FlowPlan.

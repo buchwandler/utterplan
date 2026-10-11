@@ -19,8 +19,9 @@ def test_public_planner_identity() -> None:
     assert isinstance(plan, FlowPlan)
     payload = plan.to_dict()
     assert payload["format"] == "utterplan"
-    assert payload["schema_version"] == 5
+    assert payload["schema_version"] == 6
     assert payload["producer"]["name"] == "utterplan"
+    assert payload["producer"]["text_preparation"] == "spokenform"
 
 
 def test_public_package_resources() -> None:

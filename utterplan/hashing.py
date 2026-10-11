@@ -19,7 +19,13 @@ def semantic_hash(value: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
-FLOW_HASH_SCHEMA = "utterplan-flow-v1"
+def source_text_hash(text: str) -> str:
+    """Hash exact UTF-8 source bytes without normalization or serialization."""
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+V5_FLOW_HASH_SCHEMA = "utterplan-flow-v1"
+FLOW_HASH_SCHEMA = "utterplan-flow-v2"
 
 
 def _flow_pause_semantics(value: Any) -> Any:
@@ -35,7 +41,7 @@ def _flow_pause_semantics(value: Any) -> Any:
 
 
 def flow_unit_hash(segments: Any) -> str:
-    """Hash one v5 flow unit using only its locally owned executable semantics."""
+    """Hash one flow unit using only its locally owned executable semantics."""
     values: list[dict[str, Any]] = []
     for segment in segments:
         value = _mapping(segment) or {}
@@ -58,7 +64,7 @@ def flow_unit_hash(segments: Any) -> str:
 
 
 def flow_plan_id(data: Mapping[str, Any]) -> str:
-    """Hash only renderer-visible v5 semantics, excluding provenance and diagnostics."""
+    """Hash executable semantics and, in v6, only the digest of source provenance."""
     document = data.get("document", {})
     semantics = document.get("semantics", {}) if isinstance(document, Mapping) else {}
     identity = {
@@ -77,6 +83,9 @@ def flow_plan_id(data: Mapping[str, Any]) -> str:
             for unit in data.get("flow", ())
         ],
     }
+    if identity["hash_schema"] == FLOW_HASH_SCHEMA:
+        source = data.get("source")
+        identity["source_sha256"] = source.get("sha256") if isinstance(source, Mapping) else None
     return semantic_hash(identity)
 
 

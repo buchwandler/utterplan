@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from .compiler import CompileResult, PreparationTrace
 
 from .attempts import PlanDraft, PlanningAttempt, PlanningAttemptStatus, planning_attempt_id
-from .config import PauseConfig, PlannerConfig
+from .config import PauseConfig, PlannerConfig, resolve_text_preparation_mode
 from .directives import resolve_directives
 from .exceptions import (
     ConfigurationError,
@@ -32,6 +32,7 @@ from .model import (
     PlanSource,
     PlanTexts,
     SemanticBoundary,
+    TokenAnnotation,
     UtterancePlan,
     validate_plan_structure,
 )
@@ -41,7 +42,12 @@ from .parsers import (
     effective_sequence_fallback_mode,
 )
 from .pauses import boundary_is_active, resolve_pause_intents
-from .preparation import IdentityTextPreparer, SourceToSpokenMap, TTSReadyTextPreparer
+from .preparation import (
+    IdentityTextPreparer,
+    SourceToSpokenMap,
+    SSMDSubstitutionPreparer,
+    TTSReadyTextPreparer,
+)
 from .progress import PlannerProgressEvent, ProgressCallback, _notify_progress
 from .renderability import (
     RenderabilityIssue,
@@ -50,13 +56,15 @@ from .renderability import (
     preflight_segments,
 )
 from .segmentation import (
+    CutCandidate,
     SegmentationRepair,
     SentenceTopology,
     build_paragraph_regions,
     build_sentence_topology,
+    reconcile_cut_candidates,
     validate_non_whitespace_coverage,
 )
-from .token_topology import validate_segment_token_edges
+from .token_topology import find_boundary_conflict, validate_segment_token_edges
 from .units import make_units
 
 
@@ -103,7 +111,10 @@ class UtterancePlanner:
 
         plan = project_compiler_plan(internal_plan)
         return CompileResult(
-            plan=plan, diagnostics=internal_plan.diagnostics, trace=preparation_trace
+            plan=plan,
+            diagnostics=internal_plan.diagnostics,
+            trace=preparation_trace,
+            preparation_mode=internal_plan.preparation.backend,
         )
 
     def compile_attempt(
@@ -159,12 +170,24 @@ class UtterancePlanner:
         _notify_progress(on_progress, PlannerProgressEvent(kind="phase.completed", phase="parse"))
         pause_config = config.pauses
         fallback_mode = effective_sequence_fallback_mode(parsed.header)
+        requested_mode = config.text_preparation
+        resolved_mode = resolve_text_preparation_mode(requested_mode, config.document_format)
+        config = replace(config, text_preparation=resolved_mode)
         document_language = parsed.document_language or config.language
         preserve_language_tags = config.document_format == "ssmd"
-        identity_mode = config.text_preparation == "identity"
+        identity_mode = resolved_mode == "identity"
+        ssmd_mode = resolved_mode == "ssmd"
+        skip_source_analysis = identity_mode or ssmd_mode
         skipped_details = (
-            {"skipped": True, "reason": "identity preparation does not consume source analyses"}
-            if identity_mode
+            {
+                "skipped": True,
+                "reason": (
+                    "SSMD-authoritative preparation does not consume source analyses"
+                    if ssmd_mode
+                    else "identity preparation does not consume source analyses"
+                ),
+            }
+            if skip_source_analysis
             else {}
         )
         _notify_progress(
@@ -184,7 +207,7 @@ class UtterancePlanner:
             dict(config.language_aliases),
             preserve_tags=preserve_language_tags,
         )
-        if identity_mode:
+        if skip_source_analysis:
             pass_a: tuple[RunAnalysis, ...] = ()
         else:
             pass_a = analyze_run_analyses(
@@ -213,7 +236,9 @@ class UtterancePlanner:
         )
         preparer = (
             IdentityTextPreparer()
-            if config.text_preparation == "identity"
+            if identity_mode
+            else SSMDSubstitutionPreparer()
+            if ssmd_mode
             else TTSReadyTextPreparer(sequence_fallback_mode=fallback_mode)
         )
         prepared = preparer.prepare(
@@ -236,7 +261,7 @@ class UtterancePlanner:
             dict(config.language_aliases),
             preserve_tags=preserve_language_tags,
         )
-        if identity_mode:
+        if skip_source_analysis:
             _notify_progress(
                 on_progress,
                 PlannerProgressEvent(
@@ -337,6 +362,15 @@ class UtterancePlanner:
             and annotation.spoken_end is not None
             and annotation.spoken_start < annotation.spoken_end
         )
+        atomic_sub_spans = tuple(
+            (start, end)
+            for item in prepared.info.replacements
+            if item.get("kind") == "ssmd-sub"
+            and type(start := item.get("output_start")) is int
+            and type(end := item.get("output_end")) is int
+            and start < end
+        )
+        protected_ranges = tuple(sorted((*protected_audio_spans, *atomic_sub_spans)))
         topology = build_sentence_topology(
             spoken,
             runs,
@@ -344,7 +378,7 @@ class UtterancePlanner:
             tokens=tokens,
             token_providers=token_providers,
             optional_part_boundaries=semantic_boundaries,
-            protected_spans=protected_audio_spans,
+            protected_spans=protected_ranges,
         )
         part_semantic_boundaries = [
             SemanticBoundary(
@@ -365,6 +399,10 @@ class UtterancePlanner:
                 [*semantic_boundaries, *part_semantic_boundaries]
             )
         boundaries.extend(_semantic_pause_events(semantic_boundaries, start_id=len(boundaries)))
+        hard_cut_positions, hard_cut_origins = _author_owned_cut_positions(
+            runs, prepared.annotations, boundaries, pause_config
+        )
+        segmentation_repairs: list[SegmentationRepair] = []
         segments = _segment(
             spoken,
             runs,
@@ -373,7 +411,25 @@ class UtterancePlanner:
             pause_config,
             document_language,
             topology,
+            tokens=tokens,
+            token_providers=token_providers,
+            protected_ranges=atomic_sub_spans,
+            repairs=segmentation_repairs,
+            hard_cut_positions=hard_cut_positions,
+            hard_cut_origins=hard_cut_origins,
         )
+        tokens, linguistic_runs, token_repairs = _reconcile_hard_cut_token_evidence(
+            spoken,
+            segments,
+            tokens,
+            linguistic_runs,
+            hard_cut_positions,
+            hard_cut_origins,
+            config.linguistics,
+            self._resources,
+        )
+        segmentation_repairs.extend(token_repairs)
+        token_providers = _token_providers_for_runs(linguistic_runs, len(tokens))
         validate_non_whitespace_coverage(spoken, segments)
         validate_segment_token_edges(
             segments,
@@ -390,6 +446,7 @@ class UtterancePlanner:
                 segment,
                 prepared.annotations,
                 voice_defaults=parsed.metadata.get("voice_defaults"),
+                consumed_substitutions=frozenset(prepared.consumed_substitutions),
             )
             for segment in segments
         ]
@@ -450,6 +507,7 @@ class UtterancePlanner:
                         segment,
                         prepared.annotations,
                         voice_defaults=parsed.metadata.get("voice_defaults"),
+                        consumed_substitutions=frozenset(prepared.consumed_substitutions),
                     )
                     for segment in segments
                 ]
@@ -496,9 +554,17 @@ class UtterancePlanner:
             PlannerProgressEvent(kind="phase.started", phase="finalization"),
         )
         metadata = dict(parsed.metadata)
+        metadata["text_preparation_mode"] = resolved_mode
+        metadata["text_preparation_requested"] = requested_mode
         metadata["planning"] = {
-            "linguistic_passes": 2,
+            "linguistic_passes": 1 if skip_source_analysis else 2,
+            "text_preparation_mode": resolved_mode,
             "engine_independent": True,
+            "segmentation_repair_count": len(segmentation_repairs),
+            "degraded_linguistics": any(
+                repair.code == "segmentation.token_metadata_degraded"
+                for repair in segmentation_repairs
+            ),
             "pass_a_tokens": sum(len(run.tokens) for run in pass_a),
             "renderability": {
                 "mode": config.renderability_mode,
@@ -507,15 +573,38 @@ class UtterancePlanner:
                 "guaranteed": status != "blocked",
             },
         }
+        legacy_warning = (
+            (
+                "Explicit SSMD spokenform preparation can make new automatic speech decisions; "
+                "use text_preparation='ssmd' to honor reviewed substitutions only.",
+            )
+            if requested_mode == "spokenform" and config.document_format == "ssmd"
+            else ()
+        )
         diagnostics = list(parsed.diagnostics)
         diagnostics.extend(
             _segmentation_repair_diagnostic(repair, prepared.source_map)
-            for repair in topology.repairs
+            for repair in (*topology.repairs, *segmentation_repairs)
         )
         diagnostics.extend(
             _renderability_repair_diagnostic(issue) for issue in renderability_repairs
         )
         if config.diagnostics:
+            diagnostics.append(
+                Diagnostic(
+                    "preparation.mode_resolved",
+                    f"Text preparation mode resolved to {resolved_mode!r} for "
+                    f"{config.document_format} input (requested {requested_mode!r})",
+                )
+            )
+            if legacy_warning:
+                diagnostics.append(
+                    Diagnostic(
+                        "preparation.legacy_spokenform_on_ssmd",
+                        legacy_warning[0],
+                        severity="warning",
+                    )
+                )
             diagnostics.append(
                 Diagnostic(
                     "planning.complete", "Plan compiled without renderer or audio processing"
@@ -538,7 +627,7 @@ class UtterancePlanner:
             units=units,
             markers=markers,
             document_metadata=metadata,
-            warnings=tuple(parsed.warnings) + prepared.info.warnings,
+            warnings=tuple(parsed.warnings) + prepared.info.warnings + legacy_warning,
             diagnostics=tuple(diagnostics),
         )
         if status == "blocked":
@@ -736,6 +825,221 @@ def _token_providers_for_runs(
     return tuple(providers)
 
 
+def _author_owned_cut_positions(
+    runs: tuple[LanguageRun, ...],
+    annotations: tuple[AnnotationSpan, ...],
+    boundaries: list[BoundaryEvent],
+    pause_config: PauseConfig,
+) -> tuple[set[int], dict[int, str]]:
+    positions: set[int] = set()
+    origins: dict[int, str] = {}
+
+    def add(position: int | None, origin: str) -> None:
+        if position is not None:
+            positions.add(position)
+            origins.setdefault(position, origin)
+
+    for run in runs:
+        add(run.spoken_start, "language_run")
+        add(run.spoken_end, "language_run")
+    for boundary in boundaries:
+        authored_pause = (
+            boundary.kind == "explicit"
+            and boundary.origin == "ssmd"
+            and boundary.attrs.get("pause_origin") == "explicit"
+        )
+        if authored_pause and boundary_is_active(boundary, pause_config):
+            add(boundary.position, "authored_pause")
+        elif boundary.kind == "paragraph":
+            add(boundary.position, "paragraph")
+    for annotation in annotations:
+        if not (_semantic_annotation(annotation) or _audio_annotation(annotation)):
+            continue
+        origin = (
+            "audio"
+            if _audio_annotation(annotation)
+            else str(annotation.attrs.get("tag") or annotation.kind)
+        )
+        add(annotation.spoken_start, origin)
+        add(annotation.spoken_end, origin)
+    return positions, origins
+
+
+def _reconcile_hard_cut_token_evidence(
+    text: str,
+    segments: list[PlanSegment],
+    tokens: tuple[TokenAnnotation, ...],
+    linguistic_runs: tuple[LinguisticRun, ...],
+    hard_cut_positions: set[int],
+    hard_cut_origins: Mapping[int, str],
+    linguistics: Any,
+    resources: LinguisticResourcePool,
+) -> tuple[tuple[TokenAnnotation, ...], tuple[LinguisticRun, ...], tuple[SegmentationRepair, ...]]:
+    """Reanalyze retained authored edges locally or discard unverified token facts."""
+    providers = _token_providers_for_runs(linguistic_runs, len(tokens))
+    segment_edges = {
+        position for segment in segments for position in (segment.spoken_start, segment.spoken_end)
+    }
+    conflicts: dict[int, list[int]] = {}
+    for position in sorted(hard_cut_positions & segment_edges):
+        conflict = find_boundary_conflict(position, tokens=tokens, token_providers=providers)
+        if conflict is not None:
+            conflicts.setdefault(conflict.token_index, []).append(position)
+
+    if not conflicts:
+        return tokens, linguistic_runs, ()
+
+    repaired_tokens: list[TokenAnnotation] = []
+    piece_counts: dict[int, int] = {}
+    degraded_indices: set[int] = set()
+    repairs: list[SegmentationRepair] = []
+    for token_index, token in enumerate(tokens):
+        cuts = sorted(set(conflicts.get(token_index, ())))
+        if not cuts:
+            repaired_tokens.append(token)
+            piece_counts[token_index] = 1
+            continue
+        edges = [token.spoken_start, *cuts, token.spoken_end]
+        count = 0
+        reanalyzed = False
+        degraded = False
+        for piece_index, (start, end) in enumerate(zip(edges, edges[1:], strict=False)):
+            if start >= end:
+                continue
+            local_tokens = (
+                _reanalyze_spacy_surface(
+                    text,
+                    start,
+                    end,
+                    token.language or "und",
+                    linguistics,
+                    resources,
+                    token_index=token_index,
+                    piece_index=piece_index,
+                )
+                if providers[token_index] == "spacy"
+                else None
+            )
+            if local_tokens is not None:
+                repaired_tokens.extend(local_tokens)
+                count += len(local_tokens)
+                reanalyzed = True
+                continue
+            repaired_tokens.append(
+                TokenAnnotation(
+                    start,
+                    end,
+                    text[start:end],
+                    language=token.language,
+                )
+            )
+            count += 1
+            degraded = True
+        piece_counts[token_index] = count
+        if degraded:
+            degraded_indices.add(token_index)
+        for position in cuts:
+            origin = hard_cut_origins.get(position, "authored semantic boundary")
+            if reanalyzed:
+                repairs.append(
+                    SegmentationRepair(
+                        "segmentation.token_reanalyzed",
+                        f"Preserved {origin} cut at {position} and reanalyzed token "
+                        f"{token.text!r} [{token.spoken_start}:{token.spoken_end}) "
+                        "on the displayed local surface",
+                        spoken_start=token.spoken_start,
+                        spoken_end=token.spoken_end,
+                        original_position=position,
+                        repaired_position=position,
+                        origin=origin,
+                    )
+                )
+            if degraded:
+                repairs.append(
+                    SegmentationRepair(
+                        "segmentation.token_metadata_degraded",
+                        f"Preserved {origin} cut at {position}; rebuilt token "
+                        f"{token.text!r} [{token.spoken_start}:{token.spoken_end}) as "
+                        "local surfaces without unverified POS/tag/lemma/morph metadata",
+                        spoken_start=token.spoken_start,
+                        spoken_end=token.spoken_end,
+                        original_position=position,
+                        repaired_position=position,
+                        origin=origin,
+                    )
+                )
+
+    repaired_runs: list[LinguisticRun] = []
+    next_token = 0
+    for linguistic_run in linguistic_runs:
+        old_indices = range(linguistic_run.token_start, linguistic_run.token_end)
+        count = sum(piece_counts.get(index, 0) for index in old_indices)
+        degraded = any(index in degraded_indices for index in old_indices)
+        repaired_runs.append(
+            replace(
+                linguistic_run,
+                provider="unknown" if degraded else linguistic_run.provider,
+                token_start=next_token,
+                token_end=next_token + count,
+                model=None if degraded else linguistic_run.model,
+                provider_version=None if degraded else linguistic_run.provider_version,
+                model_version=None if degraded else linguistic_run.model_version,
+            )
+        )
+        next_token += count
+    repaired_tokens = [
+        replace(token, id=f"token-{index}") for index, token in enumerate(repaired_tokens)
+    ]
+    return tuple(repaired_tokens), tuple(repaired_runs), tuple(repairs)
+
+
+def _reanalyze_spacy_surface(
+    text: str,
+    start: int,
+    end: int,
+    language: str,
+    linguistics: Any,
+    resources: LinguisticResourcePool,
+    *,
+    token_index: int,
+    piece_index: int,
+) -> tuple[TokenAnnotation, ...] | None:
+    run = LanguageRun(
+        f"segmentation-repair-{token_index}-{piece_index}",
+        start,
+        end,
+        language,
+        source="segmentation-repair",
+    )
+    try:
+        analysis = analyze_run_analyses(
+            text,
+            (run,),
+            linguistics,
+            resources,
+            phase="spoken_analysis",
+            pass_index=2,
+            pass_total=2,
+        )[0]
+    except Exception:
+        return None
+    if analysis.provider != "spacy" or not analysis.tokens:
+        return None
+    cursor = start
+    for token in analysis.tokens:
+        if (
+            token.spoken_start < cursor
+            or token.spoken_end > end
+            or text[token.spoken_start : token.spoken_end] != token.text
+            or text[cursor : token.spoken_start].strip()
+        ):
+            return None
+        cursor = token.spoken_end
+    if text[cursor:end].strip():
+        return None
+    return analysis.tokens
+
+
 def _segment(
     text: str,
     runs: tuple[LanguageRun, ...],
@@ -744,15 +1048,43 @@ def _segment(
     pause_config: PauseConfig,
     default_language: str,
     topology: SentenceTopology,
+    *,
+    tokens: tuple[TokenAnnotation, ...],
+    token_providers: tuple[str | None, ...],
+    protected_ranges: tuple[tuple[int, int], ...],
+    repairs: list[SegmentationRepair],
+    hard_cut_positions: set[int],
+    hard_cut_origins: dict[int, str],
 ) -> list[PlanSegment]:
     base_segments = _segment_sentence_parts(
-        text, topology, runs, annotations, boundaries, pause_config
+        text,
+        topology,
+        runs,
+        annotations,
+        boundaries,
+        pause_config,
+        tokens=tokens,
+        token_providers=token_providers,
+        protected_ranges=protected_ranges,
+        repairs=repairs,
+        hard_cut_positions=hard_cut_positions,
+        hard_cut_origins=hard_cut_origins,
     )
     base_segments = _reconcile_non_speech_gaps(
         text, base_segments, topology, runs, boundaries, default_language
     )
     _validate_audio_topology(annotations, runs, base_segments)
-    return _apply_atomic_audio_segments(text, base_segments, runs, annotations, default_language)
+    final_segments = _apply_atomic_audio_segments(
+        text, base_segments, runs, annotations, default_language
+    )
+    for annotation in _audio_annotations(annotations):
+        if annotation.spoken_start is not None:
+            hard_cut_positions.add(annotation.spoken_start)
+            hard_cut_origins.setdefault(annotation.spoken_start, "audio")
+        if annotation.spoken_end is not None:
+            hard_cut_positions.add(annotation.spoken_end)
+            hard_cut_origins.setdefault(annotation.spoken_end, "audio")
+    return final_segments
 
 
 def _segment_sentence_parts(
@@ -762,35 +1094,151 @@ def _segment_sentence_parts(
     annotations: tuple[AnnotationSpan, ...],
     boundaries: list[BoundaryEvent],
     pause_config: PauseConfig,
+    *,
+    tokens: tuple[TokenAnnotation, ...],
+    token_providers: tuple[str | None, ...],
+    protected_ranges: tuple[tuple[int, int], ...],
+    repairs: list[SegmentationRepair],
+    hard_cut_positions: set[int],
+    hard_cut_origins: dict[int, str],
 ) -> list[PlanSegment]:
     result: list[PlanSegment] = []
     for part in topology.parts:
         start, end = part.start, part.end
-        hard_cuts = {start, end}
-        hard_cuts.update(
-            point
-            for run in runs
-            for point in (run.spoken_start, run.spoken_end)
-            if start < point < end
-        )
-        hard_cuts.update(
-            boundary.position
-            for boundary in boundaries
-            if start < boundary.position < end and boundary_is_active(boundary, pause_config)
-        )
-        hard_cuts.update(
-            point
-            for annotation in _audio_annotations(annotations)
-            for point in (annotation.spoken_start, annotation.spoken_end)
-            if point is not None and start < point < end
-        )
-        semantic_cuts = {
-            point
-            for annotation in annotations
-            for point in (annotation.spoken_start, annotation.spoken_end)
-            if point is not None and start < point < end and _semantic_annotation(annotation)
+        candidates: list[CutCandidate] = [
+            CutCandidate(
+                start,
+                "sentence_part",
+                semantic_kind="part-start",
+                priority=10,
+                hardness="soft",
+                repair_allowed=False,
+            ),
+            CutCandidate(
+                end,
+                part.boundary_origin or "sentence_part",
+                semantic_kind="part-end",
+                priority=10,
+                hardness="soft",
+                repair_allowed=False,
+            ),
+        ]
+        for run in runs:
+            for run_position in (run.spoken_start, run.spoken_end):
+                if run_position is not None and start < run_position < end:
+                    candidates.append(
+                        CutCandidate(
+                            run_position,
+                            "language_run",
+                            semantic_kind="language-change",
+                            priority=100,
+                            hardness="hard",
+                            language_run_id=run.id,
+                        )
+                    )
+        for boundary in boundaries:
+            if not start < boundary.position < end or not boundary_is_active(
+                boundary, pause_config
+            ):
+                continue
+            authored_pause = (
+                boundary.kind == "explicit"
+                and boundary.origin == "ssmd"
+                and boundary.attrs.get("pause_origin") == "explicit"
+            )
+            structural = boundary.kind in {"paragraph", "heading"}
+            candidates.append(
+                CutCandidate(
+                    boundary.position,
+                    "authored_pause" if authored_pause else boundary.origin,
+                    semantic_kind=boundary.kind,
+                    priority=100 if authored_pause or structural else 30,
+                    hardness="hard" if authored_pause or structural else "soft",
+                    anchor=str(boundary.attrs.get("anchor", "after")),
+                    repair_allowed=not (authored_pause or structural),
+                )
+            )
+        for annotation in _audio_annotations(annotations):
+            for audio_position in (annotation.spoken_start, annotation.spoken_end):
+                if audio_position is not None and start < audio_position < end:
+                    candidates.append(
+                        CutCandidate(
+                            audio_position,
+                            "audio",
+                            semantic_kind="media-edge",
+                            priority=100,
+                            hardness="hard",
+                            source_annotation_id=annotation.id,
+                        )
+                    )
+        for annotation in annotations:
+            if not _semantic_annotation(annotation):
+                continue
+            for annotation_position in (annotation.spoken_start, annotation.spoken_end):
+                if annotation_position is None or not start < annotation_position < end:
+                    continue
+                tag = str(annotation.attrs.get("tag") or annotation.kind)
+                conflict = find_boundary_conflict(
+                    annotation_position, tokens=tokens, token_providers=token_providers
+                )
+                requires_exact_cut = conflict is not None
+                candidates.append(
+                    CutCandidate(
+                        annotation_position,
+                        tag,
+                        semantic_kind=tag,
+                        priority=90 if requires_exact_cut else 30,
+                        hardness="hard" if requires_exact_cut else "soft",
+                        source_annotation_id=annotation.id,
+                        repair_allowed=not requires_exact_cut,
+                    )
+                )
+
+        hard_cuts = {start, end} | {
+            candidate.position for candidate in candidates if candidate.hardness == "hard"
         }
-        ordered = _normalize_semantic_cuts(text, hard_cuts=hard_cuts, semantic_cuts=semantic_cuts)
+        semantic_cuts = {
+            candidate.position
+            for candidate in candidates
+            if candidate.semantic_kind != "part-start"
+        }
+        normalized = _normalize_semantic_cuts(
+            text, hard_cuts=hard_cuts, semantic_cuts=semantic_cuts
+        )
+        candidate_by_position: dict[int, CutCandidate] = {}
+        for candidate in candidates:
+            current = candidate_by_position.get(candidate.position)
+            if current is None or (candidate.hardness == "hard" and current.hardness != "hard"):
+                candidate_by_position[candidate.position] = candidate
+        selected_candidates = tuple(
+            candidate_by_position.get(
+                point,
+                CutCandidate(point, "normalized-part", semantic_kind="part", hardness="soft"),
+            )
+            for point in normalized
+        )
+        reconciled, cut_repairs, hard_conflicts = reconcile_cut_candidates(
+            text,
+            selected_candidates,
+            tokens=tokens,
+            token_providers=token_providers,
+            protected_ranges=protected_ranges,
+        )
+        repairs.extend(cut_repairs)
+        for candidate in reconciled:
+            if candidate.hardness == "hard":
+                hard_cut_positions.add(candidate.position)
+                hard_cut_origins.setdefault(candidate.position, candidate.origin)
+        for conflict in hard_conflicts:
+            candidate_for_conflict = candidate_by_position.get(conflict.position)
+            hard_cut_positions.add(conflict.position)
+            hard_cut_origins.setdefault(
+                conflict.position,
+                candidate_for_conflict.origin
+                if candidate_for_conflict is not None
+                else "authored boundary",
+            )
+        ordered = [candidate.position for candidate in reconciled]
         for segment_start, segment_end in zip(ordered, ordered[1:], strict=False):
             if segment_end <= segment_start or not text[segment_start:segment_end].strip():
                 continue
@@ -1741,7 +2189,12 @@ def _segmentation_repair_diagnostic(
         source_start, source_end = source_map.map_output_span(
             repair.spoken_start, repair.spoken_end
         )
-    severity = "warning" if repair.code.startswith("segmentation.phrasplit_") else "info"
+    severity = (
+        "warning"
+        if repair.code.startswith("segmentation.phrasplit_")
+        or repair.code in {"segmentation.cut_merged", "segmentation.token_metadata_degraded"}
+        else "info"
+    )
     return Diagnostic(
         code=repair.code,
         message=repair.message,

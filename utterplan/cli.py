@@ -28,6 +28,7 @@ from .ssmdbook import (
     selected_chapter_path,
 )
 from .trace_codec import loads_trace
+from .versioning import CURRENT_SCHEMA_VERSION, V5_SCHEMA_VERSION
 
 _EXAMPLES = """examples:
   utterplan compile chapter.ssmd.md
@@ -90,8 +91,8 @@ def build_parser() -> argparse.ArgumentParser:
     compile_parser.add_argument("--unit", choices=("paragraph", "sentence"), default="paragraph")
     compile_parser.add_argument(
         "--text-preparation",
-        choices=("spokenform", "identity"),
-        default="spokenform",
+        choices=("auto", "ssmd", "spokenform", "identity"),
+        default="auto",
     )
     compile_parser.add_argument("--pause-mode", choices=("tts", "manual", "auto"), default="tts")
     compile_parser.add_argument(
@@ -131,7 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
     batch_parser.add_argument("--input-format", choices=("auto", "plain", "ssmd"), default="auto")
     batch_parser.add_argument("--unit", choices=("paragraph", "sentence"), default="paragraph")
     batch_parser.add_argument(
-        "--text-preparation", choices=("spokenform", "identity"), default="spokenform"
+        "--text-preparation", choices=("auto", "ssmd", "spokenform", "identity"), default="auto"
     )
     batch_parser.add_argument("--pause-mode", choices=("tts", "manual", "auto"), default="tts")
     batch_parser.add_argument(
@@ -180,7 +181,7 @@ def build_parser() -> argparse.ArgumentParser:
     book_parser.add_argument("--language", "--lang", dest="language")
     book_parser.add_argument("--unit", choices=("paragraph", "sentence"), default="paragraph")
     book_parser.add_argument(
-        "--text-preparation", choices=("spokenform", "identity"), default="spokenform"
+        "--text-preparation", choices=("auto", "ssmd", "spokenform", "identity"), default="auto"
     )
     book_parser.add_argument("--pause-mode", choices=("tts", "manual", "auto"), default="tts")
     book_parser.add_argument(
@@ -214,7 +215,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     migrate_parser = commands.add_parser(
-        "migrate", help="migrate a legacy JSON or v4 TOML plan to the current v5 TOML format"
+        "migrate",
+        help="migrate supported legacy JSON or v4/v5/v6 TOML plans to the current v6 TOML format",
     )
     migrate_parser.add_argument("input", type=Path)
     migrate_parser.add_argument("-o", "--output", type=Path)
@@ -432,6 +434,26 @@ def _run_compile_requests(
                     else "source"
                 )
                 print(f"       repaired at {location}: {diagnostic.message}", file=sys.stderr)
+            if include_ids:
+                mode = outcome.preparation_mode or "unknown"
+                degraded = "yes" if outcome.degraded_linguistics else "no"
+                print(
+                    f"       preparation mode: {mode}; repairs: {outcome.repairs}; "
+                    f"degraded linguistics: {degraded}",
+                    file=sys.stderr,
+                )
+                for diagnostic in outcome.repair_details:
+                    if diagnostic.code == "planning.renderability.repaired":
+                        continue
+                    source_range = (
+                        f"source[{diagnostic.source_start}:{diagnostic.source_end}]"
+                        if diagnostic.source_start is not None and diagnostic.source_end is not None
+                        else "source"
+                    )
+                    print(
+                        f"       {diagnostic.code} at {source_range}: {diagnostic.message}",
+                        file=sys.stderr,
+                    )
             print(f"       wrote {outcome.output}", file=sys.stderr)
         elif outcome.status == "failed":
             print("       FAILED", file=sys.stderr)
@@ -678,18 +700,17 @@ def _migration_result(path: Path) -> MigrationResult:
             from .codecs.v4_toml import decode_v4_toml_data
 
             return migrate_plan_data(decode_v4_toml_data(wire))
-        if version == 5:
-            plan = FlowPlan.from_toml(content)
-            return MigrationResult(
-                data=plan.to_dict(),
-                source_version=5,
-                target_version=5,
-                steps=(),
-                source_plan_id=plan.plan_id,
-                target_plan_id=plan.plan_id,
-            )
-        raise PlanFormatError("migrate supports only v4 TOML plan files", code="schema.version")
+        if version in {V5_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION}:
+            if version == V5_SCHEMA_VERSION:
+                from .codecs.v5_toml import from_v5_toml_data
 
+                legacy = from_v5_toml_data(wire)
+                return migrate_plan_data(legacy.to_dict())
+            plan = FlowPlan.from_toml(content)
+            return migrate_plan_data(plan.to_dict())
+        raise PlanFormatError(
+            "migrate supports schema-v4/v5/v6 TOML plan files", code="schema.version"
+        )
     try:
         value = json.loads(content)
     except json.JSONDecodeError as exc:

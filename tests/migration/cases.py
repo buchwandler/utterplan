@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from utterplan import LinguisticsConfig, PauseConfig, PlannerConfig
 
@@ -39,6 +39,7 @@ SSMD = PlannerConfig(
     renderability_mode="strict",
     linguistics=FALLBACK_LINGUISTICS,
 )
+SSMD_SPOKENFORM = replace(SSMD, text_preparation="spokenform")
 SSMD_IDENTITY = PlannerConfig(
     language="en-us",
     document_format="ssmd",
@@ -55,10 +56,12 @@ CASES = (
     MigrationCase("plain_whitespace", "  \n  ", PLAIN),
     MigrationCase("plain_unicode_punctuation", "Café déjà vu. Привет мир.", PLAIN),
     MigrationCase("plain_quotation", 'She said, "Hello." Then left.', PLAIN),
-    MigrationCase("spokenform_numbers", "Dr. Smith bought 5 kg.", SSMD),
-    MigrationCase("spokenform_date_time", "The meeting is on 2024-05-12 at 10:30.", SSMD),
-    MigrationCase("spokenform_abbreviation", "Prof. Jones called at 8 p.m.", SSMD),
-    MigrationCase("multilingual_preparation", 'Hello [Bonjour.]{lang="fr"}', SSMD),
+    MigrationCase("spokenform_numbers", "Dr. Smith bought 5 kg.", SSMD_SPOKENFORM),
+    MigrationCase(
+        "spokenform_date_time", "The meeting is on 2024-05-12 at 10:30.", SSMD_SPOKENFORM
+    ),
+    MigrationCase("spokenform_abbreviation", "Prof. Jones called at 8 p.m.", SSMD_SPOKENFORM),
+    MigrationCase("multilingual_preparation", 'Hello [Bonjour.]{lang="fr"}', SSMD_SPOKENFORM),
     MigrationCase("clausal_comma", "When ready, begin the test.", AUTO),
     MigrationCase("parenthetical", "The battery (still warm) worked.", AUTO),
     MigrationCase("ssmd_language", 'Hello [Bonjour.]{lang="fr"}', SSMD_IDENTITY),

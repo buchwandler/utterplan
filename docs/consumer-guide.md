@@ -8,17 +8,17 @@ UtterPlan accepts SSMD source syntax at version 0.9 only. Convert older source w
 
 ## Importing legacy plans
 
-Historical JSON schemas v1–v4 remain immutable and supported through sequential migrations to schema v5. Import explicitly:
+Historical JSON schemas v1–v4 and frozen schema-v5 TOML remain supported through sequential migrations to schema v6. Import explicitly:
 
 ```bash
 utterplan migrate old.utterplan.json -o current.utterplan.toml
 ```
 
-Migration operates on serialized plain data and does not reparse, reprepare, rerun NLP, or replan. The v4-to-v5 projection fails safely if token ownership/spans or authored pause semantics cannot be verified without guessing. Recompiling source is a separate operation. Normal `FlowPlan.load()` and plan-inspection commands reject JSON.
+Migration operates on serialized plain data and does not reparse, reprepare, rerun NLP, or replan. The v4-to-v5 projection fails safely if token ownership/spans or authored pause semantics cannot be verified without guessing. V5-to-v6 never fabricates missing source text. Recompiling source is a separate operation. Normal `FlowPlan.load()` and plan-inspection commands reject JSON.
 
 ## Planning defaults
 
-The default text-preparation backend is `spokenform`, pause activation mode is `tts`, and spaCy policy is best-effort `auto`. Spokenform preparation is routed through TTSReady `prepare_run()`; the `spokenform` backend label remains stable for plan compatibility. Auto uses only installed compatible local models in `sm`, `md`, `lg`, `trf` preference order and falls back deterministically if unavailable; provider documents remain internal. Use `--spacy off` to force fallback or a tier flag to require that model.
+Text preparation defaults to `auto`: plain text resolves to TTSReady/Spokenform `spokenform`, while SSMD resolves to authoritative `ssmd` preparation that applies reviewed `sub` aliases without another Spokenform pass. Explicit `--text-preparation spokenform` on SSMD is a warned legacy mode; `ssmd` can also be selected explicitly, and `identity` preserves literal behavior. Applied `sub` aliases become segment text and are recorded as compact replacements, not executable substitution directives. Newly compiled v6 plans record the resolved preparation mode in informational `producer.text_preparation` metadata. Pause activation defaults to `tts`, and spaCy policy is best-effort `auto`; installed compatible local models are preferred in `sm`, `md`, `lg`, `trf` order, with deterministic fallback if unavailable. Provider documents remain internal. Use `--spacy off` to force fallback or a tier flag to require that model.
 
 In Python, `PlannerConfig.document_format` defaults to `"plain"`; select `"ssmd"` for SSMD source. `PauseConfig.mode` controls whether eligible semantic pause intents are activated by the compiler. The executable plan carries semantic intent (or an exact authored timed pause), not numeric durations invented from an activation policy. A renderer may interpret supported intents according to its own capabilities.
 
@@ -34,7 +34,7 @@ In Python, `PlannerConfig.document_format` defaults to `"plain"`; select `"ssmd"
 - `markers` and optional `heading` metadata already localized to the owning segment.
 
 Token offsets are half-open Python-character ranges into the owning `segment.text`. Do not use them to slice document text or add offsets from another segment. Consumers render flow units and segments in their stored order.
-Token `pos`, `tag`, `lemma`, and `morph` describe that exact prepared text and are the authoritative downstream linguistic context. Consumers should pass them through rather than retokenizing or rerunning spaCy. Optional replacements are provenance only: their output spans are segment-local, source values are original spellings, and they are excluded from executable hashes and synthesis inputs.
+Token `pos`, `tag`, `lemma`, and `morph` describe that exact prepared text and are the authoritative downstream linguistic context. Consumers should pass them through rather than retokenizing or rerunning spaCy. Optional replacements are provenance only: their output spans are segment-local, source values are original spellings, and they do not alter hashes independently of the source digest and are not synthesis inputs.
 
 ```python
 from utterplan import FlowPlan
@@ -58,7 +58,7 @@ for unit in plan.flow:
         )
 ```
 
-`FlowPlan.document` retains compact document information such as format, title, SSMD version, and portable semantics. `FlowPlan.linguistics` identifies analysis provider/model provenance without retaining provider state. Compact replacement views preserve local prepared-text spans and original spellings; full source text, source offsets, complete preparation mappings, compiler diagnostics, and renderability details belong only in an optional trace sidecar.
+`FlowPlan.document` retains compact document information such as format, title, SSMD version, and portable semantics. `FlowPlan.linguistics` identifies analysis provider/model provenance without retaining provider state. Compact replacement views preserve local prepared-text spans and original spellings. The optional v6 `FlowPlan.source` record retains exact raw input once (and may be absent on migrated v5 plans). Source offsets, complete preparation mappings, compiler diagnostics, and renderability details still require an optional trace sidecar.
 
 ## Optional compiler trace
 
@@ -70,8 +70,7 @@ utterplan explain chapter.utterplan.toml --trace chapter.trace.toml
 utterplan inspect-trace chapter.trace.toml --preparation --boundaries
 ```
 
-The trace contains source text/hash, structural/prepared text, coordinate maps, preparation changes, diagnostics, and renderability evidence. It is not renderer input, does not affect `FlowPlan.plan_id`, and does not change the resulting plan TOML. See the [coordinate-space contract](coordinate-spaces) for every trace offset's coordinate space.
-The trace contains source text/hash, structural/prepared text, full coordinate maps, preparation changes, diagnostics, and renderability evidence. Compact replacement views are available in v5 segments, but the trace is still needed for original source offsets and complete mappings. The trace is not renderer input, does not affect `FlowPlan.plan_id`, and does not change the executable plan.
+The trace contains source text/hash, structural/prepared text, full coordinate maps, preparation changes, diagnostics, and renderability evidence. Exact raw input is stored in the optional v6 `FlowPlan.source` record; compact replacement views are available in v6 segments, while the trace remains necessary for original source offsets and complete mappings. The trace is not renderer input, does not affect `FlowPlan.plan_id`, and does not change the executable plan.
 
 ## Directives and media
 

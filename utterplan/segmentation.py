@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from bisect import bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib import import_module
@@ -11,7 +10,7 @@ from typing import Any, Literal
 from .exceptions import PlanValidationError
 from .language import language_lookup_key
 from .renderability import contains_speech_content
-from .token_topology import find_boundary_conflict
+from .token_topology import TokenBoundaryConflict, find_boundary_conflict
 
 BoundaryLevel = Literal["sentence", "part"]
 
@@ -24,6 +23,20 @@ class BoundaryCandidate:
     reason: str
     confidence: int
     language_run_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CutCandidate:
+    position: int
+    origin: str
+    semantic_kind: str = "segment"
+    priority: int = 0
+    hardness: Literal["hard", "soft"] = "soft"
+    source_annotation_id: str | None = None
+    language_run_id: str | None = None
+    anchor: str | None = None
+    protected_range: tuple[int, int] | None = None
+    repair_allowed: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +74,106 @@ class SegmentationRepair:
     original_position: int | None = None
     repaired_position: int | None = None
     origin: str | None = None
+
+
+def reconcile_cut_candidates(
+    text: str,
+    candidates: Sequence[CutCandidate],
+    *,
+    tokens: Sequence[Any],
+    token_providers: Sequence[str | None],
+    protected_ranges: Sequence[tuple[int, int]] = (),
+) -> tuple[
+    tuple[CutCandidate, ...], tuple[SegmentationRepair, ...], tuple[TokenBoundaryConflict, ...]
+]:
+    """Keep authored cuts, merge unsafe optional cuts, and report hard token conflicts."""
+    chosen: dict[int, CutCandidate] = {}
+    for candidate in sorted(
+        candidates,
+        key=lambda item: (
+            item.position,
+            0 if item.hardness == "hard" else 1,
+            -item.priority,
+            item.origin,
+            item.source_annotation_id or "",
+        ),
+    ):
+        current = chosen.get(candidate.position)
+        if current is None or (candidate.hardness == "hard" and current.hardness != "hard"):
+            chosen[candidate.position] = candidate
+
+    accepted: list[CutCandidate] = []
+    repairs: list[SegmentationRepair] = []
+    hard_conflicts: list[TokenBoundaryConflict] = []
+    for candidate in sorted(chosen.values(), key=lambda item: item.position):
+        position = candidate.position
+        if type(position) is not int or not 0 <= position <= len(text):
+            if candidate.hardness == "hard" or not candidate.repair_allowed:
+                raise PlanValidationError(
+                    f"authored {candidate.origin} cut is outside spoken text at {position!r}",
+                    code="segmentation.authored_cut_out_of_bounds",
+                )
+            repairs.append(
+                SegmentationRepair(
+                    "segmentation.cut_dropped",
+                    f"Dropped out-of-range {candidate.origin} cut at {position!r}",
+                    original_position=position if type(position) is int else None,
+                    origin=candidate.origin,
+                )
+            )
+            continue
+
+        protected = list(protected_ranges)
+        if candidate.protected_range is not None:
+            protected.append(candidate.protected_range)
+        protected.sort()
+        protected_match = next(
+            ((start, end) for start, end in protected if start < position < end), None
+        )
+        if protected_match is not None:
+            if candidate.hardness == "hard" or not candidate.repair_allowed:
+                annotation = (
+                    f" for annotation {candidate.source_annotation_id}"
+                    if candidate.source_annotation_id
+                    else ""
+                )
+                raise PlanValidationError(
+                    f"authored {candidate.origin} cut{annotation} falls inside an atomic protected range",
+                    code="segmentation.atomic_hard_cut_conflict",
+                )
+            start, end = protected_match
+            repairs.append(
+                SegmentationRepair(
+                    "segmentation.atomic_boundary_dropped",
+                    f"Dropped optional {candidate.origin} cut at {position} inside protected "
+                    f"spoken range [{start}:{end})",
+                    spoken_start=start,
+                    spoken_end=end,
+                    original_position=position,
+                    origin=candidate.origin,
+                )
+            )
+            continue
+
+        conflict = find_boundary_conflict(position, tokens=tokens, token_providers=token_providers)
+        if conflict is not None:
+            if candidate.hardness == "soft" and candidate.repair_allowed:
+                repairs.append(
+                    SegmentationRepair(
+                        "segmentation.cut_merged",
+                        f"Dropped optional {candidate.origin} cut at {position} inside token "
+                        f"{conflict.token_text!r} [{conflict.token_start}:{conflict.token_end}); "
+                        "merged the surrounding segments",
+                        spoken_start=conflict.token_start,
+                        spoken_end=conflict.token_end,
+                        original_position=position,
+                        origin=candidate.origin,
+                    )
+                )
+                continue
+            hard_conflicts.append(conflict)
+        accepted.append(candidate)
+    return tuple(accepted), tuple(repairs), tuple(hard_conflicts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -672,8 +785,7 @@ def _normalize_protected_spans(
 
 
 def _inside_protected_span(position: int, spans: Sequence[tuple[int, int]]) -> bool:
-    index = bisect_right(spans, position, key=lambda span: span[0]) - 1
-    return index >= 0 and spans[index][0] < position < spans[index][1]
+    return any(start < position < end for start, end in spans)
 
 
 def build_sentence_topology(

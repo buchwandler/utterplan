@@ -24,7 +24,7 @@ def _segments(plan: FlowPlan):
     return tuple(segment for unit in plan.flow for segment in unit.segments)
 
 
-def test_fresh_compile_returns_current_v5_local_flow() -> None:
+def test_fresh_compile_returns_current_v6_local_flow() -> None:
     text = 'Hello [world]{emphasis="strong"}.'
     config = PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
     result = compile_document(text, input_format="ssmd", config=config)
@@ -35,7 +35,7 @@ def test_fresh_compile_returns_current_v5_local_flow() -> None:
         planner.close()
 
     assert isinstance(result.plan, FlowPlan)
-    assert result.plan.schema_version == 5
+    assert result.plan.schema_version == 6
     assert planned == result.plan
     payload = result.plan.to_toml()
     assert payload == result.plan.to_toml()
@@ -88,7 +88,8 @@ def test_fresh_compilation_converges_with_v4_migration_on_unambiguous_input(
         assert fresh.language == migrated.language
         assert fresh.unit == migrated.unit
     else:
-        assert fresh.plan_id == migrated.plan_id
+        assert fresh.source is not None and migrated.source is None
+        assert fresh.plan_id != migrated.plan_id  # V5 migration cannot recreate source provenance
         assert fresh.flow == migrated.flow
         assert fresh.document == migrated.document
         assert fresh.linguistics == migrated.linguistics

@@ -1,8 +1,10 @@
 import pytest
 
+import utterplan.planner as planner_module
 from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
 from utterplan import LinguisticsConfig, PauseConfig, PauseIntent, PlannerConfig, PlanningError
-from utterplan.exceptions import PlanValidationError
+from utterplan.linguistics import RunAnalysis
+from utterplan.model import TokenAnnotation
 
 
 def test_plain_sentences_paragraphs_and_pauses():
@@ -43,7 +45,7 @@ def test_ssmd_preparation_and_explicit_directives():
     plan = UtterancePlanner(PlannerConfig(language="en-us", document_format="ssmd")).plan(
         '[tomato]{ph="təˈmeɪtoʊ"}'
     )
-    assert plan.preparation.backend == "spokenform"
+    assert plan.preparation.backend == "ssmd"
     assert plan.segments[0].directives.pronunciation.phonemes == "təˈmeɪtoʊ"
 
 
@@ -131,13 +133,95 @@ def test_adjacent_audio_annotations_report_required_token_conflict() -> None:
             language="en-us",
             document_format="ssmd",
             text_preparation="identity",
+            linguistics=LinguisticsConfig(use_spacy=False),
         )
     )
 
-    with pytest.raises(PlanValidationError) as exc_info:
-        planner.plan('[first]{src="same.wav"}[second]{src="same.wav"}')
+    plan = planner.plan('[first]{src="same.wav"}[second]{src="same.wav"}')
 
-    assert exc_info.value.code == "segmentation.required_cut_conflict"
+    assert [segment.text for segment in plan.segments] == ["first", "second"]
+    assert [segment.spoken_start for segment in plan.segments] == [0, 5]
+    assert [segment.spoken_end for segment in plan.segments] == [5, 11]
+    assert [segment.directives.audio.src for segment in plan.segments] == [
+        "same.wav",
+        "same.wav",
+    ]
+    assert [token.text for token in plan.tokens] == ["first", "second"]
+    assert all(
+        token.pos is None and token.tag is None and token.lemma is None and token.morph is None
+        for token in plan.tokens
+    )
+    assert plan.document_metadata["planning"]["degraded_linguistics"] is True
+    assert any(
+        item.code == "segmentation.token_metadata_degraded" and item.severity == "warning"
+        for item in plan.diagnostics
+    )
+
+
+def test_authored_phoneme_edge_is_preserved_with_degraded_local_token_metadata() -> None:
+    planner = UtterancePlanner(
+        PlannerConfig(
+            language="en-us",
+            document_format="ssmd",
+            text_preparation="identity",
+            linguistics=LinguisticsConfig(use_spacy=False),
+        )
+    )
+    plan = planner.plan('[first]{ph="fəːst"}second')
+
+    assert [segment.text for segment in plan.segments] == ["first", "second"]
+    assert plan.segments[0].directives.pronunciation.phonemes == "fəːst"
+    assert [token.text for token in plan.tokens] == ["first", "second"]
+    assert all(
+        token.pos is None and token.tag is None and token.lemma is None for token in plan.tokens
+    )
+    assert plan.document_metadata["planning"]["degraded_linguistics"] is True
+
+
+def test_spacy_token_crossing_authored_edge_is_reanalyzed_on_local_surfaces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_analysis(text, runs, _config, _resources, **_kwargs):
+        analyses = []
+        for run in runs:
+            surface = text[run.spoken_start : run.spoken_end]
+            token = TokenAnnotation(
+                run.spoken_start,
+                run.spoken_end,
+                surface,
+                pos="NOUN",
+                tag="NN",
+                lemma=surface.lower(),
+                language=run.language,
+            )
+            analyses.append(
+                RunAnalysis(
+                    run.language,
+                    run.spoken_start,
+                    run.spoken_end,
+                    (token,),
+                    provider="spacy",
+                    model_name="fake-model",
+                )
+            )
+        return tuple(analyses)
+
+    monkeypatch.setattr(planner_module, "analyze_run_analyses", fake_analysis)
+    planner = UtterancePlanner(
+        PlannerConfig(
+            language="en-us",
+            document_format="ssmd",
+            text_preparation="identity",
+            linguistics=LinguisticsConfig(use_spacy=True, spacy_model="fake-model"),
+        )
+    )
+    plan = planner.plan('[first]{ph="fəːst"}second')
+
+    assert [token.text for token in plan.tokens] == ["first", "second"]
+    assert [token.lemma for token in plan.tokens] == ["first", "second"]
+    assert all(token.pos == "NOUN" and token.tag == "NN" for token in plan.tokens)
+    assert plan.linguistic_runs[0].provider == "spacy"
+    assert any(item.code == "segmentation.token_reanalyzed" for item in plan.diagnostics)
 
 
 def test_audio_fallback_is_atomic_across_sentence_segmentation() -> None:

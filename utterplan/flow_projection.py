@@ -11,6 +11,7 @@ from .model import (
     FlowUnit,
     LinguisticProvenance,
     PauseIntent,
+    PlanSource,
     ReplacementView,
     TokenView,
     UtterancePlan,
@@ -19,7 +20,8 @@ from .token_topology import boundary_splits_lexical_content
 
 
 def project_compiler_plan(plan: UtterancePlan) -> FlowPlan:
-    """Project compiler-owned v4 graph state into the current local flow model."""
+    """Project compiler-owned state into the current portable flow model."""
+    _validate_replacement_ownership(plan)
     segments_by_id = {segment.id: segment for segment in plan.segments}
     markers_by_id = {marker.id: marker for marker in plan.markers}
     headings = _headings_by_segment(plan)
@@ -98,7 +100,8 @@ def project_compiler_plan(plan: UtterancePlan) -> FlowPlan:
         flow=tuple(flow),
         document=_document_info(plan),
         linguistics=_linguistic_info(plan),
-        producer=_small_producer(plan.producer),
+        source=PlanSource(plan.source.format, plan.source.text),
+        producer=_portable_producer(plan),
         warnings=(),
     )
 
@@ -183,41 +186,86 @@ def _tokens_for_segment(
     return tuple(result)
 
 
+def _replacement_owner(plan: UtterancePlan, raw: Any, index: int) -> Any:
+    path = f"$.preparation.replacements[{index}]"
+    if not isinstance(raw, Mapping):
+        raise PlanValidationError(
+            "replacement provenance must be an object", code="replacement.type", path=path
+        )
+    output_start, output_end = raw.get("output_start"), raw.get("output_end")
+    source_start, source_end = raw.get("source_start"), raw.get("source_end")
+    source, replacement = raw.get("source"), raw.get("replacement")
+    if (
+        type(output_start) is not int
+        or type(output_end) is not int
+        or not 0 <= output_start <= output_end <= len(plan.texts.spoken)
+        or type(source_start) is not int
+        or type(source_end) is not int
+        or not 0 <= source_start < source_end <= len(plan.texts.structural)
+        or not isinstance(source, str)
+        or not isinstance(replacement, str)
+        or plan.texts.structural[source_start:source_end] != source
+        or plan.texts.spoken[output_start:output_end] != replacement
+    ):
+        raise PlanValidationError(
+            "replacement provenance ranges or surfaces cannot be verified",
+            code="replacement.provenance",
+            path=path,
+        )
+    kind, rule = raw.get("kind"), raw.get("rule")
+    if (kind is not None and (not isinstance(kind, str) or not kind)) or (
+        rule is not None and (not isinstance(rule, str) or not rule)
+    ):
+        raise PlanValidationError(
+            "replacement kind/rule must be non-empty strings",
+            code="replacement.provenance",
+            path=path,
+        )
+    if output_start < output_end:
+        owners = [
+            segment
+            for segment in plan.segments
+            if segment.spoken_start <= output_start and output_end <= segment.spoken_end
+        ]
+    else:
+        owners = [
+            segment
+            for segment in plan.segments
+            if segment.spoken_start <= output_start < segment.spoken_end
+        ]
+        if not owners and output_start == len(plan.texts.spoken):
+            owners = [segment for segment in plan.segments if segment.spoken_end == output_start]
+    if len(owners) != 1:
+        raise PlanValidationError(
+            f"replacement provenance must have exactly one owning segment; found {len(owners)}",
+            code="replacement.owner",
+            path=path,
+        )
+    return owners[0]
+
+
+def _validate_replacement_ownership(plan: UtterancePlan) -> None:
+    for index, raw in enumerate(plan.preparation.replacements):
+        _replacement_owner(plan, raw, index)
+
+
 def _replacement_views_for_segment(
     plan: UtterancePlan, segment: Any
 ) -> tuple[ReplacementView, ...]:
     views: list[ReplacementView] = []
-    for raw in plan.preparation.replacements:
-        if not isinstance(raw, Mapping):
+    for index, raw in enumerate(plan.preparation.replacements):
+        owner = _replacement_owner(plan, raw, index)
+        if owner.id != segment.id:
             continue
-        output_start = raw.get("output_start")
-        output_end = raw.get("output_end")
-        source = raw.get("source")
-        kind = raw.get("kind")
-        rule = raw.get("rule")
-        if (
-            type(output_start) is not int
-            or type(output_end) is not int
-            or output_start > output_end
-            or not isinstance(source, str)
-            or (kind is not None and (not isinstance(kind, str) or not kind))
-            or (rule is not None and (not isinstance(rule, str) or not rule))
-        ):
-            continue
-        owners = [
-            candidate
-            for candidate in plan.segments
-            if candidate.spoken_start <= output_start and output_end <= candidate.spoken_end
-        ]
-        if len(owners) != 1 or owners[0].id != segment.id:
-            continue
+        output_start = raw["output_start"]
+        output_end = raw["output_end"]
         views.append(
             ReplacementView(
                 start=output_start - segment.spoken_start,
                 end=output_end - segment.spoken_start,
-                source=source,
-                kind=kind,
-                rule=rule,
+                source=raw["source"],
+                kind=raw.get("kind"),
+                rule=raw.get("rule"),
             )
         )
     return tuple(sorted(views, key=lambda item: (item.start, item.end, item.source)))
@@ -339,6 +387,14 @@ def _linguistic_info(plan: UtterancePlan) -> tuple[LinguisticProvenance, ...]:
         )
         seen.add(identity)
     return tuple(result)
+
+
+def _portable_producer(plan: UtterancePlan) -> dict[str, str]:
+    producer = _small_producer(plan.producer)
+    mode = plan.config.get("text_preparation")
+    if isinstance(mode, str) and mode in {"ssmd", "spokenform", "identity"}:
+        producer["text_preparation"] = mode
+    return producer
 
 
 def _small_producer(value: Mapping[str, Any]) -> dict[str, str]:

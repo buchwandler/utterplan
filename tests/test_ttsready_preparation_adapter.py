@@ -269,7 +269,6 @@ def test_adapter_keeps_ttsready_warnings_as_strings(monkeypatch: pytest.MonkeyPa
     assert result.info.warnings == ("adapter warning",)
 
 
-
 def test_adapter_preserves_backend_per_change_language_provenance() -> None:
     text = "Dr. bought 5 kg."
     run = LanguageRun("run", 0, len(text), "en-us")
@@ -280,7 +279,6 @@ def test_adapter_preserves_backend_per_change_language_provenance() -> None:
         ("Dr.", "en_US"),
         ("5 kg", "en"),
     ]
-
 
 
 def test_adapter_does_not_invent_language_when_change_language_is_absent(

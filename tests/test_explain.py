@@ -17,7 +17,7 @@ def test_basic_explanation_is_human_oriented_and_current_schema() -> None:
     output = format_explanation(_migrated("basic_en.utterplan.toml"))
 
     assert "UtterPlan explanation" in output
-    assert "schema: 5" in output
+    assert "schema: 6" in output
     assert "default language: en-us" in output
     assert "result: 1 unit, 1 segment" in output
     assert '1. [en-us] "Hello."' in output
@@ -82,6 +82,20 @@ def test_compiler_trace_is_optional_and_does_not_change_executable_plan() -> Non
     assert "backend: spokenform" in explained
     assert '"Dr." ->' in explained and '"Doctor"' in explained
     assert "source hash: " in explained
+
+
+def test_explain_shows_exact_raw_source_and_ssmd_replacement_without_trace() -> None:
+    source = '[ART]{sub="A R T"}'
+    plan = compile_document(
+        source,
+        input_format="ssmd",
+        config=PlannerConfig(language="en-us", document_format="ssmd"),
+    ).plan
+
+    explained = format_explanation(plan, details=True)
+
+    assert 'raw source: "[ART]{sub=\\"A R T\\"}"' in explained
+    assert '"A R T" <- "ART" (kind=ssmd-sub, rule=ssmd.sub)' in explained
 
 
 def test_trace_diagnostics_include_source_evidence() -> None:

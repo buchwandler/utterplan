@@ -101,6 +101,7 @@ class CompileResult:
     plan: FlowPlan
     diagnostics: tuple[Diagnostic, ...]
     trace: PreparationTrace | None = None
+    preparation_mode: str | None = None
 
 
 def compile_document(

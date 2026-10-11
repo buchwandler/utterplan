@@ -17,7 +17,7 @@ PyKokoro owns model selection, voice assets, G2P, model tokens, ONNX sessions, a
 
 ## Thin adapter inputs
 
-A future adapter can use only public v5 flow fields:
+A future adapter can use only public v6 flow fields:
 
 - `plan.flow` in order, with each unit's ordered `segments`;
 - `segment.text` and `segment.language`;
@@ -35,7 +35,7 @@ for unit in plan.flow:
         phonemizer(segment.text, segment.language, tokens)
 ```
 
-Use the V5 token fields as authoritative context: pass available `pos`, `tag`, `lemma`, and `morph` through unchanged rather than rerunning spaCy or inferring tags. Default `auto` uses installed compatible local models, preferring `sm`, `md`, `lg`, `trf`, and safely falls back if unavailable; model packages are never downloaded. When fields are unavailable, follow the adapter's documented non-contextual fallback.
+Use the V6 token fields as authoritative context: pass available `pos`, `tag`, `lemma`, and `morph` through unchanged rather than rerunning spaCy or inferring tags. Default `auto` uses installed compatible local models, preferring `sm`, `md`, `lg`, `trf`, and safely falls back if unavailable; model packages are never downloaded. When fields are unavailable, follow the adapter's documented non-contextual fallback.
 
 ## Pause behavior
 

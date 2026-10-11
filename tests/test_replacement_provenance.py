@@ -17,8 +17,10 @@ from utterplan import (
     TokenView,
 )
 from utterplan.codecs.v5_toml import from_v5_toml_data, to_v5_toml_data
+from utterplan.exceptions import PlanValidationError
 from utterplan.explain import format_explanation
 from utterplan.flow_projection import project_compiler_plan
+from utterplan.hashing import V5_FLOW_HASH_SCHEMA
 
 
 def _compile_flow(text: str, *, unit: str = "paragraph") -> FlowPlan:
@@ -103,15 +105,14 @@ def test_multiple_replacements_keep_ordered_parallel_columns_and_round_trip() ->
     assert wire_segment["replacements"] == [item.to_dict() for item in replacements]
 
 
-def test_malformed_or_unlocalizable_replacement_provenance_is_skipped() -> None:
+def test_malformed_or_unlocalizable_replacement_provenance_is_rejected() -> None:
     source_plan = CompilerTestPlanner(
         PlannerConfig(language="en-us", linguistics=LinguisticsConfig(use_spacy=False))
     ).plan("(ART)")
-    valid = dict(source_plan.preparation.replacements[0])
-    malformed = {**valid, "kind": ""}
+    malformed = {**source_plan.preparation.replacements[0], "kind": ""}
     preparation = replace(source_plan.preparation, replacements=(malformed,))
-    flow = project_compiler_plan(replace(source_plan, preparation=preparation))
-    assert all(not segment.replacements for unit in flow.flow for segment in unit.segments)
+    with pytest.raises(PlanValidationError, match="replacement kind/rule"):
+        project_compiler_plan(replace(source_plan, preparation=preparation))
 
     split_plan = CompilerTestPlanner(
         PlannerConfig(
@@ -122,12 +123,15 @@ def test_malformed_or_unlocalizable_replacement_provenance_is_skipped() -> None:
     ).plan("Alpha. Beta.", unit="sentence")
     crossing = {
         "output_start": 4,
-        "output_end": 7,
-        "source": "cross-segment",
+        "output_end": 8,
+        "source_start": 4,
+        "source_end": 8,
+        "source": "a. B",
+        "replacement": "a. B",
     }
     preparation = replace(split_plan.preparation, replacements=(crossing,))
-    flow = project_compiler_plan(replace(split_plan, preparation=preparation))
-    assert all(not segment.replacements for unit in flow.flow for segment in unit.segments)
+    with pytest.raises(PlanValidationError, match="exactly one owning segment"):
+        project_compiler_plan(replace(split_plan, preparation=preparation))
 
 
 def test_replacement_view_and_flow_segment_validate_local_spans() -> None:
@@ -143,7 +147,10 @@ def test_replacement_view_and_flow_segment_validate_local_spans() -> None:
 
 def test_v5_replacement_columns_reject_invalid_cardinality_bounds_and_sparse_indexes() -> None:
     flow = _compile_flow("Dr. bought 5 kg.")
-    base = to_v5_toml_data(flow)
+    v5_flow = replace(
+        flow, schema_version=5, hash_schema=V5_FLOW_HASH_SCHEMA, source=None, plan_id=""
+    )
+    base = to_v5_toml_data(v5_flow)
 
     invalid_bounds = deepcopy(base)
     segment = next(item for item in invalid_bounds["flow"][0]["segment"] if "replacement" in item)

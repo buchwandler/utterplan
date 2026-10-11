@@ -7,16 +7,16 @@ diagnostics describe compilation, and an optional `PreparationTrace` holds compi
 provenance separately. `UtterancePlanner.plan` is also supported and returns the
 same current `FlowPlan` directly.
 
-The Python defaults are repair-first with best-effort spaCy enrichment: `PlannerConfig` uses `spokenform` preparation through TTSReady and `renderability_mode="repair"`, `PauseConfig().mode` is `"tts"`, and `LinguisticsConfig` uses local-model `auto`. The `spokenform` backend label remains stable for plan compatibility. Auto prefers installed compatible models `sm`, `md`, `lg`, `trf`, then falls back safely if spaCy or models are unavailable. No model is downloaded.
+The Python defaults are repair-first with best-effort spaCy enrichment: `PlannerConfig` uses `text_preparation="auto"` and `renderability_mode="repair"`; `auto` resolves to SSMD-authoritative preparation for SSMD input and TTSReady/Spokenform for plain text. Explicit `spokenform` on SSMD is a warned legacy mode. `PauseConfig().mode` is `"tts"`, and `LinguisticsConfig` uses local-model `auto`. Auto prefers installed compatible models `sm`, `md`, `lg`, `trf`, then falls back safely if spaCy or models are unavailable. No model is downloaded.
 
 To require a specific installed model, set `require_spacy=True` and configure its model or tier. The plan records final pass-B token provenance in `linguistic_runs`; provider documents are not retained. Set `use_spacy=False` for deterministic opt-out.
-V5 `token.span`, `pos`, `tag`, `lemma`, and `morph` are the authoritative linguistic context for the exact prepared segment text. Consumers should not retokenize or rerun spaCy. Optional replacement spans are local to final prepared `segment.text`; original spellings are stored as provenance strings, while complete source offsets and preparation maps belong in the optional trace sidecar.
+V6 `token.span`, `pos`, `tag`, `lemma`, and `morph` are the authoritative linguistic context for the exact prepared segment text. Consumers should not retokenize or rerun spaCy. Optional replacement spans are local to final prepared `segment.text`; original spellings are stored as provenance strings, while complete source offsets and preparation maps belong in the optional trace sidecar.
 
 ## Sentence segmentation and private topology
 
 PhraseSplit is an advisory sentence-boundary provider, not an owner of compiler topology. UtterPlan validates each whole proposal batch, maps accepted run-local offsets once into prepared spoken-text coordinates, then recomputes paragraph and sentence indices from parser paragraph events and accepted boundaries. If PhraseSplit fails or returns malformed/incomplete coverage, deterministic conservative fallback preserves the text and emits diagnostics. Automatic cuts that divide provider-aware lexical content are discarded or merged; the final flow-projection token-edge check remains active.
 
-Semicolon and context-safe colon separators, plus optional trusted clause/parenthetical candidates, form private sentence parts. Renderer-required language, directive, pause, marker, and media cuts subdivide those parts without changing their indices. Exact surface and non-whitespace coverage validation runs in strict and repair renderability modes alike. Parts are not a public field: only the compact ordered v5 `flow` is serialized, and `unit="sentence"` groups by the recomputed sentence topology.
+Semicolon and context-safe colon separators, plus optional trusted clause/parenthetical candidates, form private sentence parts. Renderer-required language, directive, pause, marker, and media cuts subdivide those parts without changing their indices. Exact surface and non-whitespace coverage validation runs in strict and repair renderability modes alike. Parts are not a public field: only the compact ordered v6 `flow` is serialized, and `unit="sentence"` groups by the recomputed sentence topology.
 
 ## Canonical single-document compiler
 
@@ -59,7 +59,7 @@ Attempts are separate from canonical plans. A blocked attempt retains an inspect
 candidate draft; it is not a valid `FlowPlan` and cannot be loaded by
 `FlowPlan.load()`. Persist it with `PlanningAttempt.save()` and restore it with
 `PlanningAttempt.load()`; the attempt TOML schema is
-`utterplan.planning-attempt.v1`, independent of canonical plan schema v5.
+`utterplan.planning-attempt.v1`, independent of canonical plan schema v6.
 
 ```python
 from utterplan import PlannerConfig, compile_attempt
@@ -90,7 +90,7 @@ topology, and `--json` emits the complete attempt as JSON for inspection.
 
 ## TOML persistence
 
-Schema v5 is the semantic contract, while `.utterplan.toml` is the canonical persisted format. `FlowPlan.to_toml()` and `FlowPlan.from_toml()` round-trip the executable plan; `save()` writes atomically, and `load()` accepts TOML only. Historical v4 TOML is migrated to v5 by the codec; historical JSON plans require the explicit migration command.
+Schema v6 is the current semantic contract, while `.utterplan.toml` is the canonical persisted format. `FlowPlan.to_toml()` and `FlowPlan.from_toml()` round-trip the current executable plan; `save()` writes atomically, and `load()` accepts TOML only. Historical v4 TOML and saved v5 TOML migrate sequentially to v6; historical JSON plans require the explicit migration command.
 
 ```python
 from utterplan import FlowPlan
@@ -102,7 +102,7 @@ plan.save("chapter.utterplan.toml")
 assert FlowPlan.load("chapter.utterplan.toml") == plan
 ```
 
-`FlowPlan.to_dict()` and `FlowPlan.from_dict()` expose the v5 executable mapping. For a legacy JSON file, use `utterplan migrate old.utterplan.json -o current.utterplan.toml`; SSMD source migration is a separate operation.
+`FlowPlan.to_dict()` and `FlowPlan.from_dict()` expose the current v6 executable mapping; v5 mappings remain readable for migration. For a legacy JSON file, use `utterplan migrate old.utterplan.json -o current.utterplan.toml`; SSMD source migration is a separate operation.
 
 ## Incremental batch compilation
 
@@ -303,12 +303,17 @@ consumers do not need to inspect raw SSMD annotations to find media.
 :show-inheritance:
 ```
 
+```{autoclass} utterplan.PlanSource
+:members:
+:show-inheritance:
+```
+
 ```{autoclass} utterplan.LinguisticProvenance
 :members:
 :show-inheritance:
 ```
 
-`UtterancePlan`, `PlanSegment`, and `PlanUnit` remain legacy compiler/migration models. Fresh compilation returns `FlowPlan`; renderers should use only the v5 flow contract.
+`UtterancePlan`, `PlanSegment`, and `PlanUnit` remain legacy compiler/migration models. Fresh compilation returns `FlowPlan`; renderers should use only the v6 flow contract.
 
 ## Renderer-neutral SSMD directives
 
@@ -357,9 +362,9 @@ consumers do not need to inspect raw SSMD annotations to find media.
 :show-inheritance:
 ```
 
-The v5 public model exposes `FlowPlan.flow`, compact `document` and `linguistics` records, and local segment fields for text, language, directives, pause intent, markers, headings, and tokens. `FlowSegment.directives` contains typed semantics after scope and voice-default resolution. `TokenView` offsets address only its owning segment's text; provider documents are not retained. See the [consumer guide](consumer-guide) for renderer responsibilities.
+The v6 public model exposes `FlowPlan.flow`, compact `document` and `linguistics` records, and local segment fields for text, language, directives, pause intent, markers, headings, and tokens. `FlowSegment.directives` contains typed semantics after scope and voice-default resolution. `TokenView` offsets address only its owning segment's text; provider documents are not retained. See the [consumer guide](consumer-guide) for renderer responsibilities.
 
-`TokenView` carries optional lemma, POS, tag, and morph facts. `LinguisticProvenance` identifies the analysis provider and model without retaining provider state. Source spans, exact source text, and preparation coordinate maps are available only in an optional `PreparationTrace` sidecar, not the plan TOML.
+`TokenView` carries optional lemma, POS, tag, and morph facts. `LinguisticProvenance` identifies the analysis provider and model without retaining provider state. Exact raw source is stored in the optional v6 `FlowPlan.source` record, which may be absent on migrated v5 plans. Source spans and preparation coordinate maps remain available only in an optional `PreparationTrace` sidecar.
 
 ## Errors
 

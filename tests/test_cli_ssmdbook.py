@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import tomlkit
@@ -56,11 +58,11 @@ def _report(path: Path) -> dict[str, object]:
 
 def _plan_text(path: Path) -> str:
     plan = FlowPlan.load(path)
-    assert plan.schema_version == 5
+    assert plan.schema_version == 6
     return " ".join(segment.text for unit in plan.flow for segment in unit.segments)
 
 
-def test_compile_book_root_range_defaults_to_utterplan_and_writes_v5_plans(
+def test_compile_book_root_range_defaults_to_utterplan_and_writes_v6_plans(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = tmp_path / "Platform Decay - Martha Wells.ssmdbook"
@@ -84,12 +86,54 @@ def test_compile_book_root_range_defaults_to_utterplan_and_writes_v5_plans(
     assert _plan_text(output_dir / "chapter-0005.utterplan.toml") == "Chapter 5 content."
     report = _report(output_dir / "compile-report.toml")
     assert report["requested"] == 13
+    assert report["version"] == 2
     assert report["written"] == 13
     assert report["failed"] == 0
     assert [item["id"] for item in report["item"]] == [
         f"chapter-{number:04d}" for number in range(5, 18)
     ]
+    first = report["item"][0]
+    assert first["preparation_mode"] == "identity"
+    assert first["repair_count"] == 0
+    assert first["repairs"] == []
+    assert first["degraded_linguistics"] is False
+    assert (
+        FlowPlan.load(output_dir / "chapter-0005.utterplan.toml").producer["text_preparation"]
+        == "identity"
+    )
     assert (root / "manifest.json").read_bytes() == manifest_before
+
+
+def test_compile_book_report_records_ssmd_mode_and_repaired_cut_details(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repair.ssmdbook"
+    _write_book(root, (5,), contents={5: _ssmd("lifecycle now")})
+
+    def split_inside_token(text: str, **_kwargs: object) -> list[SimpleNamespace]:
+        cut = 4
+        return [
+            SimpleNamespace(char_start=0, char_end=cut, text=text[:cut]),
+            SimpleNamespace(char_start=cut, char_end=len(text), text=text[cut:]),
+        ]
+
+    monkeypatch.setitem(
+        sys.modules, "phrasplit", SimpleNamespace(split_with_offsets=split_inside_token)
+    )
+    result = main(["compile-book", str(root), "--chapters", "5", "--spacy", "off"])
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "preparation mode: ssmd; repairs:" in captured.err
+    assert "segmentation.lexical_boundary_merged at source:" in captured.err
+    item = _report(root / "utterplan/compile-report.toml")["item"][0]
+    assert item["preparation_mode"] == "ssmd"
+    assert item["repair_count"] >= 1
+    assert any(
+        repair["code"] == "segmentation.lexical_boundary_merged" for repair in item["repairs"]
+    )
+    assert item["degraded_linguistics"] is False
+    assert _plan_text(root / "utterplan/chapter-0005.utterplan.toml") == "lifecycle now"
 
 
 def test_compile_book_accepts_chapters_directory_and_preserves_manifest_order(

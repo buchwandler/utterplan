@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, cast
 
 from ..exceptions import PlanMigrationError
-from ..hashing import FLOW_HASH_SCHEMA, flow_plan_id, flow_unit_hash
+from ..hashing import V5_FLOW_HASH_SCHEMA, flow_plan_id, flow_unit_hash
 from .registry import register_migration
 
 _FORMAT = "utterplan"
@@ -641,7 +641,7 @@ def migrate_v4_to_v5(data: Mapping[str, Any]) -> dict[str, Any]:
         "plan_id": "",
         "language": language,
         "unit": unit_kind,
-        "hash_schema": FLOW_HASH_SCHEMA,
+        "hash_schema": V5_FLOW_HASH_SCHEMA,
         "document": _document_info(source),
         "linguistics": _linguistic_info(source),
         "flow": flow,

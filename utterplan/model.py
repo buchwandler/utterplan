@@ -13,14 +13,21 @@ from .exceptions import PlanFormatError, PlanValidationError, UnsupportedSchemaE
 from .hashing import (
     FLOW_HASH_SCHEMA,
     UNIT_HASH_SCHEMA,
+    V5_FLOW_HASH_SCHEMA,
     flow_plan_id,
     flow_unit_hash,
     semantic_hash,
+    source_text_hash,
     unit_hash_payload,
 )
 from .language import LanguageRun
 from .migration import migrate_plan_data
-from .versioning import FORMAT, V4_SCHEMA_VERSION
+from .versioning import (
+    CURRENT_SCHEMA_VERSION,
+    FORMAT,
+    V4_SCHEMA_VERSION,
+    V5_SCHEMA_VERSION,
+)
 
 
 def _plain(value: Any) -> Any:
@@ -38,8 +45,21 @@ class PlanSource:
     format: str
     text: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.format, str) or not self.format:
+            raise ValueError("source format must be a non-empty string")
+        if not isinstance(self.text, str):
+            raise ValueError("source text must be a string")
+
+    @property
+    def sha256(self) -> str:
+        return source_text_hash(self.text)
+
     def to_dict(self) -> dict[str, Any]:
         return {"format": self.format, "text": self.text}
+
+    def to_portable_dict(self) -> dict[str, str]:
+        return {**self.to_dict(), "sha256": self.sha256}
 
 
 @dataclass(frozen=True, slots=True)
@@ -1783,7 +1803,7 @@ class LinguisticProvenance:
 
 @dataclass(frozen=True, slots=True)
 class FlowPlan:
-    """Compact v5 renderer-facing plan model, independent of compiler lookup tables."""
+    """Compact renderer-facing plan model with v5 read compatibility and v6 source provenance."""
 
     language: str
     unit: Literal["sentence", "paragraph"]
@@ -1794,22 +1814,37 @@ class FlowPlan:
     producer: Mapping[str, Any] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
     format: str = FORMAT
-    schema_version: int = 5
-    hash_schema: str = "utterplan-flow-v1"
+    schema_version: int = CURRENT_SCHEMA_VERSION
+    hash_schema: str = FLOW_HASH_SCHEMA
+    source: PlanSource | None = None
 
     def __post_init__(self) -> None:
         if self.format != FORMAT:
             raise PlanValidationError("format must be 'utterplan'", code="format.invalid")
-        if type(self.schema_version) is not int or self.schema_version != 5:
-            raise PlanValidationError("FlowPlan requires schema version 5", code="schema.version")
+        if type(self.schema_version) is not int or self.schema_version not in {
+            V5_SCHEMA_VERSION,
+            CURRENT_SCHEMA_VERSION,
+        }:
+            raise PlanValidationError(
+                "FlowPlan requires schema version 5 or 6", code="schema.version"
+            )
         if not isinstance(self.language, str) or not self.language:
             raise PlanValidationError(
                 "language must be a non-empty string", code="language.invalid"
             )
         if not isinstance(self.unit, str) or self.unit not in {"sentence", "paragraph"}:
             raise PlanValidationError("unit must be sentence or paragraph", code="unit.invalid")
-        if self.hash_schema != FLOW_HASH_SCHEMA:
+        expected_hash_schema = (
+            V5_FLOW_HASH_SCHEMA if self.schema_version == V5_SCHEMA_VERSION else FLOW_HASH_SCHEMA
+        )
+        if self.hash_schema != expected_hash_schema:
             raise PlanValidationError("unsupported flow hash schema", code="flow.hash_schema")
+        if self.source is not None and not isinstance(self.source, PlanSource):
+            raise PlanValidationError("source must be PlanSource", code="source.type")
+        if self.schema_version == V5_SCHEMA_VERSION and self.source is not None:
+            raise PlanValidationError(
+                "schema-v5 plans cannot contain source provenance", code="source.version"
+            )
         if not isinstance(self.document, DocumentInfo):
             raise PlanValidationError("document must be DocumentInfo", code="document.type")
         if not isinstance(self.flow, tuple):
@@ -1845,7 +1880,7 @@ class FlowPlan:
             )
 
     def to_dict(self) -> dict[str, Any]:
-        """Return the v5 semantic consumer model, with no compiler graph."""
+        """Return the versioned semantic consumer model, with no compiler graph."""
         result: dict[str, Any] = {
             "format": self.format,
             "schema_version": self.schema_version,
@@ -1857,6 +1892,8 @@ class FlowPlan:
             "document": self.document.to_dict(),
             "linguistics": [item.to_dict() for item in self.linguistics],
         }
+        if self.source is not None:
+            result["source"] = self.source.to_portable_dict()
         if self.producer:
             result["producer"] = _plain(self.producer)
         if self.warnings:
@@ -1866,7 +1903,7 @@ class FlowPlan:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> FlowPlan:
         if not isinstance(data, Mapping):
-            raise PlanFormatError("v5 plan must be an object", code="plan.type")
+            raise PlanFormatError("flow plan must be an object", code="plan.type")
         allowed_root = {
             "format",
             "schema_version",
@@ -1876,15 +1913,14 @@ class FlowPlan:
             "hash_schema",
             "flow",
             "document",
+            "source",
             "linguistics",
             "producer",
             "warnings",
         }
         unknown = set(data) - allowed_root
         if unknown:
-            raise PlanFormatError(
-                f"unknown v5 plan fields: {sorted(unknown)}", code="field.unknown"
-            )
+            raise PlanFormatError(f"unknown plan fields: {sorted(unknown)}", code="field.unknown")
         required = {
             "format",
             "schema_version",
@@ -1897,14 +1933,21 @@ class FlowPlan:
         missing = required - set(data)
         if missing:
             raise PlanFormatError(
-                f"required v5 fields are missing: {sorted(missing)}", code="field.required"
+                f"required plan fields are missing: {sorted(missing)}", code="field.required"
             )
+        schema_version = data.get("schema_version")
         if (
             data.get("format") != FORMAT
-            or type(data.get("schema_version")) is not int
-            or data.get("schema_version") != 5
+            or type(schema_version) is not int
+            or schema_version not in {V5_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION}
         ):
-            raise PlanFormatError("expected schema-v5 UtterPlan", code="schema.version")
+            raise PlanFormatError(
+                "expected schema-v5 or schema-v6 UtterPlan", code="schema.version"
+            )
+        if schema_version == V5_SCHEMA_VERSION and "source" in data:
+            raise PlanFormatError(
+                "schema-v5 plans cannot contain source provenance", code="source.version"
+            )
         language = data.get("language")
         if not isinstance(language, str) or not language:
             raise PlanFormatError("language must be a non-empty string", code="language.invalid")
@@ -2128,6 +2171,38 @@ class FlowPlan:
             except (TypeError, ValueError) as exc:
                 raise PlanFormatError(str(exc), code="linguistics.record", path=path) from exc
 
+        source: PlanSource | None = None
+        if "source" in data:
+            raw_source = data.get("source")
+            if not isinstance(raw_source, Mapping):
+                raise PlanFormatError(
+                    "source must be an object", code="source.type", path="$.source"
+                )
+            if set(raw_source) != {"format", "text", "sha256"}:
+                raise PlanFormatError(
+                    "source requires exactly format, text, and sha256",
+                    code="source.fields",
+                    path="$.source",
+                )
+            source_format, source_text, source_digest = (
+                raw_source.get("format"),
+                raw_source.get("text"),
+                raw_source.get("sha256"),
+            )
+            if not isinstance(source_format, str) or not isinstance(source_text, str):
+                raise PlanFormatError(
+                    "source format and text must be strings", code="source.type", path="$.source"
+                )
+            try:
+                source = PlanSource(source_format, source_text)
+            except ValueError as exc:
+                raise PlanFormatError(str(exc), code="source.invalid", path="$.source") from exc
+            if not isinstance(source_digest, str) or source_digest != source.sha256:
+                raise PlanFormatError(
+                    "source SHA-256 does not match exact UTF-8 source text",
+                    code="source.hash",
+                    path="$.source.sha256",
+                )
         producer = data.get("producer", {})
         warnings = data.get("warnings", [])
         if not isinstance(producer, Mapping):
@@ -2142,12 +2217,16 @@ class FlowPlan:
             flow=tuple(flow),
             document=document,
             linguistics=tuple(linguistics),
+            source=source,
             plan_id=data.get("plan_id", ""),
             producer=dict(producer),
             warnings=tuple(warnings),
             format=data.get("format", FORMAT),
-            schema_version=data.get("schema_version", 5),
-            hash_schema=data.get("hash_schema", FLOW_HASH_SCHEMA),
+            schema_version=data.get("schema_version", CURRENT_SCHEMA_VERSION),
+            hash_schema=data.get(
+                "hash_schema",
+                V5_FLOW_HASH_SCHEMA if schema_version == V5_SCHEMA_VERSION else FLOW_HASH_SCHEMA,
+            ),
         )
 
     def validate(self) -> None:
@@ -2173,7 +2252,9 @@ class FlowPlan:
 
         result = loads_toml(value)
         if not isinstance(result, cls):
-            raise PlanFormatError("TOML did not decode to a v5 FlowPlan", code="schema.version")
+            raise PlanFormatError(
+                "TOML did not decode to a current FlowPlan", code="schema.version"
+            )
         return result
 
     @classmethod

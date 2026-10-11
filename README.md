@@ -184,9 +184,9 @@ renderer repository rather than UtterPlan's test suite.
 
 ## Versions
 
-The package version is dynamically derived from Git tags by setuptools-scm. Package version and UtterPlan schema version are independent. Current `.utterplan.toml` plans use semantic schema v5. Historical JSON Schemas v1–v4 remain immutable and supported through sequential migrations; v5 deliberately has no JSON Schema resource because its canonical executable contract is the validated TOML/FlowPlan model.
+The package version is dynamically derived from Git tags by setuptools-scm. Package version and UtterPlan schema version are independent. Current `.utterplan.toml` plans use semantic schema v6. Historical JSON Schemas v1–v4 remain immutable and supported through sequential migrations; schemas v5 and v6 use their versioned TOML/FlowPlan contracts and have no JSON Schema resources.
 
-Schema v5 is a breaking redesign around ordered flow units and segment-local semantics. It preserves deterministic output and moves preparation/source provenance to an optional TOML trace sidecar, which does not affect plan identity. Migration converts serialized plan data only: v1–v4 migrate sequentially to v5 without reparsing, NLP, planning, G2P, rendering, or audio processing. The v4-to-v5 projection fails safely when historical token coordinates or pause semantics cannot be verified.
+Schema v5 introduced ordered flow units and segment-local semantics. Schema v6 adds an optional portable record of exact raw input and a new plan-identity hash that incorporates its SHA-256 digest when available. Flow-unit cache hashes remain unchanged. Frozen v5 plans remain readable and migrate sequentially to v6 without inventing source text that was not serialized. Migrations operate on serialized plan data only; they do not reparse, run NLP, plan, call G2P, render, or process audio.
 
 ## Development
 

@@ -74,7 +74,7 @@ def test_item_three_failure_preserves_successes_and_continues_through_seventeen(
 
     report = dict(tomlkit.parse(report_path.read_text(encoding="utf-8")))
     assert report["format"] == "utterplan-compile-report"
-    assert report["version"] == 1
+    assert report["version"] == 2
     assert report["requested"] == 17
     assert report["written"] == 16
     assert report["failed"] == 1

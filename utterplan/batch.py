@@ -54,6 +54,9 @@ class CompileOutcome:
     output: Path
     source_label: str
     plan_id: str | None = None
+    preparation_mode: str | None = None
+    repair_details: tuple[Diagnostic, ...] = ()
+    degraded_linguistics: bool | None = None
     segments: int | None = None
     repairs: int = 0
     repair_diagnostics: tuple[Diagnostic, ...] = ()
@@ -218,6 +221,23 @@ def _compile_one(
         for diagnostic in result.diagnostics
         if diagnostic.code == "planning.renderability.repaired"
     )
+    repair_details = tuple(
+        sorted(
+            (
+                diagnostic
+                for diagnostic in result.diagnostics
+                if diagnostic.code.startswith("segmentation.")
+                or diagnostic.code == "planning.renderability.repaired"
+            ),
+            key=lambda diagnostic: (
+                diagnostic.source_start is None,
+                diagnostic.source_start if diagnostic.source_start is not None else 0,
+                diagnostic.source_end if diagnostic.source_end is not None else 0,
+                diagnostic.code,
+                diagnostic.message,
+            ),
+        )
+    )
     return CompileOutcome(
         id=request.id,
         index=index,
@@ -227,8 +247,14 @@ def _compile_one(
         source_label=source_label,
         plan_id=plan.plan_id,
         segments=sum(len(unit.segments) for unit in plan.flow),
-        repairs=len(repair_diagnostics),
+        repairs=len(repair_details),
         repair_diagnostics=repair_diagnostics,
+        repair_details=repair_details,
+        preparation_mode=result.preparation_mode,
+        degraded_linguistics=any(
+            diagnostic.code == "segmentation.token_metadata_degraded"
+            for diagnostic in repair_details
+        ),
         units=len(plan.flow),
     )
 
@@ -360,7 +386,7 @@ def _write_report(
 ) -> None:
     data: dict[str, object] = {
         "format": "utterplan-compile-report",
-        "version": 1,
+        "version": 2,
         "written": sum(outcome.status == "written" for outcome in outcomes),
         "failed": sum(outcome.status == "failed" for outcome in outcomes),
         "skipped": sum(outcome.status == "skipped" for outcome in outcomes),
@@ -379,7 +405,15 @@ def _write_report(
         }
         optional: dict[str, object | None] = {
             "plan_id": outcome.plan_id,
-            "repair_count": outcome.repairs if outcome.repairs else None,
+            "repair_count": outcome.repairs if outcome.status == "written" else None,
+            "repairs": [
+                {key: value for key, value in diagnostic.to_dict().items() if value is not None}
+                for diagnostic in outcome.repair_details
+            ]
+            if outcome.status == "written"
+            else None,
+            "preparation_mode": outcome.preparation_mode,
+            "degraded_linguistics": outcome.degraded_linguistics,
             "segments": outcome.segments,
             "units": outcome.units,
             "stage": outcome.stage,

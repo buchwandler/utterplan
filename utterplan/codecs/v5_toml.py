@@ -10,6 +10,7 @@ from tomlkit.exceptions import ParseError
 from tomlkit.items import DottedKey
 
 from ..exceptions import PlanFormatError
+from ..hashing import V5_FLOW_HASH_SCHEMA
 from ..model import FlowPlan
 
 _ROOT_KEYS = frozenset(
@@ -202,8 +203,12 @@ def _segment_to_wire(segment: Any, default_language: str) -> dict[str, Any]:
 
 
 def to_v5_toml_data(plan: FlowPlan) -> dict[str, Any]:
-    if not isinstance(plan, FlowPlan):
-        raise _error("v5 TOML serialization requires a FlowPlan", code="plan.type")
+    if not isinstance(plan, FlowPlan) or plan.schema_version != 5:
+        raise _error("v5 TOML serialization requires a schema-v5 FlowPlan", code="plan.type")
+    if plan.hash_schema != V5_FLOW_HASH_SCHEMA:
+        raise _error(
+            "v5 TOML serialization requires the frozen v1 flow hash", code="flow.hash_schema"
+        )
     plan.validate()
     result: dict[str, Any] = {
         "format": plan.format,
