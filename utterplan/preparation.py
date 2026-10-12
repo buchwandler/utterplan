@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 from .exceptions import PlanFormatError, TextPreparationError
 from .language import LanguageRun, language_lookup_key
 from .model import AnnotationSpan, BoundaryEvent, TextPreparationInfo
+from .parsers import ParsedDocument, normalize_ssmd_substitution_spans
 
 
 class SourceToSpokenMap(Protocol):
@@ -42,8 +43,27 @@ class SSMDSubstitutionPreparer:
         annotations: tuple[AnnotationSpan, ...] = (),
         boundaries: tuple[BoundaryEvent, ...] = (),
         analyses: tuple[Any, ...] = (),
+        parsed_document: ParsedDocument | None = None,
     ) -> PreparedText:
         del analyses  # SSMD substitutions do not need source linguistic analysis.
+        if parsed_document is not None:
+            if parsed_document.structural_text != text:
+                raise TextPreparationError("SSMD source mapping does not match structural text")
+            annotations = normalize_ssmd_substitution_spans(parsed_document, annotations)
+        else:
+            for annotation in annotations:
+                if "sub" not in annotation.attrs:
+                    continue
+                start, end = annotation.structural_start, annotation.structural_end
+                if type(start) is int and type(end) is int and 0 <= start < end <= len(text):
+                    target = text[start:end]
+                    if target[0].isspace() or target[-1].isspace():
+                        raise PlanFormatError(
+                            "SSMD sub annotation includes adjacent text that cannot be proven "
+                            "to belong to the replacement target without a parser source mapping",
+                            code="preparation.ssmd_sub_span_ambiguous",
+                            path=f"$.annotations.{annotation.id}",
+                        )
         active_runs = runs or (LanguageRun("lang-0", 0, len(text), language),)
         _validate_run_coverage(text, active_runs)
 

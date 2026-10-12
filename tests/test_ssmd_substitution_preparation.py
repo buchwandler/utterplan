@@ -8,6 +8,7 @@ import ttsready
 from tests.compiler_helpers import CompilerTestPlanner
 from utterplan import PlannerConfig
 from utterplan.exceptions import ConfigurationError, PlanFormatError
+from utterplan.flow_projection import project_compiler_plan
 from utterplan.language import LanguageRun
 from utterplan.model import AnnotationSpan, BoundaryEvent
 from utterplan.preparation import SSMDSubstitutionPreparer
@@ -153,3 +154,62 @@ def test_substitution_conflicting_with_pronunciation_is_rejected() -> None:
         SSMDSubstitutionPreparer().prepare(
             "ART", "en-us", (LanguageRun("lang-0", 0, 3, "en-us"),), (substitution, pronunciation)
         )
+
+
+def test_nested_emphasis_substitution_preserves_whitespace_and_local_provenance() -> None:
+    source = (
+        'Three said, *Target [Null+1]{sub="Null plus one"} on approach*, '
+        "and included the direction vectors."
+    )
+    plan = _planner().plan(source)
+    expected = "Three said, Target Null plus one on approach, and included the direction vectors."
+
+    assert plan.texts.spoken == expected
+    assert "TargetNull" not in plan.texts.spoken
+    emphasized = [
+        segment
+        for segment in plan.segments
+        if segment.text.startswith("Target Null plus one on approach")
+    ]
+    assert len(emphasized) == 1
+    assert emphasized[0].text == "Target Null plus one on approach, "
+    assert emphasized[0].directives.emphasis is not None
+
+    flow = project_compiler_plan(plan)
+    replacement_segments = [
+        (segment, replacement)
+        for unit in flow.flow
+        for segment in unit.segments
+        for replacement in segment.replacements
+    ]
+    assert len(replacement_segments) == 1
+    segment, replacement = replacement_segments[0]
+    assert replacement.source == "Null+1"
+    assert replacement.surface(segment.text) == "Null plus one"
+    assert 0 < replacement.start < replacement.end < len(segment.text)
+    assert not any(
+        diagnostic.code == "segmentation.token_reanalyzed" for diagnostic in plan.diagnostics
+    )
+
+
+def test_substitution_span_with_unproven_edge_whitespace_fails_safely() -> None:
+    annotation = AnnotationSpan("sub-1", "sub", {"sub": "spoken"}, 0, 4)
+
+    with pytest.raises(PlanFormatError) as error:
+        SSMDSubstitutionPreparer().prepare(
+            " ART", "en-us", (LanguageRun("lang-0", 0, 4, "en-us"),), (annotation,)
+        )
+
+    assert error.value.code == "preparation.ssmd_sub_span_ambiguous"
+
+
+def test_segmentation_diagnostic_offsets_slice_raw_ssmd_source() -> None:
+    source = "Tar*get* is here."
+    plan = _planner().plan(source)
+    diagnostic = next(
+        item for item in plan.diagnostics if item.code == "segmentation.token_reanalyzed"
+    )
+
+    assert diagnostic.source_start is not None
+    assert diagnostic.source_end is not None
+    assert source[diagnostic.source_start : diagnostic.source_end] == "Tar*get"

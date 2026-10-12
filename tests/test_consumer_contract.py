@@ -9,6 +9,7 @@ from utterplan import (
     PlannerConfig,
     UtterancePlanner,
     compile_document,
+    preview_plan,
 )
 from utterplan.model import LegacyPauseKind
 
@@ -298,3 +299,52 @@ def test_trace_does_not_change_public_consumer_plan() -> None:
     assert traced.plan.to_toml() == plain.plan.to_toml()
     assert traced.plan.plan_id == plain.plan.plan_id
     assert_public_consumer_contract(traced.plan)
+
+
+def test_exact_substitution_sentence_previews_three_comma_clauses() -> None:
+    source = (
+        'Three said, *Target [Null+1]{sub="Null plus one"} on approach*, '
+        "and included the direction vectors."
+    )
+    result = compile_document(
+        source,
+        input_format="ssmd",
+        config=PlannerConfig(
+            language="en-us",
+            document_format="ssmd",
+            text_preparation="auto",
+            linguistics=LinguisticsConfig(use_spacy=False),
+        ),
+    )
+    plan = result.plan
+    original_toml = plan.to_toml()
+    original_id = plan.plan_id
+    segments = [segment for unit in plan.flow for segment in unit.segments]
+
+    assert "".join(segment.text for segment in segments) == (
+        "Three said, Target Null plus one on approach, and included the direction vectors."
+    )
+    emphasis = next(segment for segment in segments if segment.directives.emphasis is not None)
+    assert emphasis.text == "Target Null plus one on approach, "
+    assert len(emphasis.replacements) == 1
+    replacement = emphasis.replacements[0]
+    assert emphasis.text[replacement.start : replacement.end] == "Null plus one"
+
+    sentence = preview_plan(plan, chunk_by="sentence", pause_policy="automatic")
+    clauses = preview_plan(plan, chunk_by="clause", pause_policy="automatic")
+    assert len(sentence) == 1
+    assert (
+        sentence[0].text
+        == "Three said, Target Null plus one on approach, and included the direction vectors."
+    )
+    assert [chunk.text for chunk in clauses] == [
+        "Three said, ",
+        "Target Null plus one on approach, ",
+        "and included the direction vectors.",
+    ]
+    assert [chunk.automatic_pause for chunk in clauses] == ["clause", "clause", "sentence"]
+    assert [chunk.boundary_after for chunk in clauses] == [("clause",), ("clause",), ()]
+
+    assert plan.to_toml() == original_toml
+    assert plan.plan_id == original_id
+    assert_public_consumer_contract(plan)

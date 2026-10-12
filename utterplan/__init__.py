@@ -66,6 +66,14 @@ from .model import (
     VoiceDirective,
 )
 from .planner import UtterancePlanner
+from .preview import (
+    ChunkMode,
+    PausePolicy,
+    PreviewChunk,
+    SegmentRef,
+    preview_plan,
+    resolve_segment_selector,
+)
 from .progress import PlannerProgressEvent, ProgressCallback, ProgressKind, ProgressPhase
 from .renderability import (
     RenderabilityAction,
@@ -111,6 +119,12 @@ __all__ = [
     "LinguisticsConfig",
     "SSMDConfig",
     "UtterancePlanner",
+    "ChunkMode",
+    "PausePolicy",
+    "PreviewChunk",
+    "SegmentRef",
+    "preview_plan",
+    "resolve_segment_selector",
     "PlannerProgressEvent",
     "RenderabilityAction",
     "RenderabilityIssue",

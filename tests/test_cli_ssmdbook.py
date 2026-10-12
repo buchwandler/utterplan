@@ -8,8 +8,10 @@ from types import SimpleNamespace
 import pytest
 import tomlkit
 
-from utterplan import FlowPlan
+import utterplan.batch as batch_module
+from utterplan import Diagnostic, FlowPlan, FlowSegment, FlowUnit
 from utterplan.cli import build_parser, main
+from utterplan.compiler import CompileResult
 
 
 def _ssmd(text: str) -> str:
@@ -60,6 +62,66 @@ def _plan_text(path: Path) -> str:
     plan = FlowPlan.load(path)
     assert plan.schema_version == 7
     return " ".join(segment.text for unit in plan.flow for segment in unit.segments)
+
+
+@pytest.mark.parametrize(
+    ("verbosity", "show_info", "show_warning"),
+    [("warnings", False, True), ("all", True, True), ("none", False, False)],
+)
+def test_compile_book_diagnostic_verbosity_keeps_full_report(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    verbosity: str,
+    show_info: bool,
+    show_warning: bool,
+) -> None:
+    root = tmp_path / f"diagnostics-{verbosity}.ssmdbook"
+    _write_book(root, (5,), contents={5: _ssmd("A sentence.")})
+    plan = FlowPlan(
+        language="en-US",
+        flow=(FlowUnit((FlowSegment("A sentence.", "en-US"),)),),
+    )
+    diagnostics = (
+        Diagnostic("segmentation.token_reanalyzed", "token reanalyzed", severity="info"),
+        Diagnostic(
+            "segmentation.token_metadata_degraded",
+            "token metadata degraded",
+            severity="warning",
+            source_start=2,
+            source_end=5,
+        ),
+    )
+    monkeypatch.setattr(
+        batch_module,
+        "compile_document",
+        lambda *_args, **_kwargs: CompileResult(
+            plan=plan, diagnostics=diagnostics, preparation_mode="ssmd"
+        ),
+    )
+
+    result = main(["compile-book", str(root), "--chapters", "5", "--diagnostics", verbosity])
+    captured = capsys.readouterr()
+    assert result == 0
+    assert ("segmentation.token_reanalyzed" in captured.err) is show_info
+    assert ("segmentation.token_metadata_degraded" in captured.err) is show_warning
+    if verbosity == "all":
+        assert "info: 1" in captured.err
+        assert "warnings: 1" in captured.err
+    elif verbosity == "warnings":
+        assert "warnings: 1" in captured.err
+    else:
+        assert "warnings: 1" not in captured.err
+
+    item = _report(root / "utterplan/compile-report.toml")["item"][0]
+    assert item["diagnostic_count"] == 2
+    assert item["info_count"] == 1
+    assert item["warning_count"] == 1
+    assert item["renderability_repair_count"] == 0
+    assert {diagnostic["code"] for diagnostic in item["diagnostics"]} == {
+        "segmentation.token_reanalyzed",
+        "segmentation.token_metadata_degraded",
+    }
 
 
 def test_compile_book_root_range_defaults_to_utterplan_and_writes_v6_plans(
@@ -124,11 +186,15 @@ def test_compile_book_report_records_ssmd_mode_and_repaired_cut_details(
     captured = capsys.readouterr()
 
     assert result == 0
-    assert "preparation mode: ssmd; repairs:" in captured.err
-    assert "segmentation.lexical_boundary_merged at source:" in captured.err
+    assert "preparation: ssmd; linguistics: full" in captured.err
+    assert "segmentation.lexical_boundary_merged" not in captured.err
     item = _report(root / "utterplan/compile-report.toml")["item"][0]
     assert item["preparation_mode"] == "ssmd"
     assert item["repair_count"] >= 1
+    assert any(
+        diagnostic["code"] == "segmentation.lexical_boundary_merged"
+        for diagnostic in item["diagnostics"]
+    )
     assert any(
         repair["code"] == "segmentation.lexical_boundary_merged" for repair in item["repairs"]
     )

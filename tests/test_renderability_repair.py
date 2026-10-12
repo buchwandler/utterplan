@@ -107,10 +107,10 @@ def test_default_repairs_exact_comma_space_with_isolated_planner_topology(
     plan = UtterancePlanner(config).plan(source)
 
     assert plan.document_metadata["planning"]["renderability"]["guaranteed"] is True
-    assert plan.segments[1].text == ", after"
+    assert [segment.text for segment in plan.segments] == ["Before, ", "after"]
     repaired = [item for item in plan.diagnostics if item.code == "planning.renderability.repaired"]
     assert len(repaired) == 1
-    assert "', '" in repaired[0].message
+    assert "into the previous spoken segment" in repaired[0].message
 
     strict = UtterancePlanner(replace(config, renderability_mode="strict"))
     with pytest.raises(PlanRenderabilityError) as error:
@@ -119,8 +119,8 @@ def test_default_repairs_exact_comma_space_with_isolated_planner_topology(
     assert issue.text == ", "
     assert issue.repair_assessment is not None
     assert issue.repair_assessment.safe is True
-    assert issue.repair_assessment.action == "merge_next"
-    assert "Automatic repair: safe; merge with the following spoken segment." in str(error.value)
+    assert issue.repair_assessment.action == "merge_previous"
+    assert "Automatic repair: safe; merge with the previous spoken segment." in str(error.value)
     assert "Spoken context:" in str(error.value)
 
 

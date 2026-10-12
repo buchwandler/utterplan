@@ -310,3 +310,4 @@ def test_compile_many_parser_defaults_to_repair_and_continue() -> None:
     assert args.renderability == "repair"
     assert args.fail_fast is False
     assert args.spacy == "auto"
+    assert args.diagnostics == "warnings"

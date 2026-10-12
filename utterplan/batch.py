@@ -56,6 +56,7 @@ class CompileOutcome:
     plan_id: str | None = None
     preparation_mode: str | None = None
     repair_details: tuple[Diagnostic, ...] = ()
+    diagnostics: tuple[Diagnostic, ...] = ()
     degraded_linguistics: bool | None = None
     segments: int | None = None
     repairs: int = 0
@@ -250,6 +251,7 @@ def _compile_one(
         repairs=len(repair_details),
         repair_diagnostics=repair_diagnostics,
         repair_details=repair_details,
+        diagnostics=tuple(result.diagnostics),
         preparation_mode=result.preparation_mode,
         degraded_linguistics=any(
             diagnostic.code == "segmentation.token_metadata_degraded"
@@ -406,6 +408,25 @@ def _write_report(
         optional: dict[str, object | None] = {
             "plan_id": outcome.plan_id,
             "repair_count": outcome.repairs if outcome.status == "written" else None,
+            "diagnostic_count": len(outcome.diagnostics) if outcome.status == "written" else None,
+            "info_count": sum(item.severity == "info" for item in outcome.diagnostics)
+            if outcome.status == "written"
+            else None,
+            "warning_count": sum(item.severity == "warning" for item in outcome.diagnostics)
+            if outcome.status == "written"
+            else None,
+            "error_count": sum(item.severity == "error" for item in outcome.diagnostics)
+            if outcome.status == "written"
+            else None,
+            "renderability_repair_count": len(outcome.repair_diagnostics)
+            if outcome.status == "written"
+            else None,
+            "diagnostics": [
+                {key: value for key, value in diagnostic.to_dict().items() if value is not None}
+                for diagnostic in outcome.diagnostics
+            ]
+            if outcome.status == "written"
+            else None,
             "repairs": [
                 {key: value for key, value in diagnostic.to_dict().items() if value is not None}
                 for diagnostic in outcome.repair_details

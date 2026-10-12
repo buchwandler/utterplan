@@ -20,6 +20,7 @@ from .exceptions import PlanFormatError, PlanRenderabilityError, UtterPlanError
 from .explain import format_explanation
 from .migration import MigrationResult, migrate_plan_data
 from .model import FlowPlan, PauseIntent
+from .preview import PreviewChunk, preview_plan
 from .renderability import format_renderability_error
 from .ssmdbook import (
     SSMDBookError,
@@ -37,6 +38,7 @@ _EXAMPLES = """examples:
   utterplan compile-many chapters/*.ssmd --output-dir build/plans
   utterplan compile-book chapters --chapters 5-17
   utterplan validate chapter.utterplan.toml
+  utterplan preview chapter.utterplan.toml --chunk-by sentence --pause-policy native
   utterplan inspect chapter.utterplan.toml --segment 0
   utterplan inspect-attempt attempt.toml --issues
   utterplan explain chapter.utterplan.toml
@@ -149,6 +151,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     batch_parser.add_argument("--report", type=Path, help="TOML operational report path")
 
+    batch_parser.add_argument(
+        "--diagnostics",
+        choices=("warnings", "all", "none"),
+        default="warnings",
+        help="diagnostic detail verbosity (default: warnings)",
+    )
     book_parser = commands.add_parser(
         "compile-book",
         help="compile selected chapters from an ssmdbook workspace",
@@ -195,6 +203,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--fail-fast", action="store_true", help="skip remaining chapters after the first failure"
     )
     book_parser.add_argument("--report", type=Path, help="TOML operational report path")
+    book_parser.add_argument(
+        "--diagnostics",
+        choices=("warnings", "all", "none"),
+        default="warnings",
+        help="diagnostic detail verbosity (default: warnings)",
+    )
     validate_parser = commands.add_parser(
         "validate", help="validate a source document or saved semantic plan"
     )
@@ -231,6 +245,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="include IDs, offsets, provenance, and plan identity details",
     )
     explain_parser.add_argument("--trace", type=Path, help="optional compiler trace sidecar")
+    preview_parser = commands.add_parser(
+        "preview", help="project a saved plan into renderer-neutral downstream chunks"
+    )
+    preview_parser.add_argument("input", type=Path, help="saved schema-v7 .utterplan.toml plan")
+    preview_parser.add_argument(
+        "--segments",
+        metavar="SELECTOR",
+        help="global zero-based segment indexes: N, N-M, comma lists, or all",
+    )
+    preview_parser.add_argument(
+        "--chunk-by",
+        choices=("segment", "clause", "sentence", "paragraph"),
+        default="sentence",
+        help="downstream chunk grouping (default: sentence)",
+    )
+    preview_parser.add_argument(
+        "--pause-policy",
+        choices=("native", "automatic", "manual"),
+        default="native",
+        help="pause projection policy (default: native)",
+    )
+    preview_parser.add_argument(
+        "--details", action="store_true", help="show stored constituent segments and local facts"
+    )
+    preview_parser.add_argument(
+        "--json", action="store_true", help="emit stable machine-readable preview data"
+    )
     inspect_parser = commands.add_parser("inspect", help="inspect a saved TTS plan")
     inspect_parser.add_argument("input", type=Path)
     inspect_parser.add_argument("--unit", type=int)
@@ -398,6 +439,7 @@ def _run_compile_requests(
     force: bool,
     report_path: Path,
     include_ids: bool = False,
+    diagnostics: Literal["warnings", "all", "none"] = "warnings",
 ) -> int:
     outcomes: list[CompileOutcome] = []
     iterator = iter(
@@ -419,33 +461,14 @@ def _run_compile_requests(
         outcomes.append(outcome)
         if outcome.status == "written":
             written += 1
-            for diagnostic in outcome.repair_diagnostics:
-                location = (
-                    f"{diagnostic.line}:{diagnostic.column}"
-                    if diagnostic.line is not None and diagnostic.column is not None
-                    else "source"
-                )
-                print(f"       repaired at {location}: {diagnostic.message}", file=sys.stderr)
             if include_ids:
                 mode = outcome.preparation_mode or "unknown"
-                degraded = "yes" if outcome.degraded_linguistics else "no"
+                linguistics = "degraded" if outcome.degraded_linguistics else "full"
                 print(
-                    f"       preparation mode: {mode}; repairs: {outcome.repairs}; "
-                    f"degraded linguistics: {degraded}",
+                    f"       preparation: {mode}; linguistics: {linguistics}",
                     file=sys.stderr,
                 )
-                for diagnostic in outcome.repair_details:
-                    if diagnostic.code == "planning.renderability.repaired":
-                        continue
-                    source_range = (
-                        f"source[{diagnostic.source_start}:{diagnostic.source_end}]"
-                        if diagnostic.source_start is not None and diagnostic.source_end is not None
-                        else "source"
-                    )
-                    print(
-                        f"       {diagnostic.code} at {source_range}: {diagnostic.message}",
-                        file=sys.stderr,
-                    )
+            _print_batch_diagnostics(outcome, verbosity=diagnostics)
             print(f"       wrote {outcome.output}", file=sys.stderr)
         elif outcome.status == "failed":
             print("       FAILED", file=sys.stderr)
@@ -491,6 +514,45 @@ def _run_compile_requests(
     return 1 if failed else 0
 
 
+def _print_batch_diagnostics(
+    outcome: CompileOutcome,
+    *,
+    verbosity: Literal["warnings", "all", "none"],
+) -> None:
+    if verbosity == "all":
+        selected = outcome.diagnostics
+        labels = (("info", "info"), ("warning", "warnings"), ("error", "errors"))
+    elif verbosity == "warnings":
+        selected = tuple(
+            diagnostic
+            for diagnostic in outcome.diagnostics
+            if diagnostic.severity in {"warning", "error"}
+        )
+        labels = (("warning", "warnings"), ("error", "errors"))
+    else:
+        selected = tuple(
+            diagnostic for diagnostic in outcome.diagnostics if diagnostic.severity == "error"
+        )
+        labels = (("error", "errors"),)
+
+    for severity, label in labels:
+        count = sum(diagnostic.severity == severity for diagnostic in selected)
+        if count:
+            print(f"       {label}: {count}", file=sys.stderr)
+    for diagnostic in selected:
+        location = (
+            f"source[{diagnostic.source_start}:{diagnostic.source_end}]"
+            if diagnostic.source_start is not None and diagnostic.source_end is not None
+            else f"{diagnostic.line}:{diagnostic.column}"
+            if diagnostic.line is not None and diagnostic.column is not None
+            else "source"
+        )
+        print(
+            f"       {diagnostic.code} at {location}: {diagnostic.message}",
+            file=sys.stderr,
+        )
+
+
 def _compile_many(args: argparse.Namespace) -> int:
     sources: list[Path] = args.inputs
     outputs = [args.output_dir / _batch_output_name(source) for source in sources]
@@ -525,6 +587,7 @@ def _compile_many(args: argparse.Namespace) -> int:
         fail_fast=args.fail_fast,
         force=args.force,
         report_path=report_path,
+        diagnostics=args.diagnostics,
     )
 
 
@@ -601,6 +664,7 @@ def _compile_book(args: argparse.Namespace) -> int:
         force=args.force,
         report_path=report_path,
         include_ids=True,
+        diagnostics=args.diagnostics,
     )
 
 
@@ -825,6 +889,9 @@ def main(argv: list[str] | None = None) -> int:
             _inspect_trace(loads_trace(args.input.read_text(encoding="utf-8")), args)
             return 0
         plan = _load_plan_file(args.input)
+        if args.command == "preview":
+            _preview(plan, args)
+            return 0
         if args.command == "explain":
             trace = loads_trace(args.trace.read_text(encoding="utf-8")) if args.trace else None
             print(format_explanation(plan, details=args.details, trace=trace), end="")
@@ -840,6 +907,128 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, UtterPlanError, ValueError, TypeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
+
+
+def _preview(plan: FlowPlan, args: argparse.Namespace) -> None:
+    chunks = preview_plan(
+        plan,
+        segments=args.segments,
+        chunk_by=args.chunk_by,
+        pause_policy=args.pause_policy,
+    )
+    values: list[dict[str, object]] = []
+    for chunk in chunks:
+        value = chunk.to_dict()
+        if args.details:
+            value["constituents"] = _preview_constituents(plan, chunk)
+        values.append(value)
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "format": "utterplan-preview",
+                    "version": 1,
+                    "plan_id": plan.plan_id,
+                    "chunk_by": args.chunk_by,
+                    "pause_policy": args.pause_policy,
+                    "chunks": values,
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+
+    for chunk in chunks:
+        suffix = _preview_pause_label(chunk, args.pause_policy)
+        line = f"[{chunk.index}] {json.dumps(chunk.text, ensure_ascii=False)}"
+        if suffix:
+            line += f"  {suffix}"
+        print(line)
+        if args.details:
+            print(f"    boundary.before: {', '.join(chunk.boundary_before) or '-'}")
+            print(f"    boundary.after:  {', '.join(chunk.boundary_after) or '-'}")
+            constituents = _preview_constituents(plan, chunk)
+            for ref, facts in zip(chunk.segments, constituents, strict=True):
+                segment = plan.flow[ref.unit_index].segments[ref.local_index]
+                print(
+                    f"    segment[{ref.global_index}] unit={ref.unit_index} local={ref.local_index}: "
+                    f"{json.dumps(segment.text, ensure_ascii=False)}"
+                )
+                for key in (
+                    "language",
+                    "pause_before",
+                    "pause_after",
+                    "directives",
+                    "tokens",
+                    "replacements",
+                    "markers",
+                    "heading",
+                ):
+                    value = facts.get(key)
+                    if value not in (None, [], {}):
+                        print(
+                            f"      {key}: {json.dumps(value, ensure_ascii=False, sort_keys=True)}"
+                        )
+
+
+def _preview_constituents(plan: FlowPlan, chunk: PreviewChunk) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    for ref in chunk.segments:
+        segment = plan.flow[ref.unit_index].segments[ref.local_index]
+        result.append(
+            {
+                "ref": ref.to_dict(),
+                "text": segment.text,
+                "language": segment.language,
+                "boundary_before": list(segment.boundary_before),
+                "boundary_after": list(segment.boundary_after),
+                "pause_before": (
+                    segment.pause_before.to_dict() if segment.pause_before is not None else None
+                ),
+                "pause_after": (
+                    segment.pause_after.to_dict() if segment.pause_after is not None else None
+                ),
+                "directives": segment.directives.to_dict(),
+                "tokens": [token.to_dict() for token in segment.tokens],
+                "replacements": [replacement.to_dict() for replacement in segment.replacements],
+                "markers": list(segment.markers),
+                "heading": segment.heading,
+            }
+        )
+    return result
+
+
+def _preview_pause_label(chunk: PreviewChunk, policy: str) -> str:
+    labels: list[str] = []
+    before = chunk.authored_pause_before
+    after = chunk.authored_pause_after
+    if before is not None:
+        labels.append(f"pause.before.authored={_pause_label(before)}")
+    if after is not None:
+        labels.append(f"pause.authored={_pause_label(after)}")
+
+    automatic = chunk.automatic_pause
+    if automatic is not None:
+        boundary = automatic
+        if automatic == "clause" and chunk.text.rstrip().endswith(","):
+            boundary += " (comma)"
+        if policy == "manual":
+            if after is not None and after.type != "none":
+                labels.append(f"boundary={boundary}")
+            else:
+                labels.append(f"pause={boundary}")
+        elif policy == "automatic":
+            labels.append(f"pause={boundary}")
+    return " ".join(labels)
+
+
+def _pause_label(pause: PauseIntent) -> str:
+    if pause.type == "timed":
+        return pause.time if pause.time is not None else "timed"
+    return pause.type
 
 
 def _inspect(plan: FlowPlan, args: argparse.Namespace) -> None:

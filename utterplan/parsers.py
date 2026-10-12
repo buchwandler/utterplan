@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from typing import Any, Literal
 
@@ -190,6 +190,12 @@ class SSMDDocumentParser:
             )
             for i, (position, kind, attrs, source_start, source_end) in enumerate(recovered_audio)
         )
+        parsed_source = ParsedDocument(
+            source_text=text,
+            structural_text=structural,
+            text_spans=text_spans,
+        )
+        annotations = normalize_ssmd_substitution_spans(parsed_source, annotations)
         boundaries: list[BoundaryEvent] = []
         markers: list[Marker] = []
         warnings = [str(value) for value in parsed.warnings]
@@ -350,6 +356,104 @@ def map_structural_span_to_source(
     return (
         min(span.source_start for span in overlapping),
         max(span.source_end for span in overlapping),
+    )
+
+
+def normalize_ssmd_substitution_spans(
+    parsed: ParsedDocument,
+    annotations: tuple[AnnotationSpan, ...],
+) -> tuple[AnnotationSpan, ...]:
+    """Exclude parser-inserted edge whitespace only when source mapping proves ownership."""
+    normalized: list[AnnotationSpan] = []
+    for annotation in annotations:
+        if "sub" not in annotation.attrs:
+            normalized.append(annotation)
+            continue
+        start, end = annotation.structural_start, annotation.structural_end
+        if (
+            type(start) is not int
+            or type(end) is not int
+            or not 0 <= start < end <= len(parsed.structural_text)
+            or not _has_complete_structural_mapping(parsed, start, end)
+        ):
+            raise _ssmd_sub_span_ambiguous(annotation, "parser source mapping is incomplete")
+        source_start, source_end = map_structural_span_to_source(parsed, start, end)
+        if source_start is None or source_end is None:
+            raise _ssmd_sub_span_ambiguous(annotation, "parser source mapping is unavailable")
+        if (
+            type(annotation.source_start) is not int
+            or type(annotation.source_end) is not int
+            or not annotation.source_start <= source_start < source_end <= annotation.source_end
+        ):
+            raise _ssmd_sub_span_ambiguous(
+                annotation, "mapped target is outside the authored sub annotation"
+            )
+
+        structural_surface = parsed.structural_text[start:end]
+        source_surface = parsed.source_text[source_start:source_end]
+        if structural_surface == source_surface:
+            normalized.append(annotation)
+            continue
+
+        candidates: list[AnnotationSpan] = []
+        leading = 0
+        while leading < len(structural_surface) and structural_surface[leading].isspace():
+            leading += 1
+            if leading < len(structural_surface) and structural_surface[leading:] == source_surface:
+                candidates.append(replace(annotation, structural_start=start + leading))
+
+        trailing = 0
+        while (
+            trailing < len(structural_surface)
+            and structural_surface[len(structural_surface) - trailing - 1].isspace()
+        ):
+            trailing += 1
+            if (
+                trailing < len(structural_surface)
+                and structural_surface[:-trailing] == source_surface
+            ):
+                candidates.append(replace(annotation, structural_end=end - trailing))
+
+        if len(candidates) != 1:
+            raise _ssmd_sub_span_ambiguous(
+                annotation,
+                "edge whitespace cannot be distinguished safely from authored replacement text",
+            )
+        normalized.append(candidates[0])
+    return tuple(normalized)
+
+
+def _has_complete_structural_mapping(parsed: ParsedDocument, start: int, end: int) -> bool:
+    spans = sorted(
+        (
+            span
+            for span in parsed.text_spans
+            if 0 <= span.structural_start < span.structural_end <= len(parsed.structural_text)
+            and 0 <= span.source_start <= span.source_end <= len(parsed.source_text)
+        ),
+        key=lambda span: (span.structural_start, span.structural_end),
+    )
+    cursor = start
+    for span in spans:
+        if span.structural_end <= cursor:
+            continue
+        if span.structural_start > cursor:
+            return False
+        cursor = min(end, span.structural_end)
+        if cursor == end:
+            return True
+    return False
+
+
+def _ssmd_sub_span_ambiguous(annotation: AnnotationSpan, reason: str) -> PlanFormatError:
+    source_range = ""
+    if annotation.source_start is not None and annotation.source_end is not None:
+        source_range = f"; SSMD source range [{annotation.source_start}:{annotation.source_end})"
+    return PlanFormatError(
+        "SSMD sub annotation includes adjacent text that cannot be proven to belong "
+        f"to the replacement target ({reason}){source_range}",
+        code="preparation.ssmd_sub_span_ambiguous",
+        path=f"$.annotations.{annotation.id}",
     )
 
 

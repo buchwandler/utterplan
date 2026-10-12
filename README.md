@@ -39,7 +39,7 @@ Compile independent documents incrementally; every successful plan is saved imme
 utterplan compile-many examples/*.ssmd --output-dir build/plans
 ```
 
-This writes one `.utterplan.toml` per source plus an atomically refreshed `compile-report.toml`. Use `--fail-fast` to skip later inputs after a failure, `--force` to replace existing plans, or `--report PATH` to choose another report location.
+This writes one `.utterplan.toml` per source plus an atomically refreshed `compile-report.toml`. Terminal diagnostics default to warnings; `--diagnostics all` also prints informational records, while `--diagnostics none` suppresses non-failure details. Failures are always reported, and the operational report retains every diagnostic. Use `--fail-fast` to skip later inputs after a failure, `--force` to replace existing plans, or `--report PATH` to choose another report location.
 
 Compile a selected chapter range directly from an editable SSMDBook workspace:
 
@@ -60,7 +60,7 @@ utterplan/
 └── chapter-0017.utterplan.toml
 ```
 
-Omit `--chapters` to compile all manifest chapters. Use comma-separated source-number selections for non-contiguous ranges, for example `utterplan compile-book chapters --chapters 1,3-5`. The book root itself is also accepted as input; see the [SSMDBook guide](docs/ssmdbook.md).
+Omit `--chapters` to compile all manifest chapters. Use comma-separated source-number selections for non-contiguous ranges, for example `utterplan compile-book chapters --chapters 1,3-5`. `--diagnostics warnings|all|none` defaults to warnings; failures are always shown and reports retain complete diagnostics. The book root itself is also accepted as input; see the [SSMDBook guide](docs/ssmdbook.md).
 The CLI also provides:
 
 ```bash
@@ -71,6 +71,7 @@ utterplan inspect chapter.utterplan.toml --boundaries --tokens
 utterplan explain chapter.utterplan.toml --trace chapter.trace.toml
 utterplan inspect-trace chapter.trace.toml --preparation --boundaries
 utterplan inspect-attempt chapter.attempt.toml --issues
+utterplan preview chapter.utterplan.toml --segments 58-62 --chunk-by clause --pause-policy automatic
 ```
 
 `explain` presents executable flow as a human-readable speech plan. Use `compile --trace PATH` to retain optional compiler provenance; `explain --trace PATH` and `inspect-trace` read that sidecar separately from the plan.
@@ -156,6 +157,15 @@ Callbacks run synchronously and exceptions propagate. See the [Python API guide]
 ## Renderer-consumer boundary
 
 Renderers consume `FlowPlan.flow` in order. Each `FlowUnit` contains local `FlowSegment` objects with already-prepared speech text, effective language, segment-local linguistic token views, canonical boundary opportunities, authored pause intents, directives, markers, and optional heading level. Token `start`/`end` offsets are Python-character indexes into that segment's `text`; they are never document-global coordinates. FlowUnits are fixed paragraph-local blocks, not renderer chunks; a `FlowSegment` is not necessarily one TTS call. `boundary_before` / `boundary_after` hold safe cut opportunities independently from authored `none`, strength, or timed pause intents. Consumers may choose sentence, paragraph, or engine-token-budget chunking and native, automatic, or manual pause realization; linguistic token views are not model-token counts.
+
+For renderer-neutral chunk tests and debugging, `preview_plan()` projects stored text and boundaries without changing the plan:
+
+```python
+from utterplan import FlowPlan, preview_plan
+
+plan = FlowPlan.load("chapter.utterplan.toml")
+chunks = preview_plan(plan, chunk_by="clause", pause_policy="automatic")
+```
 
 `FlowPlan.document` carries compact document metadata and `FlowPlan.linguistics` identifies the analysis provider without retaining provider documents. Compiler source, preparation maps, diagnostics, and renderability details belong only in an optional trace sidecar. Plans contain no phonemes, model token IDs, models, sessions, renderer configuration, provider documents, or audio. UtterPlan does not fetch media or execute extension handlers.
 The intended dependency direction is:

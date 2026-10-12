@@ -38,7 +38,7 @@ def test_canonical_ssmd_09_compiles_to_deterministic_v7_flow() -> None:
 
     assert plan == repeated
     assert plan.schema_version == 7
-    assert plan.plan_id == "sha256:620d293bb2b638b6a6ace0857ed8017259a0558e3660835f607791b9b4c67e47"
+    assert plan.plan_id == "sha256:e69c94cb70f67c51d94428d5a00563d2eed9cba03d1687366eaabe654df03df1"
     assert plan.document.format == "ssmd"
     assert plan.document.ssmd_version == "0.9"
     assert plan.document.title == "Renderer-neutral SSMD 0.9 contract"

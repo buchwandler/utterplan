@@ -64,6 +64,28 @@ for unit in plan.flow:
         )
 ```
 
+## Preview consumer chunks
+
+The pure `preview_plan()` API groups persisted segments without changing the plan or invoking parser, planner, linguistics, G2P, or a renderer. It uses the boundary inventory already stored in the `FlowPlan`; safe comma boundaries may be persisted as `clause` opportunities. Selection is a focus over global zero-based segment indexes, and selected indexes expand to their complete containing chunks.
+
+```python
+from utterplan import FlowPlan, preview_plan
+
+plan = FlowPlan.load("chapter.utterplan.toml")
+before, plan_id = plan.to_toml(), plan.plan_id
+chunks = preview_plan(
+    plan,
+    segments="58-62",
+    chunk_by="clause",
+    pause_policy="automatic",
+)
+for chunk in chunks:
+    print(chunk.index, repr(chunk.text), chunk.automatic_pause)
+assert plan.to_toml() == before and plan.plan_id == plan_id
+```
+
+`chunk_by` accepts `segment`, `clause`, `sentence`, or `paragraph`; `pause_policy` accepts `native`, `automatic`, or `manual`. Chunk text exactly concatenates stored `segment.text` and retains spaces at chunk boundaries. Automatic projection exposes saved boundary kinds, never fixed durations; manual projection keeps authored pause intent distinct. `PreviewChunk.segments` contains global/unit/local references, while tokens and replacement spans remain local to each stored segment. The CLI's `preview --json` output is versioned for consumer tests; `--details` shows those stored local facts rather than rewriting them to fabricated chunk offsets.
+
 `FlowPlan.document` retains compact document information such as format, title, SSMD version, and portable semantics. `FlowPlan.linguistics` identifies analysis provider/model provenance without retaining provider state. Compact replacement views preserve local prepared-text spans and original spellings. The optional `FlowPlan.source` record (introduced in v6 and retained in v7) retains exact raw input once (and may be absent on migrated v5 plans). Source offsets, complete preparation mappings, compiler diagnostics, and renderability details still require an optional trace sidecar.
 
 ## Optional compiler trace

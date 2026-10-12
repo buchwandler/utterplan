@@ -325,7 +325,7 @@ def test_semantic_clause_is_a_boundary_opportunity_not_a_pause_intent(monkeypatc
     )
 
 
-def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):
+def test_fallback_adds_comma_opportunity_without_syntactic_clause_detection(monkeypatch):
     import phrasplit
 
     def fail_if_called(*args, **kwargs):
@@ -340,8 +340,13 @@ def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):
         )
     ).plan("I wanted to go, but it was raining.")
 
-    assert not any(item.kind == "clausal_comma" for item in plan.boundaries)
-    assert not any(item.kind == "clause" for item in plan.semantic_boundaries)
+    assert any(
+        item.kind == "clausal_comma" and item.origin == "planner" for item in plan.boundaries
+    )
+    assert any(
+        item.kind == "clause" and item.attrs.get("separator_kind") == "comma"
+        for item in plan.semantic_boundaries
+    )
 
 
 def _fake_spacy_plan(

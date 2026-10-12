@@ -91,9 +91,9 @@ utterplan compile-many chapters/*.ssmd --output-dir build/plans \
 
 Source names determine output names: `chapter.ssmd`, `chapter.ssmd.md`, and `chapter.md` each map to `chapter.utterplan.toml`. Duplicate output names and a report path that collides with a plan output are rejected before any writes. Existing plans are protected unless `--force` is supplied. By default the command writes an atomically refreshed `compile-report.toml` in the output directory; the report is operational TOML, not a plan accepted by `FlowPlan.load()`.
 
-Compile reports use format version 2. Each successful item records its resolved `preparation_mode`, `repair_count`, deterministically ordered structured `repairs`, and a `degraded_linguistics` boolean. Repair entries include diagnostic codes/messages/severity and source ranges where available; source ranges use the original input's Python-character coordinates. Failed or skipped items have no preparation result. Reports remain operational metadata and do not affect plan output or incremental write behavior.
+Compile reports use format version 2. Each successful item records its resolved `preparation_mode`, diagnostic/severity counts, a complete structured `diagnostics` list, `renderability_repair_count`, and a `degraded_linguistics` boolean. For compatibility, `repair_count` and `repairs` remain; they include segmentation diagnostics (including informational ones) as well as renderability repairs, so they are not the terminal warning/repair summary. Diagnostic source ranges use original-input Python-character coordinates where available. Failed or skipped items have no preparation result. Reports remain operational metadata and do not affect plan output or incremental write behavior.
 
-Shared planning options include `--language`, `--input-format auto|plain|ssmd`, `--text-preparation`, `--spacy`, and `--renderability`. Progress, repair notices, actionable errors, and the final counts are written to stderr. Exit status is 0 if every input succeeds, 1 if any input fails, and 2 for usage errors such as output collisions. `--fail-fast` skips later requests after the first failure but preserves all completed outputs and updates the report.
+Shared planning options include `--language`, `--input-format auto|plain|ssmd`, `--text-preparation`, `--spacy`, and `--renderability`. `--diagnostics warnings|all|none` controls terminal detail (default `warnings`): warnings mode suppresses informational diagnostics, all includes them, and none suppresses non-failure diagnostics. Failures are always reported, and the operational report always retains complete diagnostics. Progress, selected diagnostic details, actionable errors, and final counts are written to stderr. Exit status is 0 if every input succeeds, 1 if any input fails, and 2 for usage errors such as output collisions. `--fail-fast` skips later requests after the first failure but preserves all completed outputs and updates the report.
 
 ## Compile chapters from an SSMDBook workspace
 
@@ -116,9 +116,9 @@ utterplan compile-book chapters --chapters 5-17
 
 By default, plans and the operational report are written to `<book-root>/utterplan/`. Use `--output-dir PATH` to override the destination. One canonical v7 `.utterplan.toml` plan is written per selected chapter, plus `compile-report.toml`. Existing plans are protected unless `--force` is given; `--fail-fast` skips later chapters after the first failure. `--report PATH` overrides the report location. Duplicate output names, report/plan collisions, and writes into the source `chapters/` directory or over `manifest.json` are rejected before writing.
 
-Shared planning options are `--language`/`--lang`, `--text-preparation`, `--renderability`, and `--spacy`. Chapter documents are SSMD 0.9 by contract, so `compile-book` does not accept `--input-format`. The manifest is read-only: edited chapter content is compiled as it currently exists even if its recorded digest is stale, and UtterPlan never refreshes the manifest or chapter hashes. Only selected chapter files are opened, so an unrelated broken chapter outside the selection does not block the request.
+Shared planning options are `--language`/`--lang`, `--text-preparation`, `--renderability`, `--spacy`, and `--diagnostics warnings|all|none` (default `warnings`). The diagnostics option controls terminal verbosity; failures are always reported, and the operational report retains all diagnostic details. Chapter documents are SSMD 0.9 by contract, so `compile-book` does not accept `--input-format`. The manifest is read-only: edited chapter content is compiled as it currently exists even if its recorded digest is stale, and UtterPlan never refreshes the manifest or chapter hashes. Only selected chapter files are opened, so an unrelated broken chapter outside the selection does not block the request.
 
-The version-2 compile report identifies each successful chapter's resolved preparation mode (`ssmd`, `spokenform`, or `identity`), reports a deterministic list of segmentation/renderability repair diagnostics and a `degraded_linguistics` flag, and includes a `repair_count`. The report is operational metadata; partial-success, atomic per-plan writes, and manifest immutability are unchanged.
+The version-2 compile report identifies each successful chapter's resolved preparation mode (`ssmd`, `spokenform`, or `identity`), includes complete diagnostics and severity counts, a `renderability_repair_count`, and a `degraded_linguistics` flag. Compatibility fields `repair_count` and `repairs` still include segmentation diagnostics regardless of severity; use the diagnostic severity fields and `diagnostics` list for interpretation. The report is operational metadata; partial-success, atomic per-plan writes, and manifest immutability are unchanged.
 
 For the full editable-workspace behavior and examples, see the [SSMDBook guide](ssmdbook.md).
 
@@ -132,6 +132,21 @@ utterplan explain chapter.utterplan.toml --details
 ```
 
 The explanation presents executable flow: prepared segment text, paragraph-local unit order, effective languages, canonical boundary opportunities, authored pause intents, headings, markers, and typed directives. The v7 plan retains exact raw source when available and compact replacement views show local prepared surfaces with original spellings. Complete compiler source diagnostics and preparation maps remain absent unless a trace sidecar was saved. Add `--details` for local token offsets, flow hashes, plan identity, and trace preparation mappings. Pass `--trace PATH` to attach a matching sidecar; the TOML trace can also be read independently with `inspect-trace`.
+
+## Preview a saved consumer plan
+
+`preview` projects chunk text and pause facts from a saved schema-v7 plan. It does not recompile the source, call linguistics providers, modify the plan, or cross into G2P/rendering:
+
+```bash
+utterplan preview chapter.utterplan.toml \
+  --segments 58-62 \
+  --chunk-by clause \
+  --pause-policy automatic
+```
+
+`--segments` accepts zero-based global flow-segment indexes: `N`, `N-M`, comma-separated combinations, or `all`. It is a focus selector: grouping is performed for the full plan first, so selecting one segment returns its complete containing chunk. `--chunk-by` is `segment`, `clause`, `sentence` (default), or `paragraph`; clause grouping closes on clause, sentence, and paragraph opportunities. Chunk text is the exact concatenation of stored `segment.text` values, including spaces at chunk edges.
+
+`--pause-policy native` (default) shows authored pause intent but does not materialize ordinary boundary opportunities. `automatic` exposes saved clause/sentence/paragraph opportunities without inventing durations. `manual` displays authored pause intent and the automatic opportunity separately. These policies affect preview projection only; the saved plan and its identity remain unchanged. Use `--details` to show constituent segments, local spans, directives, and boundary facts, or `--json` for the versioned machine-readable preview object.
 
 ## Inspect a persisted planning attempt
 
@@ -177,6 +192,7 @@ utterplan compile chapter.ssmd.md -o chapter.utterplan.toml --trace chapter.trac
 utterplan explain chapter.utterplan.toml --trace chapter.trace.toml
 utterplan inspect-trace chapter.trace.toml --preparation --boundaries
 utterplan inspect-attempt chapter.attempt.toml --issues
+utterplan preview chapter.utterplan.toml --segments 58-62 --chunk-by clause --pause-policy automatic
 ```
 
 `inspect --unit` selects a stored flow unit for inspection; it does not choose compilation grouping. Compilation always writes paragraph-local flow blocks, and downstream renderers choose their own chunk boundaries from the saved boundary opportunities.

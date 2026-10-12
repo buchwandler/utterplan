@@ -6,7 +6,16 @@ from pathlib import Path
 
 import pytest
 
-from utterplan import FlowPlan, LinguisticsConfig, PlannerConfig, compile_attempt
+from utterplan import (
+    FlowPlan,
+    FlowSegment,
+    FlowUnit,
+    LinguisticsConfig,
+    PlannerConfig,
+    ReplacementView,
+    TokenView,
+    compile_attempt,
+)
 from utterplan.cli import _linguistics_config, build_parser, main
 
 
@@ -603,3 +612,90 @@ def test_inspect_attempt_json_exposes_separate_artifact_schema(
     assert payload["candidate"]["segments"]
     assert payload["renderability"]["issues"]
     assert payload["attempt"]["attempt_id"] == attempt.attempt_id
+
+
+def test_preview_cli_selects_whole_chunks_and_emits_details_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = FlowPlan(
+        language="en-us",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment("A", "en-us"),
+                    FlowSegment(
+                        "B",
+                        "en-us",
+                        tokens=(TokenView(0, 1, lemma="b"),),
+                        replacements=(ReplacementView(0, 1, "source-B", kind="ssmd-sub"),),
+                    ),
+                    FlowSegment("C.", "en-us", boundary_after=("sentence",)),
+                )
+            ),
+        ),
+    )
+    path = tmp_path / "preview.utterplan.toml"
+    path.write_text(plan.to_toml(), encoding="utf-8")
+    saved = path.read_bytes()
+    plan_id = plan.plan_id
+
+    defaults = build_parser().parse_args(["preview", str(path)])
+    assert defaults.chunk_by == "sentence"
+    assert defaults.pause_policy == "native"
+    assert defaults.segments is None
+
+    assert (
+        main(
+            [
+                "preview",
+                str(path),
+                "--segments",
+                "1",
+                "--chunk-by",
+                "sentence",
+                "--pause-policy",
+                "automatic",
+            ]
+        )
+        == 0
+    )
+    assert capsys.readouterr().out == '[0] "ABC."  pause=sentence\n'
+
+    assert (
+        main(["preview", str(path), "--segments", "1", "--chunk-by", "sentence", "--details"]) == 0
+    )
+    detail_text = capsys.readouterr().out
+    assert 'segment[1] unit=0 local=1: "B"' in detail_text
+    assert '"start": 0' in detail_text
+    assert '"end": 1' in detail_text
+
+    assert (
+        main(
+            [
+                "preview",
+                str(path),
+                "--segments",
+                "1",
+                "--chunk-by",
+                "sentence",
+                "--pause-policy",
+                "manual",
+                "--details",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["format"] == "utterplan-preview"
+    assert payload["version"] == 1
+    assert payload["plan_id"] == plan_id
+    assert payload["chunks"][0]["text"] == "ABC."
+    constituent = payload["chunks"][0]["constituents"][1]
+    assert constituent["tokens"][0]["start"] == 0
+    assert constituent["replacements"][0]["start"] == 0
+
+    assert path.read_bytes() == saved
+    assert FlowPlan.load(path).plan_id == plan_id
+    assert main(["preview", str(path), "--segments", "3-1"]) == 1
+    assert "segment range is reversed" in capsys.readouterr().err

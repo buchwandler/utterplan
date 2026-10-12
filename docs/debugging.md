@@ -15,9 +15,21 @@ utterplan explain chapter.utterplan.toml --trace chapter.trace.toml --details
 utterplan inspect-trace chapter.trace.toml --preparation --boundaries
 ```
 
-Safe punctuation-only repair is the default during compilation. If a semantic blocker prevents repair, the error includes source location, prepared fragment, spoken context, blocked repair reason, and a concrete next action; UtterPlan never guesses symbol pronunciation. Use `--renderability strict` to see safe repair opportunities without applying them. Batch compilation reports each repair and continues with later sources.
+To inspect what a saved plan exposes under downstream chunk and pause choices, use the pure preview command:
 
-Sentence segmentation is a compiler-integrity step, not a renderability repair. PhraseSplit is advisory: dependency failure or a malformed/partial proposal batch produces a `segmentation.phrasplit_*` diagnostic and triggers conservative fallback. Unsafe automatic token-edge candidates are dropped or merged before projection; exact text and non-whitespace coverage are checked in both strict and repair modes. Inspect compiler diagnostics with `compile --trace FILE` and `inspect-trace FILE --boundaries`; sentence-part spans remain private in v7; safe canonical boundary kinds are persisted separately from authored pauses.
+```bash
+utterplan preview chapter.utterplan.toml \
+  --segments 58-62 \
+  --chunk-by clause \
+  --pause-policy automatic \
+  --details
+```
+
+The selector uses global zero-based flow-segment indexes and focuses complete containing chunks. Preview concatenates stored segment text exactly (including boundary spaces) and displays stored local token/replacement spans without rewriting them. Use `--json` for a versioned machine-readable result. If a spoken-space or substitution-provenance issue appears, inspect `FlowSegment.text` and its local replacement span rather than trimming preview output.
+
+Safe punctuation-only repair is the default during compilation. If a semantic blocker prevents repair, the error includes source location, prepared fragment, spoken context, blocked repair reason, and a concrete next action; UtterPlan never guesses symbol pronunciation. Use `--renderability strict` to see safe repair opportunities without applying them. Batch diagnostics default to warnings: informational token reanalysis is suppressed rather than called a repair. Use `--diagnostics all` to display informational records or `--diagnostics none` to suppress non-failure detail; failures are always reported and complete diagnostics remain in the operational report.
+
+Sentence segmentation is a compiler-integrity step, not a renderability repair. PhraseSplit is advisory: dependency failure or a malformed/partial proposal batch produces a `segmentation.phrasplit_*` diagnostic and triggers conservative fallback. Safe commas between lexical content can add soft `clause` opportunities during compilation; candidates respect atomic replacement/media spans and token-edge reconciliation. Unsafe candidates are dropped or merged before projection; exact text and non-whitespace coverage are checked in both strict and repair modes. Inspect compiler diagnostics with `compile --trace FILE` and `inspect-trace FILE --boundaries`; sentence-part spans remain private in v7; safe canonical boundary kinds are persisted separately from authored pauses.
 
 Use `inspect --tokens` to inspect local `TokenView` values. V7 `pos`, `tag`, `lemma`, and `morph` describe prepared segment text and are authoritative linguistic context, not model-token IDs or counts; fallback analysis may leave some unavailable. `explain --details` shows token and compact replacement spans relative to the owning segment and its flow hash. These output spans are not offsets into original source or another segment; use the trace for complete source mappings.
 
