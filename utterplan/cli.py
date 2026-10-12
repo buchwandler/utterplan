@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import tomlkit
+from renderplan import codec as renderplan_codec
 from tomlkit.exceptions import ParseError
 
 from . import __version__
@@ -22,6 +23,7 @@ from .migration import MigrationResult, migrate_plan_data
 from .model import FlowPlan, PauseIntent
 from .preview import PreviewChunk, preview_plan
 from .renderability import format_renderability_error
+from .renderplan_export import build_render_plan, format_render_plan_explanation
 from .ssmdbook import (
     SSMDBookError,
     load_ssmdbook_index,
@@ -39,6 +41,7 @@ _EXAMPLES = """examples:
   utterplan compile-book chapters --chapters 5-17
   utterplan validate chapter.utterplan.toml
   utterplan preview chapter.utterplan.toml --chunk-by sentence --pause-policy native
+  utterplan render-plan chapter.utterplan.toml --profile voice.renderprofile.toml -o chapter.renderplan.toml
   utterplan inspect chapter.utterplan.toml --segment 0
   utterplan inspect-attempt attempt.toml --issues
   utterplan explain chapter.utterplan.toml
@@ -271,6 +274,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     preview_parser.add_argument(
         "--json", action="store_true", help="emit stable machine-readable preview data"
+    )
+    render_plan_parser = commands.add_parser(
+        "render-plan",
+        help="project a schema-v7 UtterPlan into a portable RenderPlan",
+    )
+    render_plan_parser.add_argument(
+        "input", type=Path, help="current schema-v7 .utterplan.toml file"
+    )
+    render_plan_parser.add_argument(
+        "--profile", type=Path, required=True, help="RenderProfile TOML file"
+    )
+    render_plan_parser.add_argument(
+        "--previous", type=Path, help="prior RenderPlan TOML for deterministic replanning"
+    )
+    render_plan_parser.add_argument(
+        "--preflight", type=Path, help="matching RenderPlan preflight report TOML"
+    )
+    render_plan_parser.add_argument(
+        "-o", "--output", type=Path, required=True, help="write the RenderPlan TOML"
+    )
+    render_plan_parser.add_argument(
+        "--force", action="store_true", help="replace an existing output file"
+    )
+    render_plan_parser.add_argument(
+        "--explain", action="store_true", help="print in-memory planning decisions"
+    )
+    render_plan_parser.add_argument(
+        "--json", action="store_true", help="emit the generated plan as machine-readable JSON"
     )
     inspect_parser = commands.add_parser("inspect", help="inspect a saved TTS plan")
     inspect_parser.add_argument("input", type=Path)
@@ -869,6 +900,48 @@ def _load_plan_file(path: Path) -> FlowPlan:
     return FlowPlan.from_toml(path.read_text(encoding="utf-8"))
 
 
+def _render_plan_command(args: argparse.Namespace) -> int:
+    if (args.previous is None) != (args.preflight is None):
+        raise _CliUsageError("--previous and --preflight must be supplied together")
+    if args.output.exists() and not args.force:
+        raise _CliUsageError(f"output exists: {args.output}; use --force to replace it")
+
+    source = _load_plan_file(args.input)
+    profile = renderplan_codec.load_profile(args.profile)
+    previous = renderplan_codec.load_plan(args.previous) if args.previous is not None else None
+    preflight = (
+        renderplan_codec.load_preflight(args.preflight) if args.preflight is not None else None
+    )
+    plan = build_render_plan(
+        source,
+        profile,
+        previous_plan=previous,
+        preflight=preflight,
+    )
+    renderplan_codec.save_plan(plan, args.output)
+
+    explanation = (
+        format_render_plan_explanation(plan, previous_plan=previous, preflight=preflight)
+        if args.explain
+        else None
+    )
+    if args.json:
+        payload: dict[str, object] = {
+            "format": "utterplan-render-plan",
+            "version": 1,
+            "output": str(args.output),
+            "plan": renderplan_codec.plan_to_dict(plan),
+        }
+        if explanation is not None:
+            payload["explanation"] = explanation
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    elif explanation is not None:
+        print(explanation, end="")
+    else:
+        print(f"wrote {args.output}", file=sys.stderr)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -888,6 +961,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "inspect-trace":
             _inspect_trace(loads_trace(args.input.read_text(encoding="utf-8")), args)
             return 0
+        if args.command == "render-plan":
+            return _render_plan_command(args)
         plan = _load_plan_file(args.input)
         if args.command == "preview":
             _preview(plan, args)

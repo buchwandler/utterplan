@@ -47,6 +47,38 @@ the plan, is not renderer input, and does not change `plan.plan_id`. Its source
 ranges index SSMD-clean structural text; transformation output ranges index prepared
 spoken text, using Python string character offsets.
 
+## Build and replan a RenderPlan
+
+`build_render_plan` is the shared schema-v7-only projection API. It consumes an
+already compiled `FlowPlan` and a shared `renderplan.RenderProfile`; it does not
+prepare text again or depend on renderer, G2P, or audio packages. Replanning passes
+the exact prior RenderPlan and its matching preflight report together:
+
+```python
+from renderplan.codec import load_plan, load_preflight, load_profile, save_plan
+from utterplan import FlowPlan, build_render_plan
+
+source = FlowPlan.load("chapter.utterplan.toml")
+profile = load_profile("voice.renderprofile.toml")
+plan = build_render_plan(source, profile)
+save_plan(plan, "chapter.renderplan.toml")
+
+previous = load_plan("chapter.renderplan.toml")
+preflight = load_preflight("chapter.preflight.toml")
+next_plan = build_render_plan(
+    source,
+    profile,
+    previous_plan=previous,
+    preflight=preflight,
+)
+save_plan(next_plan, "chapter.next.renderplan.toml")
+```
+
+The previous plan and preflight are a required pair. UtterPlan preserves successful
+prior partitions and replaces only exact failed speech occurrences. Backend metrics
+remain diagnostics supplied by preflight; UtterPlan does not estimate them. Use
+`utterplan render-plan --explain` to format the already-built decisions.
+
 ## Persistable planning attempts
 
 `compile_attempt` and `UtterancePlanner.compile_attempt` expose a finalized planning

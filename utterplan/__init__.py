@@ -88,6 +88,7 @@ from .renderability import (
     format_renderability_error,
     preflight_renderability,
 )
+from .renderplan_export import build_render_plan
 from .versioning import (
     CURRENT_SCHEMA_VERSION,
     FORMAT,
@@ -110,6 +111,7 @@ __all__ = [
     "PreparationTrace",
     "PreparationTraceUnit",
     "compile_document",
+    "build_render_plan",
     "compile_attempt",
     "PlanningAttempt",
     "PlanningAttemptStatus",

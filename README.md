@@ -72,9 +72,12 @@ utterplan explain chapter.utterplan.toml --trace chapter.trace.toml
 utterplan inspect-trace chapter.trace.toml --preparation --boundaries
 utterplan inspect-attempt chapter.attempt.toml --issues
 utterplan preview chapter.utterplan.toml --segments 58-62 --chunk-by clause --pause-policy automatic
+utterplan render-plan chapter.utterplan.toml --profile voice.renderprofile.toml -o chapter.renderplan.toml --explain
 ```
 
 `explain` presents executable flow as a human-readable speech plan. Use `compile --trace PATH` to retain optional compiler provenance; `explain --trace PATH` and `inspect-trace` read that sidecar separately from the plan.
+
+`render-plan` projects only current schema-v7 FlowPlans into the shared RenderPlan contract. Replanning requires both the exact previous RenderPlan and its matching preflight report; UtterPlan refines only failed speech occurrences and does not calculate renderer-specific metrics.
 
 `inspect-attempt` reads the separate `utterplan.planning-attempt.v1` TOML artifact,
 not a canonical plan. Use it to review renderability issues and safe repair
@@ -137,6 +140,20 @@ explanatory trace. Trace is not serialized in the plan and does not affect its
 identity. Plain text must be explicitly selected in Python and always requires a
 language fallback. Existing `UtterancePlanner.plan` remains supported and returns
 only the plan; TOML is the portable persistence and interchange format.
+
+The optional RenderPlan producer consumes the stored prepared plan directly:
+
+```python
+from renderplan.codec import load_profile, save_plan
+from utterplan import FlowPlan, build_render_plan
+
+source = FlowPlan.load("chapter.utterplan.toml")
+profile = load_profile("voice.renderprofile.toml")
+render_plan = build_render_plan(source, profile)
+save_plan(render_plan, "chapter.renderplan.toml")
+```
+
+Use `build_render_plan(..., previous_plan=previous, preflight=report)` for deterministic refinement; both values are required together. The RenderPlan path rejects historical UtterPlan schemas and does not depend on a renderer or audio runtime. See the [RenderPlan CLI](docs/cli.md#produce-or-replan-a-renderplan) and [Python API](docs/python-api.md#build-and-replan-a-renderplan) guides.
 
 For operational progress from a long-running Python plan, pass `on_progress` to
 `UtterancePlanner.plan`, `UtterancePlanner.compile`, or `compile_document`. The

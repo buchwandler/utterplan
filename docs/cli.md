@@ -21,6 +21,35 @@ forces a language over SSMD document semantics.
 
 Compilation has no `--unit` or `--pause-mode` option. Schema v7 always stores paragraph-local flow units and canonical `boundary_before` / `boundary_after` opportunities (`clause`, `sentence`, `paragraph`, `parenthetical`, `voice_change`) separately from authored SSMD pause intents. One saved plan can support downstream sentence, paragraph, or renderer-token-budget chunking, and native, automatic, or manual pause realization. A `FlowSegment` is not necessarily a TTS call; its linguistic token views are not engine/model token counts.
 
+## Produce or replan a RenderPlan
+
+`render-plan` accepts only the current schema-v7 `.utterplan.toml` file and a
+`RenderProfile` TOML file. It does not re-prepare text, infer semantic boundaries,
+call a renderer, or calculate backend model-token counts:
+
+```bash
+utterplan render-plan chapter.utterplan.toml \\
+  --profile voice.renderprofile.toml \\
+  --output chapter.renderplan.toml
+```
+
+Replanning requires both the exact previous RenderPlan and its matching preflight
+report. Only failed speech occurrences are refined; successful partitions remain:
+
+```bash
+utterplan render-plan chapter.utterplan.toml \\
+  --profile voice.renderprofile.toml \\
+  --previous chapter.renderplan.toml \\
+  --preflight chapter.preflight.toml \\
+  --output chapter.next.renderplan.toml \\
+  --explain
+```
+
+`--previous` and `--preflight` must be supplied together. Existing output files
+require `--force`. `--explain` formats the generated plan and replan decisions; it
+does not invoke planning a second time. `--json` emits a versioned JSON wrapper to
+stdout while the RenderPlan artifact remains TOML at `--output`.
+
 ## Input resolution
 
 The rules are deterministic:
