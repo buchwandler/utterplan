@@ -8,12 +8,9 @@ from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
 from utterplan import (
     FlowPlan,
     LinguisticsConfig,
-    PauseConfig,
-    PauseIntent,
     PlannerConfig,
     UtterancePlan,
 )
-from utterplan.explain import format_explanation
 from utterplan.language import LanguageRun
 from utterplan.linguistics import LinguisticResourcePool, analyze_run_analyses
 
@@ -184,13 +181,10 @@ def test_spacy_enrichment_does_not_collapse_sentence_topology(monkeypatch):
         language="en-us",
         document_format="plain",
         text_preparation="identity",
-        unit="sentence",
         linguistics=LinguisticsConfig(use_spacy=True, spacy_model="fake_model", require_spacy=True),
     )
 
-    plan = UtterancePlanner(config).plan(
-        "One sentence. Two sentences. Three sentences.", unit="sentence"
-    )
+    plan = UtterancePlanner(config).plan("One sentence. Two sentences. Three sentences.")
 
     assert [segment.text for segment in plan.segments] == [
         "One sentence.",
@@ -202,7 +196,7 @@ def test_spacy_enrichment_does_not_collapse_sentence_topology(monkeypatch):
         (0, 1),
         (0, 2),
     ]
-    assert len(plan.units) == 3
+    assert len(plan.units) == 1
     assert [token.pos for token in plan.tokens] == ["NOUN"] * 6
     assert [(segment.spoken_start, segment.spoken_end) for segment in plan.segments] == [
         (0, 13),
@@ -279,7 +273,7 @@ def test_clausal_boundaries_reuse_provider_document(monkeypatch):
     assert any(item.kind == "sentence" for item in plan.semantic_boundaries)
 
 
-def test_semantic_clause_is_independent_of_pause_activation(monkeypatch):
+def test_semantic_clause_is_a_boundary_opportunity_not_a_pause_intent(monkeypatch):
     import phrasplit
 
     class Pipeline:
@@ -311,69 +305,24 @@ def test_semantic_clause_is_independent_of_pause_activation(monkeypatch):
         ],
     )
     source = "I wanted to go, but it was raining."
-    linguistic = LinguisticsConfig(use_spacy=True, spacy_model="fake_model", require_spacy=True)
-    plans = [
-        UtterancePlanner(
-            PlannerConfig(
-                language="en-us",
-                text_preparation="identity",
-                linguistics=linguistic,
-                pauses=pauses,
-            )
-        ).plan(source)
-        for pauses in (
-            PauseConfig(mode="tts"),
-            PauseConfig(mode="auto"),
-            PauseConfig(enabled=False),
-        )
-    ]
+    config = PlannerConfig(
+        language="en-us",
+        text_preparation="identity",
+        linguistics=LinguisticsConfig(use_spacy=True, spacy_model="fake_model", require_spacy=True),
+    )
+    plan = UtterancePlanner(config).plan(source)
 
-    clauses = [
-        next(item for item in plan.semantic_boundaries if item.kind == "clause") for plan in plans
-    ]
-    assert [(item.position, item.kind, item.id) for item in clauses] == [
-        (source.index(",") + 2, "clause", "semantic-boundary-000000")
-    ] * 3
-    assert len(plans[0].segments) == 2
-    assert plans[0].segments[0].spoken_end == clauses[0].position
-    assert not any(
-        segment.pause_before is not None or segment.pause_after is not None
-        for segment in plans[0].segments
+    clause = next(item for item in plan.semantic_boundaries if item.kind == "clause")
+    assert (clause.position, clause.kind, clause.id) == (
+        source.index(",") + 2,
+        "clause",
+        "semantic-boundary-000000",
     )
-    assert any(
-        segment.pause_before == PauseIntent("clause")
-        or segment.pause_after == PauseIntent("clause")
-        for segment in plans[1].segments
+    assert len(plan.segments) == 2
+    assert plan.segments[0].boundary_after == ("clause",)
+    assert all(
+        segment.pause_before is None and segment.pause_after is None for segment in plan.segments
     )
-    assert not any(
-        segment.pause_before is not None or segment.pause_after is not None
-        for segment in plans[2].segments
-    )
-    quiet_result = UtterancePlanner(
-        PlannerConfig(
-            language="en-us",
-            text_preparation="identity",
-            linguistics=linguistic,
-            pauses=PauseConfig(mode="tts"),
-        )
-    ).compile(source, trace=True)
-    audible_result = UtterancePlanner(
-        PlannerConfig(
-            language="en-us",
-            text_preparation="identity",
-            linguistics=linguistic,
-            pauses=PauseConfig(mode="auto"),
-        )
-    ).compile(source, trace=True)
-    quiet_explanation = format_explanation(
-        quiet_result.plan, details=True, trace=quiet_result.trace
-    )
-    audible_explanation = format_explanation(
-        audible_result.plan, details=True, trace=audible_result.trace
-    )
-    assert f"Semantic boundary: clause at spoken offset {clauses[0].position}" in quiet_explanation
-    assert "pause clause" not in quiet_explanation
-    assert "pause clause" in audible_explanation
 
 
 def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):

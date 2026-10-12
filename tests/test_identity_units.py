@@ -2,7 +2,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
-from utterplan import PauseConfig, PlannerConfig, SemanticBoundary
+from utterplan import PlannerConfig, SemanticBoundary
 from utterplan.hashing import (
     LEGACY_UNIT_HASH_SCHEMA,
     UNIT_HASH_SCHEMA,
@@ -24,8 +24,6 @@ def test_marker_at_sentence_unit_boundary_has_one_owner():
         PlannerConfig(
             language="en-us",
             document_format="ssmd",
-            unit="sentence",
-            pauses=PauseConfig(mode="manual"),
         )
     ).plan("One. @mark Two.")
     memberships = [marker_id for unit in plan.units for marker_id in unit.marker_ids]
@@ -142,9 +140,9 @@ def test_boundary_at_unit_endpoint_does_not_change_unit_hash() -> None:
 
 
 def test_semantic_boundary_outside_unit_does_not_change_that_unit_hash() -> None:
-    plan = UtterancePlanner(
-        PlannerConfig(language="en-us", unit="sentence", text_preparation="identity")
-    ).plan("First sentence. Second sentence has more words.")
+    plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(
+        "First sentence.\n\nSecond sentence has more words."
+    )
     second_unit = plan.units[1]
     outside = SemanticBoundary("semantic-boundary-000000", second_unit.spoken_start + 5, "clause")
 
@@ -154,9 +152,9 @@ def test_semantic_boundary_outside_unit_does_not_change_that_unit_hash() -> None
 
 
 def test_unit_hash_v3_uses_relative_semantic_boundary_position() -> None:
-    plan = UtterancePlanner(
-        PlannerConfig(language="en-us", unit="sentence", text_preparation="identity")
-    ).plan("First sentence. Second sentence has more words.")
+    plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(
+        "First sentence.\n\nSecond sentence has more words."
+    )
     unit = plan.units[1]
     boundary = SemanticBoundary(
         "semantic-boundary-000000",

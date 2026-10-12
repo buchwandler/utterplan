@@ -114,7 +114,8 @@ def test_historical_json_schema_registry_is_distinct_from_supported_plan_version
     from utterplan.versioning import JSON_SCHEMA_VERSIONS, SUPPORTED_SCHEMA_VERSIONS
 
     assert JSON_SCHEMA_VERSIONS == (1, 2, 3, 4)
-    assert SUPPORTED_SCHEMA_VERSIONS == (1, 2, 3, 4, 5, 6)
+    assert SUPPORTED_SCHEMA_VERSIONS == (1, 2, 3, 4, 5, 6, 7)
     assert all(has_schema(version) for version in JSON_SCHEMA_VERSIONS)
     assert not has_schema(5)
     assert not has_schema(6)
+    assert not has_schema(7)

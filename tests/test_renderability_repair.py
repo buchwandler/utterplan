@@ -21,7 +21,6 @@ from utterplan import (
     classify_segment,
     compile_attempt,
 )
-from utterplan.config import PauseConfig
 from utterplan.planner import _repair_renderer_segments
 
 
@@ -66,7 +65,6 @@ def _assess(
         segments,
         spoken_text=text,
         boundaries=boundaries,
-        pause_config=PauseConfig(),
         annotations=annotations,
         semantic_boundaries=semantic_boundaries,
     )
@@ -144,7 +142,7 @@ def test_safe_merge_uses_assessed_action_and_canonical_text() -> None:
     assert classify_segment(repaired[0], 0) is None
 
 
-def test_active_pause_at_join_blocks_merge_but_preserves_safe_drop() -> None:
+def test_boundary_opportunity_at_join_blocks_merge_but_preserves_safe_drop() -> None:
     lexical = _segment("seg-000000", "Hello", 0, 5)
     punctuation = _segment("seg-000001", ".", 5, 6)
     boundary = BoundaryEvent(
@@ -165,14 +163,14 @@ def test_active_pause_at_join_blocks_merge_but_preserves_safe_drop() -> None:
     assert issue.repair_assessment is not None
     assert issue.repair_assessment.safe is True
     assert issue.repair_assessment.action == "drop"
-    assert "active pause at spoken position 5" in issue.repair_assessment.blockers
+    assert "boundary opportunity at spoken position 5" in issue.repair_assessment.blockers
     repaired, repairs = _repair_renderer_segments(segments, (issue,), "Hello.")
     assert [segment.text for segment in repaired] == ["Hello"]
     assert repairs[0].repair == "drop_non_speech_punctuation"
     assert boundary.position == 5 and boundary.seconds is None
 
 
-def test_active_pause_inside_punctuation_blocks_merge_and_drop() -> None:
+def test_boundary_opportunity_inside_punctuation_blocks_merge_and_drop() -> None:
     punctuation = _segment("seg-000001", "?!", 5, 7)
     boundary = BoundaryEvent(
         id="boundary-inside",
@@ -191,7 +189,7 @@ def test_active_pause_inside_punctuation_blocks_merge_and_drop() -> None:
 
     assert issue.repair_assessment is not None
     assert issue.repair_assessment.safe is False
-    assert "active pause at spoken position 6" in issue.repair_assessment.blockers
+    assert "boundary opportunity at spoken position 6" in issue.repair_assessment.blockers
     with pytest.raises(PlanRenderabilityError):
         _repair_renderer_segments(segments, (issue,), "Hello?!")
     assert segments == [punctuation]

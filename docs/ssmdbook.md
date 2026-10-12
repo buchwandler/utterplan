@@ -1,6 +1,6 @@
 # Compiling chapters from an SSMDBook
 
-UtterPlan's `compile-book` command accepts an editable `.ssmdbook` workspace as a collection of independent SSMD 0.9 chapter sources. It reads the workspace manifest to discover chapter paths and source numbers, then delegates the selected documents to the existing incremental batch compiler. Each successful chapter becomes its own canonical UtterPlan v6 plan; UtterPlan does not create a combined book plan or modify the source workspace.
+UtterPlan's `compile-book` command accepts an editable `.ssmdbook` workspace as a collection of independent SSMD 0.9 chapter sources. It reads the workspace manifest to discover chapter paths and source numbers, then delegates the selected documents to the existing incremental batch compiler. Each successful chapter becomes its own canonical UtterPlan v7 plan; UtterPlan does not create a combined book plan or modify the source workspace.
 
 ## Quick start
 
@@ -64,12 +64,12 @@ An SSMDBook directory is an editable workspace. If a selected chapter was edited
 `compile-book` shares these planning options with `compile-many`:
 
 - `--language` / `--lang`
-- `--unit paragraph|sentence`
 - `--text-preparation auto|ssmd|spokenform|identity`
-- `--pause-mode tts|manual|auto`
 - `--renderability strict|repair`
 - `--spacy auto|off|sm|md|lg|trf`
 - `--force`, `--fail-fast`, and `--report PATH`
+
+Compilation always uses paragraph-local flow units; `compile-book` has no renderer `--unit` or pause-mode selection. Schema-v7 segments preserve safe boundary opportunities separately from authored SSMD pause intents, so a consumer may later choose sentence-, paragraph-, or token-budget-based chunks and its own native, automatic, or manual pause behavior. A `FlowSegment` is not necessarily a TTS request, and UtterPlan's linguistic tokens are not renderer token counts.
 
 `compile-book` uses the same best-effort spaCy `auto` default as `compile`: installed models are preferred in `sm`, `md`, `lg`, `trf` order and missing resources fall back safely. `--spacy off` forces fallback; explicit tier flags require that local model.
 

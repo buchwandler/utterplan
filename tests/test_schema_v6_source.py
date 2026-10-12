@@ -7,9 +7,9 @@ import pytest
 
 from utterplan import PlannerConfig, PlanValidationError, compile_document
 from utterplan.codecs.v5_toml import loads_v5_toml
-from utterplan.exceptions import PlanFormatError
+from utterplan.exceptions import PlanFormatError, PlanMigrationError
 from utterplan.flow_projection import _validate_replacement_ownership
-from utterplan.hashing import FLOW_HASH_SCHEMA, V5_FLOW_HASH_SCHEMA
+from utterplan.hashing import V5_FLOW_HASH_SCHEMA
 from utterplan.migration import migrate_plan_data
 from utterplan.model import FlowPlan
 
@@ -25,12 +25,12 @@ def _compile(source: str) -> FlowPlan:
     ).plan
 
 
-def test_v6_plan_keeps_exact_source_once_and_roundtrips_its_digest() -> None:
+def test_v7_plan_keeps_exact_source_once_and_roundtrips_its_digest() -> None:
     source = '[ART]{sub="A R T"}\n'
     plan = _compile(source)
     data = plan.to_dict()
 
-    assert plan.schema_version == 6
+    assert plan.schema_version == 7
     assert data["source"] == {
         "format": "ssmd",
         "text": source,
@@ -60,30 +60,28 @@ def test_source_digest_changes_plan_identity_but_not_renderer_unit_hashes() -> N
     assert first.flow == second.flow
 
 
-def test_frozen_v5_toml_migrates_sequentially_without_inventing_source() -> None:
+def test_frozen_v5_toml_remains_readable_but_migration_requires_recompilation() -> None:
     raw = V5_FIXTURE.read_text(encoding="utf-8")
     frozen = loads_v5_toml(raw)
     before = frozen.to_dict()
-    migrated = migrate_plan_data(before)
-    current = FlowPlan.from_toml(raw)
+    migrated = migrate_plan_data(before, target_version=6)
 
     assert frozen.schema_version == 5
     assert frozen.hash_schema == V5_FLOW_HASH_SCHEMA
     assert migrated.target_version == 6
     assert [(step.source_version, step.target_version) for step in migrated.steps] == [(5, 6)]
     assert migrated.data["schema_version"] == 6
-    assert migrated.data["hash_schema"] == FLOW_HASH_SCHEMA
     assert "source" not in migrated.data
-    assert current.schema_version == 6
-    assert current.source is None
-    assert [unit.content_hash for unit in current.flow] == [
-        unit.content_hash for unit in frozen.flow
-    ]
+    with pytest.raises(PlanMigrationError) as error:
+        migrate_plan_data(before)
+    assert error.value.code == "migration.recompile_required"
+    with pytest.raises(PlanMigrationError, match="Recompile"):
+        FlowPlan.from_toml(raw)
     assert before == frozen.to_dict()
     assert V5_FIXTURE.read_text(encoding="utf-8") == raw
 
 
-def test_v6_source_hash_is_verified_when_loading_semantic_data() -> None:
+def test_v7_source_hash_is_verified_when_loading_semantic_data() -> None:
     data = _compile("Hello.").to_dict()
     data["source"]["sha256"] = "sha256:" + "0" * 64
 

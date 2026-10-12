@@ -1,5 +1,9 @@
+import pytest
+
 from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
-from utterplan import PlannerConfig
+from utterplan import BoundaryKind, FlowSegment, PauseIntent, PlannerConfig
+from utterplan.boundaries import canonicalize_boundary_kinds, validate_canonical_boundary_kinds
+from utterplan.model import PlanSegment
 
 TEXT = "The backup battery (still warm from the morning test) sat beside the console."
 
@@ -59,3 +63,43 @@ def test_derived_paragraph_boundary_does_not_duplicate_existing_event():
     assert len(keys) == len(set(keys))
     assert [(item.position, item.kind) for item in plan.semantic_boundaries] == [(14, "paragraph")]
     assert [(event.position, event.kind) for event in plan.boundaries] == [(14, "paragraph")]
+
+
+def test_boundary_kinds_are_canonicalized_on_internal_and_public_segments():
+    kind: BoundaryKind = "clause"
+    expected = ("sentence", "voice_change")
+    values = ("voice_change", "sentence", "sentence")
+
+    assert canonicalize_boundary_kinds((kind, "voice_change")) == ("clause", "voice_change")
+    assert canonicalize_boundary_kinds(values) == expected
+    assert canonicalize_boundary_kinds(("clause", "sentence", "paragraph", "voice_change")) == (
+        "paragraph",
+        "voice_change",
+    )
+
+    public = FlowSegment("Hello.", "en-US", boundary_after=values)
+    assert public.boundary_after == expected
+    assert public.to_dict()["boundary_after"] == list(expected)
+
+    internal = PlanSegment("s1", "Hello.", 0, 6, "en-US", boundary_before=values)
+    assert internal.boundary_before == expected
+    assert internal.to_dict()["boundary_before"] == list(expected)
+
+    authored_none = FlowSegment(
+        "Hello.", "en-US", pause_after=PauseIntent("none"), boundary_after=("sentence",)
+    )
+    assert authored_none.pause_after == PauseIntent("none")
+    assert authored_none.boundary_after == ("sentence",)
+    assert authored_none.to_dict()["boundary_after"] == ["sentence"]
+    assert authored_none.to_dict()["pause_after"] == "none"
+
+
+def test_boundary_kind_validation_rejects_unknown_duplicate_and_noncanonical_values():
+    with pytest.raises(ValueError, match="unsupported boundary kind"):
+        canonicalize_boundary_kinds(("sentence", "engine_token"))
+    with pytest.raises(ValueError, match="duplicates"):
+        validate_canonical_boundary_kinds(("sentence", "sentence"))
+    with pytest.raises(ValueError, match="canonical ordering"):
+        validate_canonical_boundary_kinds(("voice_change", "sentence"))
+    with pytest.raises(ValueError, match="weaker structural"):
+        validate_canonical_boundary_kinds(("sentence", "paragraph"))

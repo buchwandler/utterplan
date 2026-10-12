@@ -24,7 +24,6 @@ from utterplan import (
 from utterplan.codecs.v4_toml import decode_v4_toml_data
 from utterplan.exceptions import PlanFormatError, PlanMigrationError, UnsupportedSchemaError
 from utterplan.hashing import FLOW_HASH_SCHEMA
-from utterplan.migration import migrate_plan_data
 from utterplan.migrations import migrate_v4_to_v5
 from utterplan.toml_codec import dumps_toml, from_toml_data, loads_toml, to_toml_data
 
@@ -58,12 +57,11 @@ def _plan() -> FlowPlan:
     translated = FlowSegment(
         text="Outer voice.",
         language="fr-FR",
-        pause_before=PauseIntent("voice_change"),
+        boundary_before=("voice_change",),
         tokens=(TokenView(0, 5, pos="ADJ", tag="JJ"), TokenView(6, 11, pos="NOUN", tag="NN")),
     )
     return FlowPlan(
         language="en-US",
-        unit="sentence",
         flow=(FlowUnit((segment, translated)),),
         document=DocumentInfo(
             format="ssmd",
@@ -79,7 +77,7 @@ def _plan() -> FlowPlan:
     )
 
 
-def test_current_v6_toml_roundtrip_is_deterministic_and_semantically_identical() -> None:
+def test_current_v7_toml_roundtrip_is_deterministic_and_semantically_identical() -> None:
     plan = _plan()
     text = dumps_toml(plan)
     restored = loads_toml(text)
@@ -99,7 +97,7 @@ def test_toml_is_compact_local_and_columnar() -> None:
     text = dumps_toml(plan)
     segment = wire["flow"][0]["segment"][0]
 
-    assert wire["schema_version"] == 6
+    assert wire["schema_version"] == 7
     assert wire["hash_schema"] == FLOW_HASH_SCHEMA
     assert segment["token"]["span"] == [[0, 2], [3, 7], [8, 15]]
     assert segment["token"]["pos"] == ["PRON", "NOUN", "VERB"]
@@ -162,16 +160,16 @@ def test_v6_model_rejects_identity_and_content_hash_mismatches() -> None:
     assert error.value.code == "flow.hash"
 
 
-def test_version_router_reads_frozen_v4_toml_and_projects_to_v6() -> None:
+def test_version_router_requires_recompilation_for_frozen_v4_toml() -> None:
     raw = V4_TOML.read_text(encoding="utf-8")
     frozen = decode_v4_toml_data(tomlkit.parse(raw).unwrap())
     before = copy.deepcopy(frozen)
-    migrated = loads_toml(raw)
 
-    assert isinstance(migrated, FlowPlan)
-    assert migrated.schema_version == 6
+    with pytest.raises(PlanMigrationError) as error:
+        loads_toml(raw)
+
+    assert error.value.code == "migration.recompile_required"
     assert frozen == before
-    assert migrated.to_dict() == migrate_plan_data(migrate_v4_to_v5(frozen)).data
 
 
 def test_v4_toml_with_ambiguous_token_coordinates_fails_safely() -> None:
@@ -180,16 +178,21 @@ def test_v4_toml_with_ambiguous_token_coordinates_fails_safely() -> None:
     assert error.value.code == "migration.token-coordinate-ambiguous"
 
 
-def test_v5_model_from_legacy_v4_mapping_uses_the_current_v6_wire_shape() -> None:
+def test_v5_historical_codec_remains_readable_but_current_migration_requires_source() -> None:
     import json
 
-    legacy = json.loads(V4_JSON.read_text(encoding="utf-8"))
-    v5 = FlowPlan.from_dict(migrate_v4_to_v5(legacy))
-    wire = to_toml_data(v5)
-    restored = from_toml_data(wire)
+    from utterplan.codecs.v5_toml import dumps_v5_toml, loads_v5_toml
 
-    assert isinstance(restored, FlowPlan)
-    assert restored.to_dict() == migrate_plan_data(v5.to_dict()).data
+    legacy = json.loads(V4_JSON.read_text(encoding="utf-8"))
+    historical = FlowPlan.from_dict(migrate_v4_to_v5(legacy))
+    serialized = dumps_v5_toml(historical)
+    restored = loads_v5_toml(serialized)
+
+    assert historical.schema_version == 5
+    assert restored.to_dict() == historical.to_dict()
+    with pytest.raises(PlanMigrationError, match="Recompile") as error:
+        from_toml_data(tomlkit.parse(serialized).unwrap())
+    assert error.value.code == "migration.recompile_required"
 
 
 @pytest.mark.parametrize(
@@ -222,6 +225,6 @@ def test_unknown_root_fields_and_future_schema_are_rejected() -> None:
         from_toml_data(wire)
 
     wire = to_toml_data(_plan())
-    wire["schema_version"] = 7
+    wire["schema_version"] = 8
     with pytest.raises(UnsupportedSchemaError):
         from_toml_data(wire)

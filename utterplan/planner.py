@@ -11,10 +11,9 @@ if TYPE_CHECKING:
     from .compiler import CompileResult, PreparationTrace
 
 from .attempts import PlanDraft, PlanningAttempt, PlanningAttemptStatus, planning_attempt_id
-from .config import PauseConfig, PlannerConfig, resolve_text_preparation_mode
+from .config import PlannerConfig, resolve_text_preparation_mode
 from .directives import resolve_directives
 from .exceptions import (
-    ConfigurationError,
     PlanningError,
     PlanRenderabilityError,
     PlanValidationError,
@@ -41,7 +40,7 @@ from .parsers import (
     SSMDDocumentParser,
     effective_sequence_fallback_mode,
 )
-from .pauses import boundary_is_active, resolve_pause_intents
+from .pauses import boundary_is_materializable, resolve_edge_semantics
 from .preparation import (
     IdentityTextPreparer,
     SourceToSpokenMap,
@@ -85,7 +84,6 @@ class UtterancePlanner:
         text: str,
         *,
         config: PlannerConfig | None = None,
-        unit: str | None = None,
         trace: bool = False,
         on_progress: ProgressCallback | None = None,
     ) -> CompileResult:
@@ -100,7 +98,7 @@ class UtterancePlanner:
         from .compiler import CompileResult
 
         attempt, preparation_trace = self._plan(
-            text, config=config, unit=unit, trace=trace, on_progress=on_progress
+            text, config=config, trace=trace, on_progress=on_progress
         )
         if not attempt.ok:
             raise PlanRenderabilityError(
@@ -122,12 +120,11 @@ class UtterancePlanner:
         text: str,
         *,
         config: PlannerConfig | None = None,
-        unit: str | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> PlanningAttempt:
         """Return the finalized semantic outcome without throwing for renderability."""
         attempt, _preparation_trace = self._plan(
-            text, config=config, unit=unit, trace=False, on_progress=on_progress
+            text, config=config, trace=False, on_progress=on_progress
         )
         return attempt
 
@@ -136,7 +133,6 @@ class UtterancePlanner:
         text: str,
         *,
         config: PlannerConfig | None = None,
-        unit: str | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> FlowPlan:
         """Return a canonical semantic plan, optionally reporting synchronous progress.
@@ -144,31 +140,23 @@ class UtterancePlanner:
         The callback is operational only and cannot affect the plan. Keep handlers
         lightweight; callback exceptions propagate to the caller.
         """
-        return self.compile(text, config=config, unit=unit, on_progress=on_progress).plan
+        return self.compile(text, config=config, on_progress=on_progress).plan
 
     def _plan(
         self,
         text: str,
         *,
         config: PlannerConfig | None = None,
-        unit: str | None = None,
         trace: bool = False,
         on_progress: ProgressCallback | None = None,
     ) -> tuple[PlanningAttempt, PreparationTrace | None]:
         if not isinstance(text, str):
             raise TypeError("text must be a string")
         effective_config = config if config is not None else self.config
-        if unit is not None:
-            if unit not in {"paragraph", "sentence"}:
-                raise ConfigurationError("unit must be 'paragraph' or 'sentence'")
-            selected_unit = unit
-        else:
-            selected_unit = effective_config.unit
         config = effective_config
         _notify_progress(on_progress, PlannerProgressEvent(kind="phase.started", phase="parse"))
         parsed = self._parse(text, config)
         _notify_progress(on_progress, PlannerProgressEvent(kind="phase.completed", phase="parse"))
-        pause_config = config.pauses
         fallback_mode = effective_sequence_fallback_mode(parsed.header)
         requested_mode = config.text_preparation
         resolved_mode = resolve_text_preparation_mode(requested_mode, config.document_format)
@@ -400,7 +388,7 @@ class UtterancePlanner:
             )
         boundaries.extend(_semantic_pause_events(semantic_boundaries, start_id=len(boundaries)))
         hard_cut_positions, hard_cut_origins = _author_owned_cut_positions(
-            runs, prepared.annotations, boundaries, pause_config
+            runs, prepared.annotations, boundaries
         )
         segmentation_repairs: list[SegmentationRepair] = []
         segments = _segment(
@@ -408,7 +396,6 @@ class UtterancePlanner:
             runs,
             prepared.annotations,
             boundaries,
-            pause_config,
             document_language,
             topology,
             tokens=tokens,
@@ -456,17 +443,6 @@ class UtterancePlanner:
             parsed=parsed,
             spoken_text=spoken,
             boundaries=boundaries,
-            pause_config=pause_config,
-            annotations=prepared.annotations,
-            semantic_boundaries=semantic_boundaries,
-        )
-        initial_renderability = preflight_segments(
-            segments,
-            tokens,
-            parsed=parsed,
-            spoken_text=spoken,
-            boundaries=boundaries,
-            pause_config=pause_config,
             annotations=prepared.annotations,
             semantic_boundaries=semantic_boundaries,
         )
@@ -517,7 +493,6 @@ class UtterancePlanner:
                     parsed=parsed,
                     spoken_text=spoken,
                     boundaries=boundaries,
-                    pause_config=pause_config,
                     annotations=prepared.annotations,
                     semantic_boundaries=semantic_boundaries,
                 )
@@ -529,20 +504,19 @@ class UtterancePlanner:
                 if not post_repair.issues:
                     status = "repaired"
         renderability_checked_segments = checked_segment_count
-        boundaries.extend(_derived_boundaries(segments, boundaries, pause_config))
+        boundaries.extend(_derived_boundaries(segments, boundaries))
         semantic_boundaries = _derive_semantic_topology(segments, semantic_boundaries)
         semantic_boundaries, semantic_id_map = _canonicalize_semantic_boundaries(
             semantic_boundaries
         )
         boundaries = _relink_semantic_pause_events(boundaries, semantic_id_map)
-        segments = resolve_pause_intents(segments, boundaries, pause_config)
+        segments = resolve_edge_semantics(segments, boundaries)
         markers = tuple(_map_marker(marker, prepared.source_map) for marker in parsed.markers)
         segment_tuple = tuple(segments)
         units = make_units(
             segment_tuple,
             markers,
             tokens,
-            selected_unit,
             tuple(semantic_boundaries),
         )
         _notify_progress(
@@ -611,7 +585,6 @@ class UtterancePlanner:
                 )
             )
         plan_config = _config_dict(config)
-        plan_config["unit"] = selected_unit
         plan = UtterancePlan(
             source=PlanSource(parsed.source_text and config.document_format or "plain", text),
             config=plan_config,
@@ -792,6 +765,8 @@ def _trace_plain(value: Any) -> Any:
 def _config_dict(config: PlannerConfig) -> dict[str, Any]:
     result = asdict(config)
     result["language_aliases"] = dict(config.language_aliases)
+    result["unit"] = "paragraph"
+    result["pauses"] = {"mode": "tts", "enabled": True}
     return result
 
 
@@ -829,7 +804,6 @@ def _author_owned_cut_positions(
     runs: tuple[LanguageRun, ...],
     annotations: tuple[AnnotationSpan, ...],
     boundaries: list[BoundaryEvent],
-    pause_config: PauseConfig,
 ) -> tuple[set[int], dict[int, str]]:
     positions: set[int] = set()
     origins: dict[int, str] = {}
@@ -848,7 +822,7 @@ def _author_owned_cut_positions(
             and boundary.origin == "ssmd"
             and boundary.attrs.get("pause_origin") == "explicit"
         )
-        if authored_pause and boundary_is_active(boundary, pause_config):
+        if authored_pause:
             add(boundary.position, "authored_pause")
         elif boundary.kind == "paragraph":
             add(boundary.position, "paragraph")
@@ -1045,7 +1019,6 @@ def _segment(
     runs: tuple[LanguageRun, ...],
     annotations: tuple[AnnotationSpan, ...],
     boundaries: list[BoundaryEvent],
-    pause_config: PauseConfig,
     default_language: str,
     topology: SentenceTopology,
     *,
@@ -1062,7 +1035,6 @@ def _segment(
         runs,
         annotations,
         boundaries,
-        pause_config,
         tokens=tokens,
         token_providers=token_providers,
         protected_ranges=protected_ranges,
@@ -1093,7 +1065,6 @@ def _segment_sentence_parts(
     runs: tuple[LanguageRun, ...],
     annotations: tuple[AnnotationSpan, ...],
     boundaries: list[BoundaryEvent],
-    pause_config: PauseConfig,
     *,
     tokens: tuple[TokenAnnotation, ...],
     token_providers: tuple[str | None, ...],
@@ -1137,9 +1108,7 @@ def _segment_sentence_parts(
                         )
                     )
         for boundary in boundaries:
-            if not start < boundary.position < end or not boundary_is_active(
-                boundary, pause_config
-            ):
+            if not start < boundary.position < end or not boundary_is_materializable(boundary):
                 continue
             authored_pause = (
                 boundary.kind == "explicit"
@@ -1268,7 +1237,6 @@ def _segment_sentence_parts(
         text,
         result,
         boundaries=boundaries,
-        pause_config=pause_config,
         annotations=annotations,
     )
 
@@ -1380,11 +1348,10 @@ def _coalesce_neutral_punctuation_segments(
     segments: list[PlanSegment],
     *,
     boundaries: list[BoundaryEvent],
-    pause_config: PauseConfig,
     annotations: tuple[AnnotationSpan, ...],
 ) -> list[PlanSegment]:
     active_pause_positions = {
-        boundary.position for boundary in boundaries if boundary_is_active(boundary, pause_config)
+        boundary.position for boundary in boundaries if boundary_is_materializable(boundary)
     }
     audio_spans = tuple(
         (annotation.spoken_start, annotation.spoken_end)
@@ -2023,40 +1990,32 @@ def _relink_semantic_pause_events(
 
 
 def _derived_boundaries(
-    segments: list[PlanSegment], existing: list[BoundaryEvent], config: PauseConfig
+    segments: list[PlanSegment], existing: list[BoundaryEvent]
 ) -> list[BoundaryEvent]:
     result: list[BoundaryEvent] = []
-    existing_keys = {
-        (event.position, event.kind)
-        for event in existing
-        if event.kind in {"paragraph", "sentence"}
-    }
-    next_id = len(existing)
+    existing_keys = {(event.position, event.kind) for event in existing}
     for previous, current in zip(segments, segments[1:], strict=False):
-        kind: str | None = None
-        strength: str | None = None
+        kinds: list[str] = []
         if previous.paragraph != current.paragraph:
-            kind, strength = "paragraph", "paragraph"
+            kinds.append("paragraph")
         elif previous.sentence != current.sentence:
-            kind, strength = "sentence", "sentence"
-        elif config.mode == "auto" and _voice_changed(previous, current):
-            kind, strength = "voice_change", "weak"
-        if kind is not None:
+            kinds.append("sentence")
+        if _voice_changed(previous, current):
+            kinds.append("voice_change")
+        for kind in kinds:
             position = previous.spoken_end
             if (position, kind) in existing_keys:
                 continue
             result.append(
                 BoundaryEvent(
-                    f"boundary-{next_id:06d}",
+                    f"boundary-{len(existing) + len(result):06d}",
                     position,
                     kind,
                     origin="planner",
-                    strength=strength,
                     attrs={"automatic": True},
                 )
             )
             existing_keys.add((position, kind))
-            next_id += 1
     return result
 
 

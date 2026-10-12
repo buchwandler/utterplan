@@ -1,25 +1,65 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import Literal
 
-from utterplan import FlowPlan, PlannerConfig, compile_document
+from utterplan import (
+    EmphasisDirective,
+    FlowPlan,
+    FlowSegment,
+    FlowUnit,
+    PauseIntent,
+    PlannerConfig,
+    ProsodyDirective,
+    SegmentDirectives,
+    TokenView,
+    compile_document,
+)
 from utterplan.compiler import PreparationTrace
 from utterplan.explain import format_explanation
 
-GOLDEN = Path(__file__).parent / "golden"
 
+def _explanation_plan(name: str) -> FlowPlan:
+    name = name.removesuffix(".utterplan.toml")
+    if name == "basic_en":
+        segment = FlowSegment("Hello.", "en-us", tokens=(TokenView(0, 6),))
+        return FlowPlan(language="en-us", flow=(FlowUnit((segment,)),))
+    if name == "ssmd_breaks":
+        segments = (
+            FlowSegment("Hello", "en-us", pause_after=PauseIntent("timed", "500ms")),
+            FlowSegment(" world", "en-us", pause_after=PauseIntent("none")),
+        )
+        return FlowPlan(language="en-us", flow=(FlowUnit(segments),))
+    if name == "directives":
+        directives = SegmentDirectives(
+            prosody=ProsodyDirective(rate="1.2", pitch="+2st", volume="80%"),
+            emphasis=EmphasisDirective("strong"),
+        )
+        segment = FlowSegment("fast", "en-us", directives=directives)
+        return FlowPlan(language="en-us", flow=(FlowUnit((segment,)),))
 
-def _migrated(name: str) -> FlowPlan:
-    return FlowPlan.from_toml((GOLDEN / name).read_text(encoding="utf-8"))
+    sources: dict[str, tuple[str, Literal["plain", "ssmd"]]] = {
+        "multilingual": ('Hello [Bonjour.]{lang="fr"}', "ssmd"),
+        "markers": ("One. @mark Two.", "ssmd"),
+    }
+    source, input_format = sources[name]
+    return compile_document(
+        source,
+        input_format=input_format,
+        config=PlannerConfig(
+            language="en-us",
+            document_format=input_format,
+            text_preparation="identity",
+        ),
+    ).plan
 
 
 def test_basic_explanation_is_human_oriented_and_current_schema() -> None:
-    output = format_explanation(_migrated("basic_en.utterplan.toml"))
+    output = format_explanation(_explanation_plan("basic_en.utterplan.toml"))
 
     assert "UtterPlan explanation" in output
-    assert "schema: 6" in output
+    assert "schema: 7" in output
     assert "default language: en-us" in output
-    assert "result: 1 unit, 1 segment" in output
+    assert "result: 1 flow block, 1 segment" in output
     assert '1. [en-us] "Hello."' in output
     assert "No warnings." in output
     assert "Compiler provenance is not stored in the plan" in output
@@ -27,7 +67,7 @@ def test_basic_explanation_is_human_oriented_and_current_schema() -> None:
 
 
 def test_explanation_details_use_segment_local_token_coordinates() -> None:
-    output = format_explanation(_migrated("basic_en.utterplan.toml"), details=True)
+    output = format_explanation(_explanation_plan("basic_en.utterplan.toml"), details=True)
 
     assert "plan id: sha256:" in output
     assert "local tokens: 1" in output
@@ -36,7 +76,7 @@ def test_explanation_details_use_segment_local_token_coordinates() -> None:
 
 
 def test_semantic_pauses_preserve_timed_and_explicit_none_intent() -> None:
-    output = format_explanation(_migrated("ssmd_breaks.utterplan.toml"))
+    output = format_explanation(_explanation_plan("ssmd_breaks.utterplan.toml"))
 
     assert "pause timed 500ms" in output
     assert "pause none" in output
@@ -44,7 +84,7 @@ def test_semantic_pauses_preserve_timed_and_explicit_none_intent() -> None:
 
 
 def test_directives_are_humanized() -> None:
-    output = format_explanation(_migrated("directives.utterplan.toml"))
+    output = format_explanation(_explanation_plan("directives.utterplan.toml"))
 
     assert "effective prosody: rate 1.2, pitch +2st, volume 80%" in output
     assert "emphasis: strong" in output
@@ -52,20 +92,20 @@ def test_directives_are_humanized() -> None:
 
 
 def test_multilingual_segments_remain_in_render_order() -> None:
-    output = format_explanation(_migrated("multilingual.utterplan.toml"))
+    output = format_explanation(_explanation_plan("multilingual.utterplan.toml"))
 
     labels = [output.index(label) for label in ("[en-us]", "[fr]")]
     assert labels[0] < labels[1]
     assert output.count("[en-us]") == 1
-    assert '[fr] "Bonjour."' in output
+    assert '[fr] " Bonjour."' in output
 
 
 def test_markers_are_shown_in_their_owning_flow_unit() -> None:
-    output = format_explanation(_migrated("markers.utterplan.toml"))
+    output = format_explanation(_explanation_plan("markers.utterplan.toml"))
 
-    assert "Unit 2" in output
+    assert "Unit 1" in output
     assert "markers: @mark" in output
-    assert output.index("Unit 2") < output.index("markers: @mark")
+    assert output.index("Unit 1") < output.index("markers: @mark")
 
 
 def test_compiler_trace_is_optional_and_does_not_change_executable_plan() -> None:
@@ -129,7 +169,7 @@ def test_trace_toml_round_trip_preserves_all_provenance() -> None:
 
 
 def test_explanation_is_deterministic() -> None:
-    plan = _migrated("directives.utterplan.toml")
+    plan = _explanation_plan("directives.utterplan.toml")
 
     assert format_explanation(plan) == format_explanation(plan)
     assert format_explanation(plan, details=True) == format_explanation(plan, details=True)

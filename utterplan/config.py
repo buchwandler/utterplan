@@ -13,17 +13,6 @@ def _validate_bool(value: object, field_name: str) -> None:
 
 
 @dataclass(frozen=True, slots=True)
-class PauseConfig:
-    mode: Literal["tts", "manual", "auto"] = "tts"
-    enabled: bool = True
-
-    def __post_init__(self) -> None:
-        if self.mode not in {"tts", "manual", "auto"}:
-            raise ConfigurationError("pauses.mode must be one of 'tts', 'manual', or 'auto'")
-        _validate_bool(self.enabled, "pauses.enabled")
-
-
-@dataclass(frozen=True, slots=True)
 class LinguisticsConfig:
     use_spacy: bool | None = True
     spacy_model: str | None = None
@@ -57,8 +46,6 @@ class PlannerConfig:
     language: str
     document_format: Literal["plain", "ssmd"] = "plain"
     text_preparation: Literal["auto", "ssmd", "spokenform", "identity"] = "auto"
-    unit: Literal["paragraph", "sentence"] = "paragraph"
-    pauses: PauseConfig = field(default_factory=PauseConfig)
     linguistics: LinguisticsConfig = field(default_factory=LinguisticsConfig)
     ssmd: SSMDConfig = field(default_factory=SSMDConfig)
     overlap_mode: Literal["snap", "strict"] = "snap"
@@ -75,9 +62,6 @@ class PlannerConfig:
             raise ConfigurationError(
                 "text_preparation must be 'auto', 'ssmd', 'spokenform', or 'identity'"
             )
-        if self.unit not in {"paragraph", "sentence"}:
-            raise ConfigurationError("unit must be 'paragraph' or 'sentence'")
-        if self.overlap_mode not in {"snap", "strict"}:
             raise ConfigurationError("overlap_mode must be 'snap' or 'strict'")
         if self.renderability_mode not in {"strict", "repair"}:
             raise ConfigurationError("renderability_mode must be 'strict' or 'repair'")
@@ -118,7 +102,6 @@ def semantic_config(config: PlannerConfig | Mapping[str, object]) -> dict[str, o
 
 __all__ = [
     "LinguisticsConfig",
-    "PauseConfig",
     "PlannerConfig",
     "SSMDConfig",
     "semantic_config",

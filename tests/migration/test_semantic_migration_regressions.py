@@ -44,6 +44,7 @@ def _semantic_projection(plan: Any) -> dict[str, Any]:
                     key: boundary[key]
                     for key in ("position", "kind", "origin", "strength")
                     if key in boundary
+                    and not (key == "strength" and boundary.get("origin") == "planner")
                 },
                 "attrs": {
                     key: value
@@ -154,7 +155,12 @@ def test_migration_goldens_match_semantic_plan_output() -> None:
             if key == "boundaries":
                 expected_value = [
                     {
-                        **{name: value for name, value in boundary.items() if name != "seconds"},
+                        **{
+                            name: value
+                            for name, value in boundary.items()
+                            if name != "seconds"
+                            and not (name == "strength" and boundary.get("origin") == "planner")
+                        },
                         "attrs": {
                             name: value
                             for name, value in boundary.get("attrs", {}).items()

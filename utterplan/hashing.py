@@ -25,7 +25,8 @@ def source_text_hash(text: str) -> str:
 
 
 V5_FLOW_HASH_SCHEMA = "utterplan-flow-v1"
-FLOW_HASH_SCHEMA = "utterplan-flow-v2"
+V6_FLOW_HASH_SCHEMA = "utterplan-flow-v2"
+FLOW_HASH_SCHEMA = "utterplan-flow-v3"
 
 
 def _flow_pause_semantics(value: Any) -> Any:
@@ -52,6 +53,10 @@ def flow_unit_hash(segments: Any) -> str:
             "tokens": [_plain_semantic(token) for token in _get(value, "tokens", ())],
             "markers": list(_get(value, "markers", ())),
         }
+        for key in ("boundary_before", "boundary_after"):
+            boundaries = _get(value, key, ())
+            if boundaries:
+                semantic[key] = list(boundaries)
         for key in ("pause_before", "pause_after"):
             pause = _flow_pause_semantics(_get(value, key))
             if pause is not None:
@@ -64,32 +69,37 @@ def flow_unit_hash(segments: Any) -> str:
 
 
 def flow_plan_id(data: Mapping[str, Any]) -> str:
-    """Hash executable semantics and, in v6, only the digest of source provenance."""
+    """Hash executable semantics, including boundary opportunities, and only the source digest."""
     document = data.get("document", {})
     semantics = document.get("semantics", {}) if isinstance(document, Mapping) else {}
+    hash_schema = data.get("hash_schema", FLOW_HASH_SCHEMA)
     identity = {
         "format": data.get("format"),
         "schema_version": data.get("schema_version"),
         "language": data.get("language"),
-        "unit": data.get("unit"),
-        "hash_schema": data.get("hash_schema", FLOW_HASH_SCHEMA),
+        "hash_schema": hash_schema,
         "document_semantics": _plain_semantic(semantics) if isinstance(semantics, Mapping) else {},
         "flow": [
             {
                 "segments": [
-                    _flow_segment_semantics(segment) for segment in _get(unit, "segments", ())
+                    _flow_segment_semantics(
+                        segment, include_boundaries=hash_schema == FLOW_HASH_SCHEMA
+                    )
+                    for segment in _get(unit, "segments", ())
                 ],
             }
             for unit in data.get("flow", ())
         ],
     }
-    if identity["hash_schema"] == FLOW_HASH_SCHEMA:
+    if hash_schema in {V5_FLOW_HASH_SCHEMA, V6_FLOW_HASH_SCHEMA}:
+        identity["unit"] = data.get("unit")
+    if hash_schema in {V6_FLOW_HASH_SCHEMA, FLOW_HASH_SCHEMA}:
         source = data.get("source")
         identity["source_sha256"] = source.get("sha256") if isinstance(source, Mapping) else None
     return semantic_hash(identity)
 
 
-def _flow_segment_semantics(segment: Any) -> dict[str, Any]:
+def _flow_segment_semantics(segment: Any, *, include_boundaries: bool) -> dict[str, Any]:
     value = _mapping(segment) or {}
     result: dict[str, Any] = {
         "text": _get(value, "text"),
@@ -98,6 +108,11 @@ def _flow_segment_semantics(segment: Any) -> dict[str, Any]:
         "tokens": [_plain_semantic(token) for token in _get(value, "tokens", ())],
         "markers": list(_get(value, "markers", ())),
     }
+    if include_boundaries:
+        for key in ("boundary_before", "boundary_after"):
+            boundaries = _get(value, key, ())
+            if boundaries:
+                result[key] = list(boundaries)
     for key in ("pause_before", "pause_after"):
         pause = _flow_pause_semantics(_get(value, key))
         if pause is not None:

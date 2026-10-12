@@ -9,7 +9,9 @@ from .model import (
     AudioDirective,
     BoundaryEvent,
     FlowPlan,
+    LegacyFlowPlan,
     LegacyPause,
+    LegacyPauseKind,
     Marker,
     PauseIntent,
     PlanSegment,
@@ -55,13 +57,16 @@ def format_explanation(
     details: bool = False,
     trace: PreparationTrace | None = None,
 ) -> str:
-    """Explain executable v6 flow, source provenance, and compiler details when a trace is supplied."""
+    """Explain executable v7 flow, source provenance, and compiler details when a trace is supplied."""
     lines = ["UtterPlan explanation", "", "Plan"]
     lines.append(f"  schema: {plan.schema_version}")
     lines.append(f"  default language: {plan.language}")
-    lines.append(f"  grouping: {plan.unit}")
+    if isinstance(plan, LegacyFlowPlan):
+        lines.append(f"  historical grouping: {plan.unit}")
+    else:
+        lines.append("  grouping: paragraph-local")
     lines.append(
-        f"  result: {_count(len(plan.flow), 'unit')}, {_count(_flow_segment_count(plan), 'segment')}"
+        f"  result: {_count(len(plan.flow), 'flow block')}, {_count(_flow_segment_count(plan), 'segment')}"
     )
     lines.append(f"  document format: {plan.document.format or 'unknown'}")
     if plan.document.title:
@@ -436,7 +441,7 @@ def _format_segment_tokens(plan: UtterancePlan, segment: PlanSegment) -> list[st
 
 
 def _format_pause(
-    pause: PauseIntent | LegacyPause | None, *, edge: Literal["before", "after"]
+    pause: PauseIntent | LegacyPause | LegacyPauseKind | None, *, edge: Literal["before", "after"]
 ) -> list[str]:
     if pause is None:
         return []
@@ -444,7 +449,11 @@ def _format_pause(
         if pause.seconds == 0 and not pause.events:
             return []
         return [f"       {edge}: legacy pause {pause.seconds:g}s"]
-    value = f"timed {pause.time}" if pause.type == "timed" else pause.type
+    value = (
+        f"timed {pause.time}"
+        if isinstance(pause, PauseIntent) and pause.type == "timed"
+        else pause.type
+    )
     return [f"       {edge}: pause {value}"]
 
 

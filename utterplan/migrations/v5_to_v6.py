@@ -5,7 +5,7 @@ from copy import deepcopy
 from typing import Any
 
 from ..exceptions import PlanMigrationError
-from ..hashing import FLOW_HASH_SCHEMA, V5_FLOW_HASH_SCHEMA, flow_plan_id
+from ..hashing import V5_FLOW_HASH_SCHEMA, V6_FLOW_HASH_SCHEMA, flow_plan_id
 from .registry import register_migration
 
 
@@ -37,7 +37,7 @@ def migrate_v5_to_v6(data: Mapping[str, Any]) -> dict[str, Any]:
 
     result = deepcopy(dict(data))
     result["schema_version"] = 6
-    result["hash_schema"] = FLOW_HASH_SCHEMA
+    result["hash_schema"] = V6_FLOW_HASH_SCHEMA
     result["plan_id"] = ""
     result["plan_id"] = flow_plan_id(result)
     return result

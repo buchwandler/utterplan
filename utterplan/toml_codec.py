@@ -10,12 +10,11 @@ import tomlkit
 from tomlkit.exceptions import ParseError
 
 from .codecs import v4_toml
-from .codecs.v5_toml import from_v5_toml_data
-from .codecs.v6_toml import dumps_v6_toml, from_v6_toml_data, to_v6_toml_data
+from .codecs.v7_toml import dumps_v7_toml, from_v7_toml_data, to_v7_toml_data
 from .exceptions import PlanFormatError, UnsupportedSchemaError
 from .migration import migrate_plan_data
 from .model import FlowPlan, UtterancePlan
-from .versioning import CURRENT_SCHEMA_VERSION, V4_SCHEMA_VERSION, V5_SCHEMA_VERSION
+from .versioning import CURRENT_SCHEMA_VERSION, V4_SCHEMA_VERSION
 
 
 def _plain(value: Any) -> Any:
@@ -35,20 +34,18 @@ def _current_flow_plan(plan: UtterancePlan | FlowPlan) -> FlowPlan:
         return FlowPlan.from_dict(migrate_plan_data(plan.to_dict()).data)
     if not isinstance(plan, UtterancePlan):
         raise PlanFormatError("unsupported plan object for TOML serialization", code="plan.type")
-    from .migrations.v4_to_v5 import migrate_v4_to_v5
+    from .flow_projection import project_compiler_plan
 
-    v5_data = migrate_v4_to_v5(plan.to_dict())
-    migrated = migrate_plan_data(v5_data)
-    return FlowPlan.from_dict(migrated.data)
+    return project_compiler_plan(plan)
 
 
 def to_toml_data(plan: UtterancePlan | FlowPlan) -> dict[str, Any]:
-    """Project any supported model to the current schema-v6 TOML wire format."""
-    return to_v6_toml_data(_current_flow_plan(plan))
+    """Project any supported model to the current schema-v7 TOML wire format."""
+    return to_v7_toml_data(_current_flow_plan(plan))
 
 
 def from_toml_data(data: Mapping[str, object]) -> FlowPlan:
-    """Decode v6 TOML or sequentially migrate frozen v4/v5 TOML into the current model."""
+    """Decode v7 TOML or sequentially migrate frozen historical TOML into the current model."""
     plain = _plain(data)
     if not isinstance(plain, Mapping):
         raise PlanFormatError("TOML root must be a table", code="toml.root")
@@ -56,13 +53,12 @@ def from_toml_data(data: Mapping[str, object]) -> FlowPlan:
     if type(version) is not int:
         raise UnsupportedSchemaError(version)
     if version == CURRENT_SCHEMA_VERSION:
-        current_plan = from_v6_toml_data(plain)
+        current_plan = from_v7_toml_data(plain)
         current_plan.validate()
         return current_plan
-    if version == V5_SCHEMA_VERSION:
-        legacy_v5 = from_v5_toml_data(plain)
-        migrated_v5 = migrate_plan_data(legacy_v5.to_dict())
-        current_plan = FlowPlan.from_dict(migrated_v5.data)
+    if version in {5, 6}:
+        migrated = migrate_plan_data(plain)
+        current_plan = FlowPlan.from_dict(migrated.data)
         current_plan.validate()
         return current_plan
     if version == V4_SCHEMA_VERSION:
@@ -77,12 +73,12 @@ def from_toml_data(data: Mapping[str, object]) -> FlowPlan:
 
 
 def dumps_toml(plan: UtterancePlan | FlowPlan) -> str:
-    """Serialize the current schema-v6 plan representation to TOML."""
-    return dumps_v6_toml(_current_flow_plan(plan))
+    """Serialize the current schema-v7 plan representation to TOML."""
+    return dumps_v7_toml(_current_flow_plan(plan))
 
 
 def loads_toml(value: object) -> FlowPlan:
-    """Parse supported TOML and return a validated schema-v6 FlowPlan."""
+    """Parse supported TOML and return a validated schema-v7 FlowPlan."""
     if not isinstance(value, str):
         raise PlanFormatError("TOML input must be text", code="toml.type")
     try:
@@ -96,14 +92,14 @@ def loads_toml(value: object) -> FlowPlan:
 
 
 def dump(plan: UtterancePlan | FlowPlan, path: str | Path) -> None:
-    """Atomically write a current schema-v6 TOML plan."""
+    """Atomically write a current schema-v7 TOML plan."""
     from .atomic_io import atomic_write_text
 
     atomic_write_text(path, dumps_toml(plan), create_parent=True)
 
 
 def load(path: str | Path) -> FlowPlan:
-    """Read and decode a schema-v6 or sequentially migratable schema-v4/v5 TOML plan."""
+    """Read and decode a schema-v7 or sequentially migratable schema-v4/v5 TOML plan."""
     return loads_toml(Path(path).read_text(encoding="utf-8"))
 
 

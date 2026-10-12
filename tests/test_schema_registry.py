@@ -19,22 +19,23 @@ from utterplan.versioning import (
 
 def test_schema_registry_separates_supported_plans_from_historical_json_schemas() -> None:
     assert FORMAT == "utterplan"
-    assert CURRENT_SCHEMA_VERSION == 6
+    assert CURRENT_SCHEMA_VERSION == 7
     assert SCHEMA_VERSION == CURRENT_SCHEMA_VERSION
     assert OLDEST_SUPPORTED_SCHEMA_VERSION == 1
-    assert SUPPORTED_SCHEMA_VERSIONS == (1, 2, 3, 4, 5, 6)
+    assert SUPPORTED_SCHEMA_VERSIONS == (1, 2, 3, 4, 5, 6, 7)
     assert JSON_SCHEMA_VERSIONS == (1, 2, 3, 4)
     assert schema_versions() == JSON_SCHEMA_VERSIONS
     assert all(has_schema(version) for version in JSON_SCHEMA_VERSIONS)
     assert not has_schema(5)
     assert not has_schema(6)
+    assert not has_schema(7)
     for version in JSON_SCHEMA_VERSIONS:
         assert schema(version)["properties"]["schema_version"]["const"] == version
     with pytest.raises(ValueError, match="no historical JSON schema"):
         schema(5)
 
 
-def test_default_json_schema_is_the_latest_historical_schema_not_current_v6() -> None:
+def test_default_json_schema_is_the_latest_historical_schema_not_current_v7() -> None:
     assert schema() == schema(4)
     assert CURRENT_SCHEMA_VERSION not in JSON_SCHEMA_VERSIONS
 

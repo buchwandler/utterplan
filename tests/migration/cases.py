@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from utterplan import LinguisticsConfig, PauseConfig, PlannerConfig
+from utterplan import LinguisticsConfig, PlannerConfig
 
 
 @dataclass(frozen=True)
@@ -29,7 +29,6 @@ IDENTITY = PlannerConfig(
 AUTO = PlannerConfig(
     language="en-us",
     document_format="plain",
-    pauses=PauseConfig(mode="auto"),
     renderability_mode="strict",
     linguistics=FALLBACK_LINGUISTICS,
 )

@@ -61,7 +61,6 @@ def test_v5_flow_model_is_sufficient_for_a_single_pass_renderer() -> None:
     )
     plan = FlowPlan(
         language="en-US",
-        unit="sentence",
         flow=(FlowUnit((first, second)),),
         document=DocumentInfo(format="ssmd", ssmd_version="0.9", title="Example"),
         linguistics=(LinguisticProvenance("en-US", "fallback"),),
@@ -77,10 +76,10 @@ def test_v5_flow_model_is_sufficient_for_a_single_pass_renderer() -> None:
     assert FlowPlan.from_toml(plan.to_toml()) == plan
 
 
-def test_v5_pause_and_local_token_invariants_are_checked() -> None:
+def test_authored_pause_and_local_token_invariants_are_checked() -> None:
     with pytest.raises(ValueError, match="requires time"):
         PauseIntent("timed")
-    with pytest.raises(ValueError, match="only valid"):
+    with pytest.raises(ValueError, match="unsupported pause intent"):
         PauseIntent("sentence", "500ms")
     with pytest.raises(ValueError, match="ordered"):
         FlowSegment("abcdef", "en-US", tokens=(TokenView(2, 4), TokenView(1, 3)))
@@ -127,7 +126,7 @@ def test_direct_audio_directive_round_trips_in_flow_model() -> None:
         language="en-US",
         directives=SegmentDirectives(audio=AudioDirective(src="sfx:bell")),
     )
-    plan = FlowPlan(language="en-US", unit="paragraph", flow=(FlowUnit((segment,)),))
+    plan = FlowPlan(language="en-US", flow=(FlowUnit((segment,)),))
 
     assert render_flow(plan)[0]["audio_src"] == "sfx:bell"
     assert FlowPlan.from_toml(plan.to_toml()) == plan

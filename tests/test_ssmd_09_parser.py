@@ -12,7 +12,7 @@ from utterplan import FlowPlan, PauseIntent, PlannerConfig
 from utterplan.cli import _format_for_path, main
 from utterplan.exceptions import PlanFormatError
 from utterplan.language import language_lookup_key
-from utterplan.pauses import boundary_is_active
+from utterplan.pauses import boundary_is_materializable
 
 
 def _installed_ssmd_version() -> tuple[int, int, int]:
@@ -256,7 +256,7 @@ def test_heading_events_are_preserved_but_inactive_for_pause_resolution() -> Non
 
     assert [event.attrs["level"] for event in headings] == ["1", "2"]
     assert all(event.attrs["structural_only"] for event in headings)
-    assert all(not boundary_is_active(event, _planner().config.pauses) for event in headings)
+    assert all(not boundary_is_materializable(event) for event in headings)
 
 
 def test_cli_auto_detection_recognizes_ssmd_names_and_versioned_markdown(tmp_path: Path) -> None:
@@ -377,7 +377,7 @@ def test_sequence_fallback_mode_roundtrips_and_is_part_of_plan_identity() -> Non
 
     restored = type(plan).from_dict(plan.to_dict())
     assert restored.document_metadata["sequence_fallback_mode"] == "preserve"
-    assert FlowPlan.from_toml(_planner().compile(source).plan.to_toml()).schema_version == 6
+    assert FlowPlan.from_toml(_planner().compile(source).plan.to_toml()).schema_version == 7
 
     changed_policy = replace(
         plan,

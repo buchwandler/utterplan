@@ -5,16 +5,18 @@ from pathlib import Path
 from utterplan import (
     FlowPlan,
     LinguisticsConfig,
-    PauseConfig,
     PauseIntent,
     PlannerConfig,
     UtterancePlanner,
     compile_document,
 )
+from utterplan.model import LegacyPauseKind
 
 
-def _fake_renderer(plan: FlowPlan) -> list[tuple[str, str, tuple[str, ...], PauseIntent | None]]:
-    """Consume only local v6 flow, without compiler lookup tables or joins."""
+def _fake_renderer(
+    plan: FlowPlan,
+) -> list[tuple[str, str, tuple[str, ...], PauseIntent | LegacyPauseKind | None]]:
+    """Consume only local v7 flow, without compiler lookup tables or joins."""
     rendered = []
     for unit in plan.flow:
         for segment in unit.segments:
@@ -29,9 +31,66 @@ def _fake_renderer(plan: FlowPlan) -> list[tuple[str, str, tuple[str, ...], Paus
     return rendered
 
 
+def _sentence_chunks(plan: FlowPlan) -> tuple[tuple[str, ...], ...]:
+    chunks: list[tuple[str, ...]] = []
+    pending: list[str] = []
+    for unit in plan.flow:
+        for segment in unit.segments:
+            pending.append(segment.text)
+            if {"sentence", "paragraph"}.intersection(segment.boundary_after):
+                chunks.append(tuple(pending))
+                pending = []
+    if pending:
+        chunks.append(tuple(pending))
+    return tuple(chunks)
+
+
+def _paragraph_chunks(plan: FlowPlan) -> tuple[tuple[str, ...], ...]:
+    return tuple(tuple(segment.text for segment in unit.segments) for unit in plan.flow)
+
+
+def _fake_token_budget_chunks(plan: FlowPlan, budget: int) -> tuple[tuple[str, ...], ...]:
+    """Model a downstream counter; it deliberately does not use UtterPlan tokens."""
+    chunks: list[tuple[str, ...]] = []
+    pending: list[str] = []
+    count = 0
+    for unit in plan.flow:
+        for segment in unit.segments:
+            segment_count = len(segment.text.split())
+            if pending and count + segment_count > budget:
+                chunks.append(tuple(pending))
+                pending = []
+                count = 0
+            pending.append(segment.text)
+            count += segment_count
+    if pending:
+        chunks.append(tuple(pending))
+    return tuple(chunks)
+
+
+def _pause_strategy_view(plan: FlowPlan, strategy: str) -> tuple[object, ...]:
+    segments = [segment for unit in plan.flow for segment in unit.segments]
+    if strategy == "native":
+        return tuple(segment.pause_before or segment.pause_after for segment in segments)
+    if strategy == "automatic":
+        return tuple((*segment.boundary_before, *segment.boundary_after) for segment in segments)
+    if strategy == "manual":
+        return tuple(
+            (
+                segment.pause_before,
+                segment.pause_after,
+                segment.boundary_before,
+                segment.boundary_after,
+            )
+            for segment in segments
+        )
+    raise AssertionError(f"unknown fake renderer strategy: {strategy}")
+
+
 def assert_public_consumer_contract(plan: FlowPlan) -> None:
     serialized = plan.to_dict()
-    assert serialized["schema_version"] == 6
+    assert serialized["schema_version"] == 7
+    assert "unit" not in serialized
     assert "flow" in serialized
     assert not {
         "texts",
@@ -88,26 +147,64 @@ One. @mark [Two]{voice="narrator"}."""
     assert_public_consumer_contract(plan)
 
 
-def test_explicit_and_parenthetical_pauses_are_semantic_intents() -> None:
+def test_one_saved_plan_supports_downstream_chunk_and_pause_choices() -> None:
+    source = "One two. ...500ms Three four five. Six seven.\n\nEight nine."
+    plan = UtterancePlanner(
+        PlannerConfig(
+            language="en-us",
+            document_format="ssmd",
+            text_preparation="identity",
+        )
+    ).plan(source)
+    original_toml = plan.to_toml()
+    original_id = plan.plan_id
+
+    sentence_chunks = _sentence_chunks(plan)
+    paragraph_chunks = _paragraph_chunks(plan)
+    budget_chunks = _fake_token_budget_chunks(plan, budget=6)
+
+    assert sentence_chunks == (
+        ("One two.",),
+        ("Three four five.",),
+        ("Six seven.",),
+        ("Eight nine.",),
+    )
+    assert paragraph_chunks == (("One two.", "Three four five.", "Six seven."), ("Eight nine.",))
+    assert budget_chunks == (("One two.", "Three four five."), ("Six seven.", "Eight nine."))
+    assert len({sentence_chunks, paragraph_chunks, budget_chunks}) == 3
+
+    native = _pause_strategy_view(plan, "native")
+    automatic = _pause_strategy_view(plan, "automatic")
+    manual = _pause_strategy_view(plan, "manual")
+    assert native[0] == PauseIntent("timed", "500ms")
+    assert automatic[0] == ("sentence",)
+    assert manual[0] == (None, PauseIntent("timed", "500ms"), (), ("sentence",))
+    assert plan.plan_id == original_id
+    assert plan.to_toml() == original_toml
+
+
+def test_explicit_authored_pauses_and_parenthetical_boundaries_are_separate() -> None:
     explicit = UtterancePlanner(
         PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
     ).plan("Hello ...c world")
     parenthetical = UtterancePlanner(
-        PlannerConfig(
-            language="en-us",
-            text_preparation="identity",
-            pauses=PauseConfig(mode="auto"),
-        )
+        PlannerConfig(language="en-us", text_preparation="identity")
     ).plan("The backup battery (still warm) sat beside the console.")
 
     assert any(
-        pause is not None
+        pause == PauseIntent("medium")
         for unit in explicit.flow
         for segment in unit.segments
         for pause in (segment.pause_before, segment.pause_after)
     )
     assert any(
-        pause == PauseIntent("parenthetical")
+        "parenthetical" in (*segment.boundary_before, *segment.boundary_after)
+        for unit in parenthetical.flow
+        for segment in unit.segments
+    )
+    assert all(
+        pause is None
+        or pause.type not in {"clause", "sentence", "paragraph", "parenthetical", "voice_change"}
         for unit in parenthetical.flow
         for segment in unit.segments
         for pause in (segment.pause_before, segment.pause_after)
@@ -116,22 +213,23 @@ def test_explicit_and_parenthetical_pauses_are_semantic_intents() -> None:
     assert_public_consumer_contract(parenthetical)
 
 
-def test_multilingual_and_sentence_units_remain_in_render_order() -> None:
+def test_multilingual_segments_remain_in_paragraph_local_render_order() -> None:
     plan = UtterancePlanner(
         PlannerConfig(
             language="en-us",
             document_format="ssmd",
-            unit="sentence",
             text_preparation="identity",
         )
     ).plan('One. [Bonjour.]{lang="fr"}')
 
     rendered = _fake_renderer(plan)
     assert [item[1] for item in rendered] == ["en-us", "fr"]
-    assert len(plan.flow) == 2
+    assert len(plan.flow) == 1
     assert [[segment.text for segment in unit.segments] for unit in plan.flow] == [
-        ["One."],
-        ["Bonjour."],
+        [
+            "One.",
+            "Bonjour.",
+        ]
     ]
     assert_public_consumer_contract(plan)
 
@@ -155,10 +253,14 @@ def test_zero_width_media_is_available_from_the_owning_segment() -> None:
     assert_public_consumer_contract(plan)
 
 
-def test_shared_fixture_has_one_canonical_v5_semantic_interpretation() -> None:
+def test_v5_fixture_boundary_semantics_are_projected_into_v7_opportunities() -> None:
+    from utterplan.codecs.v5_toml import loads_v5_toml
+
     fixtures = Path(__file__).parent / "fixtures"
     source = (fixtures / "canonical_consumer_contract.ssmd").read_text(encoding="utf-8")
-    expected = FlowPlan.load(fixtures / "canonical_consumer_contract.expected.toml")
+    expected = loads_v5_toml(
+        (fixtures / "canonical_consumer_contract.expected.toml").read_text(encoding="utf-8")
+    )
     result = compile_document(
         source,
         input_format="ssmd",
@@ -170,13 +272,20 @@ def test_shared_fixture_has_one_canonical_v5_semantic_interpretation() -> None:
         ),
     )
 
-    assert result.plan.plan_id != expected.plan_id  # V5 has no exact-source identity
+    current_segments = [segment for unit in result.plan.flow for segment in unit.segments]
+    old_segments = [segment for unit in expected.flow for segment in unit.segments]
+    assert result.plan.plan_id != expected.plan_id
     assert result.plan.source is not None and result.plan.source.text == source
-    assert result.plan.flow == expected.flow
+    assert [segment.text for segment in current_segments] == [
+        segment.text for segment in old_segments
+    ]
     assert result.plan.document == expected.document
     assert result.plan.linguistics == expected.linguistics
-    assert result.plan.flow[0].segments[0].directives.voice is not None
-    assert result.plan.flow[0].segments[0].pause_after == PauseIntent("sentence")
+    assert current_segments[0].directives.voice is not None
+    assert current_segments[0].boundary_after == ("sentence", "voice_change")
+    assert current_segments[0].pause_after is None
+    assert old_segments[0].pause_after is not None
+    assert old_segments[0].pause_after.to_dict() == "sentence"
     assert_public_consumer_contract(result.plan)
 
 

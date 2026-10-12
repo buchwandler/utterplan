@@ -23,7 +23,6 @@ def _plan_with(boundaries: tuple[SemanticBoundary, ...]) -> UtterancePlan:
         plan.segments,
         plan.markers,
         plan.tokens,
-        str(plan.config["unit"]),
         boundaries,
     )
     return replace(plan, semantic_boundaries=boundaries, units=units).with_identity()

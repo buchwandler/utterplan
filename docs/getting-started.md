@@ -41,12 +41,12 @@ Without `-o`, the complete canonical TOML plan is written to stdout. Status mess
 
 ## Defaults and linguistic resources
 
-Text preparation defaults to `auto`: plain text resolves to TTSReady/Spokenform, while SSMD resolves to authoritative `ssmd` mode and consumes reviewed `sub` aliases without another automatic preparation pass. Explicit `spokenform` on SSMD is a warned legacy mode. Pause activation defaults to `tts`, and spaCy uses best-effort `auto` with deterministic fallback; UtterPlan never downloads models.
+Text preparation defaults to `auto`: plain text resolves to TTSReady/Spokenform, while SSMD resolves to authoritative `ssmd` mode and consumes reviewed `sub` aliases without another automatic preparation pass. Explicit `spokenform` on SSMD is a warned legacy mode. There is no compile-time pause activation or renderer chunking choice; safe boundary opportunities and authored pauses are stored separately for downstream use. SpaCy uses best-effort `auto` with deterministic fallback; UtterPlan never downloads models.
 
 Use `--spacy off` to force fallback, or `--spacy sm|md|lg|trf` to require a specific local tier. Python `LinguisticsConfig` has the same best-effort default. Install the optional library with `python -m pip install 'utterplan[spacy]'` when needed; install language model packages separately.
 Language model packages remain explicit environment dependencies; UtterPlan never downloads them.
 
-Final v6 token fields (`pos`, `tag`, `lemma`, and `morph`) describe prepared segment text and are the downstream linguistic context. Optional replacement spans are local to that final text; preserve the trace sidecar for full source-coordinate maps and preparation diagnostics.
+Final v7 token fields (`pos`, `tag`, `lemma`, and `morph`) describe prepared segment text and are the downstream linguistic context, not engine/model token counts. Optional replacement spans are local to that final text; preserve the trace sidecar for full source-coordinate maps and preparation diagnostics.
 
 ```bash
 utterplan compile "Hello world." --lang en-us -o hello.utterplan.toml
@@ -83,7 +83,7 @@ cd "Platform Decay - Martha Wells.ssmdbook"
 utterplan compile-book chapters --chapters 5-17
 ```
 
-This writes one independent canonical v6 plan per selected chapter and a TOML report by default:
+This writes one independent canonical v7 plan per selected chapter and a TOML report by default:
 
 ```text
 utterplan/
@@ -99,10 +99,13 @@ Safe punctuation repair is enabled by default for both `compile` and `compile-ma
 
 ## Inspect and validate
 
-````bash
+```bash
 utterplan validate hello.utterplan.toml
 utterplan inspect hello.utterplan.toml --segment 0
 utterplan inspect hello.utterplan.toml --unit 0 --boundaries --tokens
+```
+
+`inspect --unit` only selects a saved flow unit for inspection; it is not a compile-time renderer grouping option.
 
 ## SSMD
 
@@ -111,13 +114,13 @@ SSMD is selected by `.ssmd` or `.ssmd.md` suffixes, an SSMD version header in Ma
 ```bash
 printf '[Hello]{lang="en-us"} ...s [Bonjour]{lang="fr"}.\n' \
   | utterplan compile --lang en-us --input-format ssmd
-````
+```
 
-UtterPlan parses SSMD dialect 0.9 only, including canonical fragments without a version header when explicitly selected. Older SSMD source must be converted first: `ssmd migrate old.ssmd --to 0.9`. `utterplan migrate` explicitly imports historical UtterPlan JSON plans into TOML; it does not migrate source files.
+UtterPlan parses SSMD dialect 0.9 only, including canonical fragments without a version header when explicitly selected. Older SSMD source must be converted first: `ssmd migrate old.ssmd --to 0.9`. `utterplan migrate` handles serialized-plan migration only; v6-to-v7 promotion may return `migration.recompile_required`, in which case recompile the original source. It does not migrate source files.
 
-The compiled plan preserves compact document metadata, exact raw source in the optional v6 `source` record, effective directives, and semantic pause intent. Audio and extension references are descriptive data only; consumers decide how to interpret them.
+The compiled plan preserves compact document metadata, exact raw source in the optional v7 `source` record, effective directives, canonical boundary opportunities, and authored pause intent. Audio and extension references are descriptive data only; consumers decide how to interpret them.
 
-The v6 plan stores exact raw input once in an optional source record, plus prepared segment text, local token spans, and compact replacement views. It does not store structural text or dense source/preparation maps; preserve an optional trace sidecar for those details:
+The v7 plan stores exact raw input once in an optional source record, plus prepared segment text, local token spans, and compact replacement views. It does not store structural text or dense source/preparation maps; preserve an optional trace sidecar for those details:
 
 ```bash
 utterplan compile chapter.ssmd.md -o chapter.utterplan.toml --trace chapter.trace.toml
@@ -125,4 +128,4 @@ utterplan explain chapter.utterplan.toml --trace chapter.trace.toml
 utterplan inspect-trace chapter.trace.toml --preparation --boundaries
 ```
 
-Trace data contains source text/hash, preparation maps, diagnostics, and renderability evidence. Exact raw input is also stored in the optional v6 plan source record; trace data does not change plan TOML or identity. Segment token offsets are local Python-character ranges into each owning segment's `text`.
+Trace data contains source text/hash, preparation maps, diagnostics, and renderability evidence. Exact raw input is also stored in the optional v7 plan source record; trace data does not change plan TOML or identity. Segment token offsets are local Python-character ranges into each owning segment's `text`.

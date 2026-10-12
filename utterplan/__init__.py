@@ -1,6 +1,7 @@
 from ._version import __version__
 from .attempts import PlanDraft, PlanningAttempt, PlanningAttemptStatus
 from .batch import BatchProgressCallback, CompileOutcome, CompileRequest, compile_to_files
+from .boundaries import BoundaryKind
 from .compiler import (
     CompileResult,
     InputFormat,
@@ -12,7 +13,6 @@ from .compiler import (
 )
 from .config import (
     LinguisticsConfig,
-    PauseConfig,
     PlannerConfig,
     SSMDConfig,
 )
@@ -43,6 +43,7 @@ from .model import (
     FlowPlan,
     FlowSegment,
     FlowUnit,
+    LegacyFlowPlan,
     LinguisticProvenance,
     LinguisticRun,
     Marker,
@@ -87,6 +88,7 @@ from .versioning import (
     SUPPORTED_SCHEMA_VERSIONS,
     V4_SCHEMA_VERSION,
     V5_SCHEMA_VERSION,
+    V6_SCHEMA_VERSION,
 )
 
 __all__ = [
@@ -106,7 +108,6 @@ __all__ = [
     "PlanDraft",
     "compile_to_files",
     "PlannerConfig",
-    "PauseConfig",
     "LinguisticsConfig",
     "SSMDConfig",
     "UtterancePlanner",
@@ -127,6 +128,7 @@ __all__ = [
     "ProgressPhase",
     "UtterancePlan",
     "FlowPlan",
+    "LegacyFlowPlan",
     "FlowUnit",
     "FlowSegment",
     "PauseIntent",
@@ -143,6 +145,7 @@ __all__ = [
     "TokenAnnotation",
     "AnnotationSpan",
     "BoundaryEvent",
+    "BoundaryKind",
     "SemanticBoundary",
     "SegmentDirectives",
     "VoiceDirective",
@@ -175,6 +178,7 @@ __all__ = [
     "JSON_SCHEMA_VERSIONS",
     "V4_SCHEMA_VERSION",
     "V5_SCHEMA_VERSION",
+    "V6_SCHEMA_VERSION",
     "CURRENT_SCHEMA_VERSION",
     "SUPPORTED_SCHEMA_VERSIONS",
     "MigrationResult",

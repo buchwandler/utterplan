@@ -1,6 +1,6 @@
 # Coordinate spaces
 
-Schema v6 keeps the executable plan compact: token coordinates are local to each `FlowSegment.text`, and exact raw input is stored once in an optional `PlanSource`; document-global source and preparation coordinates remain in an optional `PreparationTrace` sidecar.
+Schema v7 keeps the executable plan compact: token coordinates are local to each `FlowSegment.text`, and exact raw input is stored once in an optional `PlanSource`; document-global source and preparation coordinates remain in an optional `PreparationTrace` sidecar.
 
 ## Executable plan coordinates
 
@@ -8,7 +8,7 @@ Schema v6 keeps the executable plan compact: token coordinates are local to each
 
 Optional `replacement.span` entries use this same segment-local coordinate space: they slice the final prepared text. The paired `replacement.source` value is the original spelling, not a source offset. Thus a prepared output such as `A R T` can record source `ART` while the exact original source location and complete transformation maps remain available only in the optional trace sidecar; the raw source text itself is retained in `FlowPlan.source` when available.
 
-Pauses, directives, markers, and optional heading levels are attached directly to their owning flow-segment edge or segment. They have no independent text coordinate. Flow-unit and segment order is the render order.
+Pauses, directives, markers, and optional heading levels are attached directly to their owning flow-segment edge or segment. They have no independent text coordinate. Flow-unit and segment order is the canonical flow order; downstream chunkers may group segments but preserve their order.
 
 ## Optional trace coordinates
 
@@ -23,6 +23,6 @@ Trace coordinates use Python string character boundaries (Unicode code points), 
 
 ## Compiler-only segmentation coordinates
 
-Paragraph, sentence, and sentence-part spans use half-open Python-character offsets into the prepared global `spoken_text`. PhraseSplit offsets are run-local and are translated to global spoken coordinates exactly once before validation. Renderer segments retain the exact `spoken_text[start:end]` slice; language-run edges and other required renderer cuts do not change their owning paragraph, sentence, or part index. These spans are compiler topology, not fields in the v6 flow. Segmentation diagnostics map their spoken ranges back to exact source coordinates through the compiler's source map.
+Paragraph, sentence, and sentence-part spans use half-open Python-character offsets into the prepared global `spoken_text`. PhraseSplit offsets are run-local and are translated to global spoken coordinates exactly once before validation. Renderer segments retain the exact `spoken_text[start:end]` slice; language-run edges and other compiler-required segment cuts do not change their owning paragraph, sentence, or part index. Sentence-part spans remain private; v7 flow segments expose canonical safe-boundary kinds instead of global offsets. Segmentation diagnostics map their spoken ranges back to exact source coordinates through the compiler's source map.
 
 Diagnostic source offsets use the exact original-source coordinate space. Diagnostic `line` and `column` values are 1-based; columns count Python characters from the start of a line. The trace retains all these maps and source evidence. `FlowPlan.source` retains raw input when available, but the executable plan does not contain the maps or diagnostic source offsets.

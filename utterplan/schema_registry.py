@@ -24,7 +24,7 @@ def has_schema(version: int) -> bool:
 
 
 def schema(version: int | None = None) -> dict[str, Any]:
-    """Load a frozen historical JSON schema; current v6 and historical v5 use their versioned TOML/model contracts."""
+    """Load a frozen historical JSON schema; current v7 and historical v5/v6 use their versioned TOML/model contracts."""
     selected = max(JSON_SCHEMA_VERSIONS) if version is None else version
     if selected not in _SCHEMA_RESOURCES:
         raise ValueError(f"no historical JSON schema for UtterPlan version: {selected}")

@@ -199,7 +199,7 @@ def test_schema_v3_loading_rejects_punctuation_only_renderer_segment() -> None:
     invalid_plan = replace(
         plan,
         segments=(invalid_segment,),
-        units=make_units((invalid_segment,), plan.markers, plan.tokens, "paragraph"),
+        units=make_units((invalid_segment,), plan.markers, plan.tokens),
     ).with_identity()
 
     with pytest.raises(PlanValidationError) as error:

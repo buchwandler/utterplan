@@ -58,7 +58,7 @@ def _report(path: Path) -> dict[str, object]:
 
 def _plan_text(path: Path) -> str:
     plan = FlowPlan.load(path)
-    assert plan.schema_version == 6
+    assert plan.schema_version == 7
     return " ".join(segment.text for unit in plan.flow for segment in unit.segments)
 
 

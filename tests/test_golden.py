@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from utterplan import FlowPlan, PauseIntent, PlannerConfig, UtterancePlanner
+from utterplan.exceptions import PlanMigrationError
 
 ROOT = Path(__file__).resolve().parent
 HISTORICAL_TOML = sorted(
@@ -13,16 +16,15 @@ HISTORICAL_TOML = sorted(
 COMPREHENSIVE_SOURCE = ROOT / "fixtures" / "ssmd_09_comprehensive.ssmd"
 
 
-def test_historical_toml_goldens_migrate_to_current_v6_and_round_trip() -> None:
+def test_historical_toml_goldens_require_source_recompilation_for_v7() -> None:
     assert HISTORICAL_TOML
     for path in HISTORICAL_TOML:
-        plan = FlowPlan.load(path)
-        assert plan.schema_version == 6
-        assert FlowPlan.from_toml(plan.to_toml()) == plan
-        assert FlowPlan.from_dict(plan.to_dict()) == plan
+        with pytest.raises(PlanMigrationError) as error:
+            FlowPlan.load(path)
+        assert error.value.code == "migration.recompile_required"
 
 
-def test_canonical_ssmd_09_compiles_to_deterministic_v6_flow() -> None:
+def test_canonical_ssmd_09_compiles_to_deterministic_v7_flow() -> None:
     source = COMPREHENSIVE_SOURCE.read_text(encoding="utf-8")
     config = PlannerConfig(
         language="en-us",
@@ -35,8 +37,8 @@ def test_canonical_ssmd_09_compiles_to_deterministic_v6_flow() -> None:
     repeated = planner.plan(source)
 
     assert plan == repeated
-    assert plan.schema_version == 6
-    assert plan.plan_id == "sha256:28d882fe67611c7258cdbb222506837d4a5f703cb8cffdef7693b41940407f02"
+    assert plan.schema_version == 7
+    assert plan.plan_id == "sha256:620d293bb2b638b6a6ace0857ed8017259a0558e3660835f607791b9b4c67e47"
     assert plan.document.format == "ssmd"
     assert plan.document.ssmd_version == "0.9"
     assert plan.document.title == "Renderer-neutral SSMD 0.9 contract"

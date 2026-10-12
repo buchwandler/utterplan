@@ -10,6 +10,7 @@ from utterplan import (
     FlowPlan,
     FlowSegment,
     FlowUnit,
+    LegacyFlowPlan,
     LinguisticsConfig,
     PlanFormatError,
     PlannerConfig,
@@ -23,13 +24,12 @@ from utterplan.flow_projection import project_compiler_plan
 from utterplan.hashing import V5_FLOW_HASH_SCHEMA
 
 
-def _compile_flow(text: str, *, unit: str = "paragraph") -> FlowPlan:
+def _compile_flow(text: str) -> FlowPlan:
     config = PlannerConfig(
         language="en-us",
-        unit=unit,
         linguistics=LinguisticsConfig(use_spacy=False),
     )
-    compiler_plan = CompilerTestPlanner(config).plan(text, unit=unit)
+    compiler_plan = CompilerTestPlanner(config).plan(text)
     return project_compiler_plan(compiler_plan)
 
 
@@ -67,7 +67,6 @@ def test_art_replacement_projects_to_compact_segment_local_v5_provenance() -> No
 
     example = FlowPlan(
         language="en-us",
-        unit="paragraph",
         flow=(
             FlowUnit(
                 (
@@ -117,10 +116,9 @@ def test_malformed_or_unlocalizable_replacement_provenance_is_rejected() -> None
     split_plan = CompilerTestPlanner(
         PlannerConfig(
             language="en-us",
-            unit="sentence",
             linguistics=LinguisticsConfig(use_spacy=False),
         )
-    ).plan("Alpha. Beta.", unit="sentence")
+    ).plan("Alpha. Beta.")
     crossing = {
         "output_start": 4,
         "output_end": 8,
@@ -147,8 +145,24 @@ def test_replacement_view_and_flow_segment_validate_local_spans() -> None:
 
 def test_v5_replacement_columns_reject_invalid_cardinality_bounds_and_sparse_indexes() -> None:
     flow = _compile_flow("Dr. bought 5 kg.")
-    v5_flow = replace(
-        flow, schema_version=5, hash_schema=V5_FLOW_HASH_SCHEMA, source=None, plan_id=""
+    v5_flow = LegacyFlowPlan(
+        language=flow.language,
+        unit="paragraph",
+        flow=tuple(
+            FlowUnit(
+                tuple(
+                    replace(segment, boundary_before=(), boundary_after=())
+                    for segment in unit.segments
+                )
+            )
+            for unit in flow.flow
+        ),
+        document=flow.document,
+        linguistics=flow.linguistics,
+        producer=flow.producer,
+        warnings=flow.warnings,
+        schema_version=5,
+        hash_schema=V5_FLOW_HASH_SCHEMA,
     )
     base = to_v5_toml_data(v5_flow)
 
@@ -191,7 +205,7 @@ def test_replacement_provenance_does_not_change_hashes_but_token_semantics_do() 
         tokens=(token,),
         replacements=(ReplacementView(0, 4, "LIVE", kind="structured", rule="rule-a"),),
     )
-    plan = FlowPlan(language="en-us", unit="paragraph", flow=(FlowUnit((segment,)),))
+    plan = FlowPlan(language="en-us", flow=(FlowUnit((segment,)),))
 
     changed_replacement = replace(
         segment.replacements[0], source="other", kind="abbreviation", rule="rule-b"

@@ -21,7 +21,7 @@ def plan() -> FlowPlan:
     return UtterancePlanner(PlannerConfig(language="en-us")).plan("Doctor Smith bought 5 kg.")
 
 
-def test_public_v6_toml_roundtrip_and_file_apis(tmp_path: Path) -> None:
+def test_public_v7_toml_roundtrip_and_file_apis(tmp_path: Path) -> None:
     original = plan()
     text = original.to_toml()
 
@@ -37,20 +37,20 @@ def test_public_v6_toml_roundtrip_and_file_apis(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8").startswith('format = "utterplan"')
 
 
-def test_current_v6_model_is_not_checked_against_historical_v4_json_schema() -> None:
+def test_current_v7_model_is_not_checked_against_historical_v4_json_schema() -> None:
     value = plan().to_dict()
-    assert value["schema_version"] == 6
+    assert value["schema_version"] == 7
     assert SCHEMA_PATH.name == "v4.schema.json"
     assert PACKAGE_SCHEMA_PATH == SCHEMA_PATH
     assert schema(4) == json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     with pytest.raises(ValueError, match="no historical JSON schema"):
-        schema(6)
-    assert validate_data(value).schema_version == 6
+        schema(7)
+    assert validate_data(value).schema_version == 7
 
 
 def test_future_schema_is_rejected() -> None:
     value = plan().to_dict()
-    value["schema_version"] = 7
+    value["schema_version"] = 8
     with pytest.raises(UnsupportedSchemaError):
         validate_data(value)
 
@@ -73,12 +73,12 @@ def test_toml_output_is_plain_engine_independent_flow_data_with_source() -> None
     text = plan().to_toml()
     assert "phonemes" not in text
     assert "numpy" not in text
-    assert "schema_version = 6" in text
+    assert "schema_version = 7" in text
     assert "[source]" in text
     assert "token_indices" not in text
 
 
-def test_zero_width_media_roundtrip_uses_current_v6_flow_contract() -> None:
+def test_zero_width_media_roundtrip_uses_current_v7_flow_contract() -> None:
     result = UtterancePlanner(
         PlannerConfig(
             language="en-us",
@@ -88,7 +88,7 @@ def test_zero_width_media_roundtrip_uses_current_v6_flow_contract() -> None:
     ).plan('[]{src="sfx:impact.knock?seed=42"}')
 
     payload = result.to_dict()
-    assert payload["schema_version"] == 6
+    assert payload["schema_version"] == 7
     restored = FlowPlan.from_toml(result.to_toml())
     media = [
         segment

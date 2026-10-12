@@ -100,22 +100,19 @@ def test_optional_trace_explains_preparation_without_changing_plan_identity() ->
     assert any(change.source == "Dr." for change in unit.transformations)
 
 
-def test_trace_source_ranges_follow_sentence_units_after_text_expansion() -> None:
+def test_trace_source_ranges_follow_paragraph_units_after_text_expansion() -> None:
     text = "Dr. Smith has 5 kg. Second sentence."
-    config = PlannerConfig(language="en-us", unit="sentence")
+    config = PlannerConfig(language="en-us")
     result = compile_document(text, input_format="plain", config=config, trace=True)
 
     assert result.trace is not None
-    assert [unit.source_text for unit in result.trace.units] == [
-        "Dr. Smith has 5 kg.",
-        "Second sentence.",
-    ]
-    assert result.trace.units[0].prepared_text == "Doctor Smith has five kilograms."
+    assert [unit.source_text for unit in result.trace.units] == [text]
+    assert (
+        result.trace.units[0].prepared_text == "Doctor Smith has five kilograms. Second sentence."
+    )
     assert result.trace.units[0].source_start == 0
-    assert result.trace.units[0].source_end == len("Dr. Smith has 5 kg.")
-    assert result.trace.units[1].source_start == len("Dr. Smith has 5 kg. ")
-    assert result.trace.units[1].source_end == len(text)
-    assert result.trace.units[1].transformations == ()
+    assert result.trace.units[0].source_end == len(text)
+    assert [item.source for item in result.trace.units[0].transformations] == ["Dr.", "5 kg"]
 
 
 def test_plan_identity_is_repeatable_and_tracks_semantic_metadata() -> None:

@@ -19,7 +19,7 @@ def test_public_planner_identity() -> None:
     assert isinstance(plan, FlowPlan)
     payload = plan.to_dict()
     assert payload["format"] == "utterplan"
-    assert payload["schema_version"] == 6
+    assert payload["schema_version"] == 7
     assert payload["producer"]["name"] == "utterplan"
     assert payload["producer"]["text_preparation"] == "spokenform"
 
@@ -32,3 +32,5 @@ def test_public_package_resources() -> None:
     assert (package / "utterplan.schema.json").is_file()
     schemas = package / "schemas"
     assert all((schemas / f"v{version}.schema.json").is_file() for version in (1, 2, 3, 4))
+    assert (package / "codecs" / "v7_toml.py").is_file()
+    assert not (schemas / "v7.schema.json").exists()

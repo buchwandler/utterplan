@@ -18,13 +18,11 @@ class CompilerTestPlanner(PublicUtterancePlanner):
         text: str,
         *,
         config: PlannerConfig | None = None,
-        unit: str | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> Any:
         attempt, _trace = self._plan(
             text,
             config=config,
-            unit=unit,
             trace=False,
             on_progress=on_progress,
         )

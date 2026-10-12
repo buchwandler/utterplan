@@ -9,12 +9,12 @@ import pytest
 from utterplan import (
     FlowPlan,
     LinguisticsConfig,
-    PauseConfig,
     PlannerConfig,
     UtterancePlanner,
     compile_document,
+    migrate_plan_data,
 )
-from utterplan.exceptions import PlanValidationError
+from utterplan.exceptions import PlanMigrationError, PlanValidationError
 from utterplan.flow_projection import _token_providers, _tokens_for_segment
 from utterplan.migrations.v4_to_v5 import migrate_v4_to_v5
 from utterplan.model import LinguisticRun, TokenAnnotation
@@ -24,7 +24,7 @@ def _segments(plan: FlowPlan):
     return tuple(segment for unit in plan.flow for segment in unit.segments)
 
 
-def test_fresh_compile_returns_current_v6_local_flow() -> None:
+def test_fresh_compile_returns_current_v7_local_flow() -> None:
     text = 'Hello [world]{emphasis="strong"}.'
     config = PlannerConfig(language="en-us", document_format="ssmd", text_preparation="identity")
     result = compile_document(text, input_format="ssmd", config=config)
@@ -35,7 +35,7 @@ def test_fresh_compile_returns_current_v6_local_flow() -> None:
         planner.close()
 
     assert isinstance(result.plan, FlowPlan)
-    assert result.plan.schema_version == 6
+    assert result.plan.schema_version == 7
     assert planned == result.plan
     payload = result.plan.to_toml()
     assert payload == result.plan.to_toml()
@@ -51,50 +51,29 @@ def test_fresh_compile_returns_current_v6_local_flow() -> None:
     "fixture_name",
     ("basic_en", "ssmd_breaks", "markers", "multilingual", "parenthetical", "spokenform_offsets"),
 )
-def test_fresh_compilation_converges_with_v4_migration_on_unambiguous_input(
+def test_v4_migration_requires_recompile_and_fresh_compile_is_deterministic(
     fixture_name: str,
 ) -> None:
     fixture = Path(__file__).parent / f"migration/fixtures/v4/{fixture_name}.utterplan.json"
     v4_plan = json.loads(fixture.read_text(encoding="utf-8"))
     old_config = v4_plan["config"]
-    old_pauses = old_config.get("pauses", {})
     config = PlannerConfig(
         language=old_config["language"],
         document_format=old_config["document_format"],
-        unit=old_config.get("unit", "paragraph"),
         text_preparation=old_config.get("text_preparation", "spokenform"),
-        pauses=PauseConfig(
-            mode=old_pauses.get("mode", "tts"),
-            enabled=old_pauses.get("enabled", True),
-        ),
         linguistics=LinguisticsConfig(use_spacy=False),
     )
-    fresh = compile_document(
-        v4_plan["source"]["text"],
-        input_format=old_config["document_format"],
-        config=config,
+    source = v4_plan["source"]["text"]
+    fresh = compile_document(source, input_format=old_config["document_format"], config=config).plan
+    repeated = compile_document(
+        source, input_format=old_config["document_format"], config=config
     ).plan
-    migrated = FlowPlan.from_dict(migrate_v4_to_v5(v4_plan))
 
-    if fixture_name == "multilingual":
-        # The compiler now preserves the inter-language whitespace on the right-hand
-        # renderer segment instead of dropping it at the run boundary.
-        assert fresh.flow != migrated.flow
-        assert [[segment.text for segment in unit.segments] for unit in fresh.flow] == [
-            ["Hello", " Bonjour."]
-        ]
-        assert fresh.document == migrated.document
-        assert fresh.linguistics == migrated.linguistics
-        assert fresh.language == migrated.language
-        assert fresh.unit == migrated.unit
-    else:
-        assert fresh.source is not None and migrated.source is None
-        assert fresh.plan_id != migrated.plan_id  # V5 migration cannot recreate source provenance
-        assert fresh.flow == migrated.flow
-        assert fresh.document == migrated.document
-        assert fresh.linguistics == migrated.linguistics
-        assert fresh.language == migrated.language
-        assert fresh.unit == migrated.unit
+    assert fresh.schema_version == 7
+    assert fresh == repeated
+    with pytest.raises(PlanMigrationError) as error:
+        migrate_plan_data(migrate_v4_to_v5(v4_plan))
+    assert error.value.code == "migration.recompile_required"
 
 
 def test_fresh_compile_localizes_a_token_cut_by_ssmd_semantics() -> None:

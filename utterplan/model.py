@@ -8,12 +8,18 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from ._version import __version__
+from .boundaries import (
+    BoundaryKind,
+    canonicalize_boundary_kinds,
+    validate_canonical_boundary_kinds,
+)
 from .config import semantic_config
 from .exceptions import PlanFormatError, PlanValidationError, UnsupportedSchemaError
 from .hashing import (
     FLOW_HASH_SCHEMA,
     UNIT_HASH_SCHEMA,
     V5_FLOW_HASH_SCHEMA,
+    V6_FLOW_HASH_SCHEMA,
     flow_plan_id,
     flow_unit_hash,
     semantic_hash,
@@ -27,6 +33,7 @@ from .versioning import (
     FORMAT,
     V4_SCHEMA_VERSION,
     V5_SCHEMA_VERSION,
+    V6_SCHEMA_VERSION,
 )
 
 
@@ -404,11 +411,20 @@ class PlanSegment:
     clause: int = 0
     structural_start: int | None = None
     structural_end: int | None = None
-    pause_before: PauseIntent | LegacyPause | None = None
-    pause_after: PauseIntent | LegacyPause | None = None
+    pause_before: PauseIntent | LegacyPause | LegacyPauseKind | None = None
+    pause_after: PauseIntent | LegacyPause | LegacyPauseKind | None = None
     directives: SegmentDirectives = field(default_factory=SegmentDirectives)
     token_indices: tuple[int, ...] = ()
     annotation_ids: tuple[str, ...] = ()
+    boundary_before: tuple[BoundaryKind, ...] = ()
+    boundary_after: tuple[BoundaryKind, ...] = ()
+
+    def __post_init__(self) -> None:
+        for field_name in ("boundary_before", "boundary_after"):
+            values = getattr(self, field_name)
+            if not isinstance(values, tuple):
+                raise ValueError(f"{field_name} must be a tuple")
+            object.__setattr__(self, field_name, canonicalize_boundary_kinds(values))
 
     @property
     def char_start(self) -> int:
@@ -448,6 +464,10 @@ class PlanSegment:
             "token_indices": list(self.token_indices),
             "annotation_ids": list(self.annotation_ids),
         }
+        if self.boundary_before:
+            result["boundary_before"] = list(self.boundary_before)
+        if self.boundary_after:
+            result["boundary_after"] = list(self.boundary_after)
         if self.pause_before is not None:
             result["pause_before"] = self.pause_before.to_dict()
         if self.pause_after is not None:
@@ -860,6 +880,15 @@ def _expect(value: Any, expected: type | tuple[type, ...], path: str) -> Any:
     return value
 
 
+def _boundary_kinds(data: Any, path: str) -> tuple[BoundaryKind, ...]:
+    if not isinstance(data, (list, tuple)):
+        raise PlanFormatError("boundary kinds must be an array", code="boundary.type", path=path)
+    try:
+        return validate_canonical_boundary_kinds(data)
+    except ValueError as exc:
+        raise PlanFormatError(str(exc), code="boundary.invalid", path=path) from exc
+
+
 def _pause(data: Any) -> PauseIntent | None:
     if data is None:
         return None
@@ -884,9 +913,17 @@ def _pause(data: Any) -> PauseIntent | None:
     raise PlanFormatError("invalid pause intent table", code="pause.type")
 
 
-def _legacy_pause(data: Any) -> PauseIntent | LegacyPause | None:
+def _legacy_pause(data: Any) -> PauseIntent | LegacyPause | LegacyPauseKind | None:
     if data is None:
         return None
+    if isinstance(data, str) and data in {
+        "clause",
+        "sentence",
+        "paragraph",
+        "parenthetical",
+        "voice_change",
+    }:
+        return LegacyPauseKind(data)
     if isinstance(data, Mapping) and ("seconds" in data or "events" in data):
         seconds = data.get("seconds")
         events = data.get("events")
@@ -901,6 +938,16 @@ def _legacy_pause(data: Any) -> PauseIntent | LegacyPause | None:
             raise PlanFormatError("invalid schema-v4 pause payload", code="pause.legacy_numeric")
         return LegacyPause(seconds_value, tuple(events))
     return _pause(data)
+
+
+def _legacy_flow_pause(data: Any) -> PauseIntent | LegacyPauseKind | None:
+    pause = _legacy_pause(data)
+    if isinstance(pause, LegacyPause):
+        raise PlanFormatError(
+            "numeric v4 pauses cannot appear in schema-v5 or schema-v6 flow",
+            code="pause.legacy_numeric",
+        )
+    return pause
 
 
 def _directive(data: Mapping[str, Any] | None) -> SegmentDirectives:
@@ -1088,6 +1135,8 @@ def _from_current_dict(data: Mapping[str, Any]) -> UtterancePlan:
                 _directive(x.get("directives")),
                 tuple(x.get("token_indices", ())),
                 tuple(x.get("annotation_ids", ())),
+                tuple(x.get("boundary_before", ())),
+                tuple(x.get("boundary_after", ())),
             )
             for x in data.get("segments", ())
         ),
@@ -1502,6 +1551,20 @@ class LegacyPause:
         return {"seconds": self.seconds, "events": list(self.events)}
 
 
+@dataclass(frozen=True, slots=True)
+class LegacyPauseKind:
+    """Legacy automatic pause label retained only while reading historical plans."""
+
+    type: str
+
+    def __post_init__(self) -> None:
+        if self.type not in {"clause", "sentence", "paragraph", "parenthetical", "voice_change"}:
+            raise ValueError(f"unsupported legacy pause kind: {self.type!r}")
+
+    def to_dict(self) -> str:
+        return self.type
+
+
 PauseType = Literal[
     "none",
     "x-weak",
@@ -1510,11 +1573,6 @@ PauseType = Literal[
     "strong",
     "x-strong",
     "timed",
-    "clause",
-    "sentence",
-    "paragraph",
-    "parenthetical",
-    "voice_change",
 ]
 
 
@@ -1534,11 +1592,6 @@ class PauseIntent:
             "strong",
             "x-strong",
             "timed",
-            "clause",
-            "sentence",
-            "paragraph",
-            "parenthetical",
-            "voice_change",
         }
         if not isinstance(self.type, str) or self.type not in allowed:
             raise ValueError(f"unsupported pause intent: {self.type!r}")
@@ -1644,13 +1697,15 @@ class FlowSegment:
 
     text: str
     language: str
-    pause_before: PauseIntent | None = None
-    pause_after: PauseIntent | None = None
+    pause_before: PauseIntent | LegacyPauseKind | None = None
+    pause_after: PauseIntent | LegacyPauseKind | None = None
     directives: SegmentDirectives = field(default_factory=SegmentDirectives)
     tokens: tuple[TokenView, ...] = ()
     markers: tuple[str, ...] = ()
     heading: int | None = None
     replacements: tuple[ReplacementView, ...] = ()
+    boundary_before: tuple[BoundaryKind, ...] = ()
+    boundary_after: tuple[BoundaryKind, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.text, str):
@@ -1665,9 +1720,13 @@ class FlowSegment:
             raise ValueError("segment tokens must be a tuple of TokenView values")
         if not isinstance(self.markers, tuple):
             raise ValueError("segment markers must be a tuple")
-        if self.pause_before is not None and not isinstance(self.pause_before, PauseIntent):
+        if self.pause_before is not None and not isinstance(
+            self.pause_before, (PauseIntent, LegacyPauseKind)
+        ):
             raise ValueError("pause_before must be a PauseIntent or None")
-        if self.pause_after is not None and not isinstance(self.pause_after, PauseIntent):
+        if self.pause_after is not None and not isinstance(
+            self.pause_after, (PauseIntent, LegacyPauseKind)
+        ):
             raise ValueError("pause_after must be a PauseIntent or None")
         if any(not isinstance(marker, str) or not marker for marker in self.markers):
             raise ValueError("segment markers must be non-empty strings")
@@ -1687,6 +1746,11 @@ class FlowSegment:
                 raise ValueError(f"replacement {index} span is outside segment text")
         if self.heading is not None and (type(self.heading) is not int or self.heading < 1):
             raise ValueError("heading must be a positive integer")
+        for field_name in ("boundary_before", "boundary_after"):
+            values = getattr(self, field_name)
+            if not isinstance(values, tuple):
+                raise ValueError(f"{field_name} must be a tuple")
+            object.__setattr__(self, field_name, canonicalize_boundary_kinds(values))
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -1696,6 +1760,10 @@ class FlowSegment:
             "tokens": [token.to_dict() for token in self.tokens],
             "markers": list(self.markers),
         }
+        if self.boundary_before:
+            result["boundary_before"] = list(self.boundary_before)
+        if self.boundary_after:
+            result["boundary_after"] = list(self.boundary_after)
         if self.pause_before is not None:
             result["pause_before"] = self.pause_before.to_dict()
         if self.pause_after is not None:
@@ -1803,10 +1871,9 @@ class LinguisticProvenance:
 
 @dataclass(frozen=True, slots=True)
 class FlowPlan:
-    """Compact renderer-facing plan model with v5 read compatibility and v6 source provenance."""
+    """Compact schema-v7 plan model with renderer-independent boundary semantics."""
 
     language: str
-    unit: Literal["sentence", "paragraph"]
     flow: tuple[FlowUnit, ...]
     document: DocumentInfo = field(default_factory=DocumentInfo)
     linguistics: tuple[LinguisticProvenance, ...] = ()
@@ -1821,30 +1888,16 @@ class FlowPlan:
     def __post_init__(self) -> None:
         if self.format != FORMAT:
             raise PlanValidationError("format must be 'utterplan'", code="format.invalid")
-        if type(self.schema_version) is not int or self.schema_version not in {
-            V5_SCHEMA_VERSION,
-            CURRENT_SCHEMA_VERSION,
-        }:
-            raise PlanValidationError(
-                "FlowPlan requires schema version 5 or 6", code="schema.version"
-            )
+        if self.schema_version != CURRENT_SCHEMA_VERSION:
+            raise PlanValidationError("FlowPlan requires schema version 7", code="schema.version")
         if not isinstance(self.language, str) or not self.language:
             raise PlanValidationError(
                 "language must be a non-empty string", code="language.invalid"
             )
-        if not isinstance(self.unit, str) or self.unit not in {"sentence", "paragraph"}:
-            raise PlanValidationError("unit must be sentence or paragraph", code="unit.invalid")
-        expected_hash_schema = (
-            V5_FLOW_HASH_SCHEMA if self.schema_version == V5_SCHEMA_VERSION else FLOW_HASH_SCHEMA
-        )
-        if self.hash_schema != expected_hash_schema:
+        if self.hash_schema != FLOW_HASH_SCHEMA:
             raise PlanValidationError("unsupported flow hash schema", code="flow.hash_schema")
         if self.source is not None and not isinstance(self.source, PlanSource):
             raise PlanValidationError("source must be PlanSource", code="source.type")
-        if self.schema_version == V5_SCHEMA_VERSION and self.source is not None:
-            raise PlanValidationError(
-                "schema-v5 plans cannot contain source provenance", code="source.version"
-            )
         if not isinstance(self.document, DocumentInfo):
             raise PlanValidationError("document must be DocumentInfo", code="document.type")
         if not isinstance(self.flow, tuple):
@@ -1855,6 +1908,15 @@ class FlowPlan:
             raise PlanValidationError("warnings must be a tuple", code="warnings.type")
         if any(not isinstance(item, FlowUnit) for item in self.flow):
             raise PlanValidationError("flow must contain FlowUnit values", code="flow.type")
+        if any(
+            isinstance(pause, LegacyPauseKind)
+            for unit in self.flow
+            for segment in unit.segments
+            for pause in (segment.pause_before, segment.pause_after)
+        ):
+            raise PlanValidationError(
+                "automatic pause labels are forbidden in schema v7", code="pause.automatic"
+            )
         if any(not isinstance(item, LinguisticProvenance) for item in self.linguistics):
             raise PlanValidationError(
                 "linguistics must contain provenance records", code="linguistics.type"
@@ -1886,7 +1948,6 @@ class FlowPlan:
             "schema_version": self.schema_version,
             "plan_id": self.plan_id,
             "language": self.language,
-            "unit": self.unit,
             "hash_schema": self.hash_schema,
             "flow": [unit.to_dict() for unit in self.flow],
             "document": self.document.to_dict(),
@@ -1904,12 +1965,16 @@ class FlowPlan:
     def from_dict(cls, data: Mapping[str, Any]) -> FlowPlan:
         if not isinstance(data, Mapping):
             raise PlanFormatError("flow plan must be an object", code="plan.type")
+        schema_version = data.get("schema_version")
+        is_legacy = type(schema_version) is int and schema_version in {
+            V5_SCHEMA_VERSION,
+            V6_SCHEMA_VERSION,
+        }
         allowed_root = {
             "format",
             "schema_version",
             "plan_id",
             "language",
-            "unit",
             "hash_schema",
             "flow",
             "document",
@@ -1918,43 +1983,47 @@ class FlowPlan:
             "producer",
             "warnings",
         }
+        if is_legacy:
+            allowed_root.add("unit")
         unknown = set(data) - allowed_root
         if unknown:
             raise PlanFormatError(f"unknown plan fields: {sorted(unknown)}", code="field.unknown")
-        required = {
-            "format",
-            "schema_version",
-            "plan_id",
-            "language",
-            "unit",
-            "hash_schema",
-            "flow",
-        }
+        required = {"format", "schema_version", "plan_id", "language", "hash_schema", "flow"}
+        if is_legacy:
+            required.add("unit")
         missing = required - set(data)
         if missing:
             raise PlanFormatError(
                 f"required plan fields are missing: {sorted(missing)}", code="field.required"
             )
-        schema_version = data.get("schema_version")
         if (
             data.get("format") != FORMAT
             or type(schema_version) is not int
-            or schema_version not in {V5_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION}
+            or schema_version not in {V5_SCHEMA_VERSION, V6_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION}
         ):
             raise PlanFormatError(
-                "expected schema-v5 or schema-v6 UtterPlan", code="schema.version"
+                "expected schema-v5, schema-v6, or schema-v7 UtterPlan", code="schema.version"
             )
-        if schema_version == V5_SCHEMA_VERSION and "source" in data:
-            raise PlanFormatError(
-                "schema-v5 plans cannot contain source provenance", code="source.version"
+        legacy_unit: Literal["sentence", "paragraph"] | None = None
+        if is_legacy:
+            if schema_version == V5_SCHEMA_VERSION and "source" in data:
+                raise PlanFormatError(
+                    "schema-v5 plans cannot contain source provenance", code="source.version"
+                )
+            expected_hash_schema = (
+                V5_FLOW_HASH_SCHEMA if schema_version == V5_SCHEMA_VERSION else V6_FLOW_HASH_SCHEMA
             )
+            if data.get("hash_schema") != expected_hash_schema:
+                raise PlanFormatError(
+                    "unsupported historical flow hash schema", code="flow.hash_schema"
+                )
+            unit_value = data.get("unit")
+            if not isinstance(unit_value, str) or unit_value not in {"sentence", "paragraph"}:
+                raise PlanFormatError("unit must be sentence or paragraph", code="unit.invalid")
+            legacy_unit = cast(Literal["sentence", "paragraph"], unit_value)
         language = data.get("language")
         if not isinstance(language, str) or not language:
             raise PlanFormatError("language must be a non-empty string", code="language.invalid")
-        unit_value = data.get("unit")
-        if not isinstance(unit_value, str) or unit_value not in {"sentence", "paragraph"}:
-            raise PlanFormatError("unit must be sentence or paragraph", code="unit.invalid")
-        unit = cast(Literal["sentence", "paragraph"], unit_value)
         flow_value = data.get("flow")
         if not isinstance(flow_value, (list, tuple)):
             raise PlanFormatError("flow must be an array", code="flow.type")
@@ -1984,6 +2053,8 @@ class FlowPlan:
                 allowed_segment = {
                     "text",
                     "language",
+                    "boundary_before",
+                    "boundary_after",
                     "pause_before",
                     "pause_after",
                     "directives",
@@ -1992,6 +2063,8 @@ class FlowPlan:
                     "heading",
                     "replacements",
                 }
+                if is_legacy:
+                    allowed_segment.difference_update({"boundary_before", "boundary_after"})
                 unknown_segment = set(raw_segment) - allowed_segment
                 if unknown_segment:
                     raise PlanFormatError(
@@ -2090,8 +2163,18 @@ class FlowPlan:
                             code="segment.markers",
                             path=segment_path,
                         )
-                    pause_before = _pause(raw_segment.get("pause_before"))
-                    pause_after = _pause(raw_segment.get("pause_after"))
+                    pause_before = (_legacy_flow_pause if is_legacy else _pause)(
+                        raw_segment.get("pause_before")
+                    )
+                    pause_after = (_legacy_flow_pause if is_legacy else _pause)(
+                        raw_segment.get("pause_after")
+                    )
+                    boundary_before = _boundary_kinds(
+                        raw_segment.get("boundary_before", []), f"{segment_path}.boundary_before"
+                    )
+                    boundary_after = _boundary_kinds(
+                        raw_segment.get("boundary_after", []), f"{segment_path}.boundary_after"
+                    )
                     segments.append(
                         FlowSegment(
                             text=text,
@@ -2103,6 +2186,8 @@ class FlowPlan:
                             markers=tuple(raw_markers),
                             heading=raw_segment.get("heading"),
                             replacements=tuple(replacements),
+                            boundary_before=boundary_before,
+                            boundary_after=boundary_after,
                         )
                     )
                 except PlanFormatError:
@@ -2211,23 +2296,24 @@ class FlowPlan:
             not isinstance(item, str) for item in warnings
         ):
             raise PlanFormatError("warnings must be strings", code="warnings.type")
-        return cls(
-            language=language,
-            unit=unit,
-            flow=tuple(flow),
-            document=document,
-            linguistics=tuple(linguistics),
-            source=source,
-            plan_id=data.get("plan_id", ""),
-            producer=dict(producer),
-            warnings=tuple(warnings),
-            format=data.get("format", FORMAT),
-            schema_version=data.get("schema_version", CURRENT_SCHEMA_VERSION),
-            hash_schema=data.get(
-                "hash_schema",
-                V5_FLOW_HASH_SCHEMA if schema_version == V5_SCHEMA_VERSION else FLOW_HASH_SCHEMA,
-            ),
-        )
+        plan_kwargs = {
+            "language": language,
+            "flow": tuple(flow),
+            "document": document,
+            "linguistics": tuple(linguistics),
+            "source": source,
+            "plan_id": data.get("plan_id", ""),
+            "producer": dict(producer),
+            "warnings": tuple(warnings),
+            "format": data.get("format", FORMAT),
+            "schema_version": schema_version,
+            "hash_schema": data.get("hash_schema", FLOW_HASH_SCHEMA),
+        }
+        if is_legacy:
+            return LegacyFlowPlan(
+                unit=cast(Literal["sentence", "paragraph"], legacy_unit), **plan_kwargs
+            )
+        return cls(**plan_kwargs)
 
     def validate(self) -> None:
         """Recheck content hashes and semantic identity for callers loading mutable mappings."""
@@ -2272,3 +2358,112 @@ class FlowPlan:
         from .atomic_io import atomic_write_text
 
         atomic_write_text(path, self.to_toml(), create_parent=create_parent)
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyFlowPlan(FlowPlan):
+    """Historical v5/v6 flow view retained for their immutable codecs."""
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> LegacyFlowPlan:
+        plan = super().from_dict(data)
+        if not isinstance(plan, cls):
+            raise PlanFormatError(
+                "expected a schema-v5 or schema-v6 flow plan", code="schema.version"
+            )
+        return plan
+
+    unit: Literal["sentence", "paragraph"] = "paragraph"
+
+    def __post_init__(self) -> None:
+        if self.format != FORMAT:
+            raise PlanValidationError("format must be 'utterplan'", code="format.invalid")
+        if type(self.schema_version) is not int or self.schema_version not in {
+            V5_SCHEMA_VERSION,
+            V6_SCHEMA_VERSION,
+        }:
+            raise PlanValidationError(
+                "LegacyFlowPlan requires schema version 5 or 6", code="schema.version"
+            )
+        if not isinstance(self.language, str) or not self.language:
+            raise PlanValidationError(
+                "language must be a non-empty string", code="language.invalid"
+            )
+        if not isinstance(self.unit, str) or self.unit not in {"sentence", "paragraph"}:
+            raise PlanValidationError("unit must be sentence or paragraph", code="unit.invalid")
+        expected_hash = (
+            V5_FLOW_HASH_SCHEMA if self.schema_version == V5_SCHEMA_VERSION else V6_FLOW_HASH_SCHEMA
+        )
+        if self.hash_schema != expected_hash:
+            raise PlanValidationError(
+                "unsupported historical flow hash schema", code="flow.hash_schema"
+            )
+        if self.schema_version == 5 and self.source is not None:
+            raise PlanValidationError(
+                "schema-v5 plans cannot contain source provenance", code="source.version"
+            )
+        if self.source is not None and not isinstance(self.source, PlanSource):
+            raise PlanValidationError("source must be PlanSource", code="source.type")
+        if not isinstance(self.document, DocumentInfo):
+            raise PlanValidationError("document must be DocumentInfo", code="document.type")
+        if not isinstance(self.flow, tuple) or any(
+            not isinstance(item, FlowUnit) for item in self.flow
+        ):
+            raise PlanValidationError("flow must contain FlowUnit values", code="flow.type")
+        if any(
+            segment.boundary_before or segment.boundary_after
+            for unit in self.flow
+            for segment in unit.segments
+        ):
+            raise PlanValidationError(
+                "historical plans cannot contain schema-v7 boundaries", code="boundary.version"
+            )
+        if not isinstance(self.linguistics, tuple) or any(
+            not isinstance(item, LinguisticProvenance) for item in self.linguistics
+        ):
+            raise PlanValidationError(
+                "linguistics must contain provenance records", code="linguistics.type"
+            )
+        if not isinstance(self.producer, Mapping):
+            raise PlanValidationError("producer must be a mapping", code="producer.type")
+        object.__setattr__(self, "producer", _plain(self.producer))
+        if not isinstance(self.plan_id, str):
+            raise PlanValidationError("plan ID must be a string", code="plan.identity")
+        if any(not isinstance(item, str) for item in self.warnings):
+            raise PlanValidationError("warnings must be strings", code="warnings.type")
+        expected = flow_plan_id(self.to_dict())
+        if not self.plan_id:
+            object.__setattr__(self, "plan_id", expected)
+        elif self.plan_id != expected:
+            raise PlanValidationError(
+                "plan ID does not match executable semantics", code="plan.identity"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        result = FlowPlan.to_dict(self)
+        for unit in result["flow"]:
+            for segment in unit["segments"]:
+                segment.pop("boundary_before", None)
+                segment.pop("boundary_after", None)
+        result["unit"] = self.unit
+        return result
+
+    def validate(self) -> None:
+        for unit in self.flow:
+            if unit.content_hash != flow_unit_hash(unit.segments):
+                raise PlanValidationError(
+                    "flow unit hash does not match local semantics", code="flow.hash"
+                )
+        if self.plan_id != flow_plan_id(self.to_dict()):
+            raise PlanValidationError(
+                "plan ID does not match executable semantics", code="plan.identity"
+            )
+
+    def to_toml(self) -> str:
+        if self.schema_version == 5:
+            from .codecs.v5_toml import dumps_v5_toml
+
+            return dumps_v5_toml(self)
+        from .codecs.v6_toml import dumps_v6_toml
+
+        return dumps_v6_toml(self)

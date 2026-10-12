@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Literal
 
-from .config import PauseConfig
 from .exceptions import PlanRenderabilityError, PlanValidationError
 from .model import (
     AnnotationSpan,
@@ -16,7 +15,7 @@ from .model import (
     UtterancePlan,
 )
 from .parsers import ParsedDocument, map_structural_span_to_source
-from .pauses import boundary_is_active
+from .pauses import boundary_is_materializable
 
 RenderabilityMode = Literal["strict", "repair"]
 
@@ -187,7 +186,6 @@ def preflight_segments(
     parsed: ParsedDocument | None = None,
     spoken_text: str | None = None,
     boundaries: tuple[BoundaryEvent, ...] | list[BoundaryEvent] = (),
-    pause_config: PauseConfig | None = None,
     annotations: tuple[AnnotationSpan, ...] = (),
     semantic_boundaries: tuple[SemanticBoundary, ...] | list[SemanticBoundary] = (),
 ) -> RenderabilityReport:
@@ -201,7 +199,7 @@ def preflight_segments(
         )
         is not None
     )
-    if spoken_text is not None and pause_config is not None:
+    if spoken_text is not None:
         issues = tuple(
             replace(
                 issue,
@@ -211,7 +209,6 @@ def preflight_segments(
                     segments,
                     spoken_text=spoken_text,
                     boundaries=boundaries,
-                    pause_config=pause_config,
                     annotations=annotations,
                     semantic_boundaries=semantic_boundaries,
                 ),
@@ -228,21 +225,11 @@ def preflight_segments(
 
 def preflight_renderability(plan: UtterancePlan) -> RenderabilityReport:
     """Inspect every renderer-facing segment in a completed plan."""
-    pause_values = plan.config.get("pauses")
-    pause_config = (
-        PauseConfig(
-            mode=pause_values.get("mode", "tts"),
-            enabled=pause_values.get("enabled", True),
-        )
-        if isinstance(pause_values, dict)
-        else PauseConfig()
-    )
     return preflight_segments(
         plan.segments,
         plan.tokens,
         spoken_text=plan.texts.spoken,
         boundaries=plan.boundaries,
-        pause_config=pause_config,
         annotations=plan.annotations,
         semantic_boundaries=plan.semantic_boundaries,
     )
@@ -255,7 +242,6 @@ def assess_renderability_repair(
     *,
     spoken_text: str,
     boundaries: tuple[BoundaryEvent, ...] | list[BoundaryEvent],
-    pause_config: PauseConfig,
     annotations: tuple[AnnotationSpan, ...],
     semantic_boundaries: tuple[SemanticBoundary, ...] | list[SemanticBoundary],
 ) -> RenderabilityRepair:
@@ -280,7 +266,6 @@ def assess_renderability_repair(
             direction,
             spoken_text,
             boundaries,
-            pause_config,
             annotations,
             semantic_boundaries,
         )
@@ -290,7 +275,7 @@ def assess_renderability_repair(
         blockers.extend(merge_blockers)
 
     drop_blockers = _drop_punctuation_blockers(
-        segment, boundaries, pause_config, annotations, semantic_boundaries
+        segment, boundaries, annotations, semantic_boundaries
     )
     if not drop_blockers:
         return RenderabilityRepair("drop", True, tuple(dict.fromkeys(blockers)))
@@ -304,7 +289,6 @@ def _merge_punctuation_blockers(
     direction: int,
     text: str,
     boundaries: tuple[BoundaryEvent, ...] | list[BoundaryEvent],
-    pause_config: PauseConfig,
     annotations: tuple[AnnotationSpan, ...],
     semantic_boundaries: tuple[SemanticBoundary, ...] | list[SemanticBoundary],
 ) -> tuple[str, ...]:
@@ -332,8 +316,8 @@ def _merge_punctuation_blockers(
         if (
             gap_start <= boundary.position <= gap_end
             or punctuation.spoken_start < boundary.position < punctuation.spoken_end
-        ) and boundary_is_active(boundary, pause_config):
-            blockers.append(f"active pause at spoken position {boundary.position}")
+        ) and boundary_is_materializable(boundary):
+            blockers.append(f"boundary opportunity at spoken position {boundary.position}")
     for annotation in annotations:
         if _audio_annotation(annotation) and _annotation_overlaps_segment(annotation, punctuation):
             blockers.append("audio/media occurrence overlaps the punctuation segment")
@@ -369,7 +353,6 @@ def _merge_punctuation_blockers(
 def _drop_punctuation_blockers(
     segment: PlanSegment,
     boundaries: tuple[BoundaryEvent, ...] | list[BoundaryEvent],
-    pause_config: PauseConfig,
     annotations: tuple[AnnotationSpan, ...],
     semantic_boundaries: tuple[SemanticBoundary, ...] | list[SemanticBoundary],
 ) -> tuple[str, ...]:
@@ -379,10 +362,11 @@ def _drop_punctuation_blockers(
     for name in segment.directives.to_dict():
         blockers.append(f"{name.replace('_', '-')} directive belongs to the punctuation segment")
     for boundary in boundaries:
-        if segment.spoken_start < boundary.position < segment.spoken_end and boundary_is_active(
-            boundary, pause_config
+        if (
+            segment.spoken_start < boundary.position < segment.spoken_end
+            and boundary_is_materializable(boundary)
         ):
-            blockers.append(f"active pause at spoken position {boundary.position}")
+            blockers.append(f"boundary opportunity at spoken position {boundary.position}")
     for semantic_boundary in semantic_boundaries:
         if segment.spoken_start < semantic_boundary.position < segment.spoken_end:
             blockers.append(

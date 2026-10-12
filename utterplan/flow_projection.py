@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Literal, cast
+from typing import Any
 
 from .exceptions import PlanValidationError
 from .model import (
@@ -87,16 +87,14 @@ def project_compiler_plan(plan: UtterancePlan) -> FlowPlan:
                     ),
                     heading=headings.get(segment.id),
                     replacements=_replacement_views_for_segment(plan, segment),
+                    boundary_before=segment.boundary_before,
+                    boundary_after=segment.boundary_after,
                 )
             )
         flow.append(FlowUnit(tuple(unit_segments)))
 
-    unit_kind = plan.units[0].kind if plan.units else plan.config.get("unit", "paragraph")
-    if unit_kind not in {"sentence", "paragraph"}:
-        raise PlanValidationError("unit must be sentence or paragraph", code="unit.invalid")
     return FlowPlan(
         language=str(plan.config.get("language", "")),
-        unit=cast(Literal["sentence", "paragraph"], unit_kind),
         flow=tuple(flow),
         document=_document_info(plan),
         linguistics=_linguistic_info(plan),

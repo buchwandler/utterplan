@@ -5,9 +5,7 @@ UtterPlan's command-line compiler accepts literal text, stdin, and files:
 ```text
 usage: utterplan compile [-h] [--file FILE] [--language LANGUAGE]
                          [--input-format {auto,text,plain,ssmd}]
-                         [--unit {paragraph,sentence}]
                          [--text-preparation {auto,ssmd,spokenform,identity}]
-                         [--pause-mode {tts,manual,auto}]
                          [--spacy {auto,off,sm,md,lg,trf}] [-o OUTPUT]
                          [--trace TRACE] [--force] [--stdout]
                          [--renderability {strict,repair}]
@@ -18,6 +16,10 @@ usage: utterplan compile [-h] [--file FILE] [--language LANGUAGE]
 as an alias for `--input-format`. `--language` is a fallback language: it is
 required for plain input, optional for SSMD with a header `language`, and never
 forces a language over SSMD document semantics.
+
+## Renderer-independent plan contract
+
+Compilation has no `--unit` or `--pause-mode` option. Schema v7 always stores paragraph-local flow units and canonical `boundary_before` / `boundary_after` opportunities (`clause`, `sentence`, `paragraph`, `parenthetical`, `voice_change`) separately from authored SSMD pause intents. One saved plan can support downstream sentence, paragraph, or renderer-token-budget chunking, and native, automatic, or manual pause realization. A `FlowSegment` is not necessarily a TTS call; its linguistic token views are not engine/model token counts.
 
 ## Input resolution
 
@@ -57,7 +59,7 @@ ssmd migrate old.ssmd --to 0.9 --output migrated.ssmd
 utterplan compile migrated.ssmd --lang en-us
 ```
 
-`utterplan migrate` is the explicit serialized-plan import path: it applies supported schema migrations and writes current canonical TOML. It cannot migrate SSMD source.
+`utterplan migrate` handles serialized-plan migrations only; v6-to-v7 promotion returns `migration.recompile_required` instead of writing an incomplete current plan. It cannot migrate SSMD source.
 
 ## Output and errors
 
@@ -91,7 +93,7 @@ Source names determine output names: `chapter.ssmd`, `chapter.ssmd.md`, and `cha
 
 Compile reports use format version 2. Each successful item records its resolved `preparation_mode`, `repair_count`, deterministically ordered structured `repairs`, and a `degraded_linguistics` boolean. Repair entries include diagnostic codes/messages/severity and source ranges where available; source ranges use the original input's Python-character coordinates. Failed or skipped items have no preparation result. Reports remain operational metadata and do not affect plan output or incremental write behavior.
 
-Shared planning options include `--language`, `--input-format auto|plain|ssmd`, `--unit`, `--text-preparation`, `--pause-mode`, `--spacy`, and `--renderability`. Progress, repair notices, actionable errors, and the final counts are written to stderr. Exit status is 0 if every input succeeds, 1 if any input fails, and 2 for usage errors such as output collisions. `--fail-fast` skips later requests after the first failure but preserves all completed outputs and updates the report.
+Shared planning options include `--language`, `--input-format auto|plain|ssmd`, `--text-preparation`, `--spacy`, and `--renderability`. Progress, repair notices, actionable errors, and the final counts are written to stderr. Exit status is 0 if every input succeeds, 1 if any input fails, and 2 for usage errors such as output collisions. `--fail-fast` skips later requests after the first failure but preserves all completed outputs and updates the report.
 
 ## Compile chapters from an SSMDBook workspace
 
@@ -112,9 +114,9 @@ utterplan compile-book chapters --chapters 5-17
 
 `--chapters` selects manifest `source_number` values, not filenames or manifest indexes. It accepts `all` (the default), one number, inclusive ranges, or comma-separated combinations such as `1,3-5,9`. Duplicate selections do not duplicate work, and selected chapters always follow manifest array order. A selected missing source number or malformed selector is rejected before compilation.
 
-By default, plans and the operational report are written to `<book-root>/utterplan/`. Use `--output-dir PATH` to override the destination. One canonical v6 `.utterplan.toml` plan is written per selected chapter, plus `compile-report.toml`. Existing plans are protected unless `--force` is given; `--fail-fast` skips later chapters after the first failure. `--report PATH` overrides the report location. Duplicate output names, report/plan collisions, and writes into the source `chapters/` directory or over `manifest.json` are rejected before writing.
+By default, plans and the operational report are written to `<book-root>/utterplan/`. Use `--output-dir PATH` to override the destination. One canonical v7 `.utterplan.toml` plan is written per selected chapter, plus `compile-report.toml`. Existing plans are protected unless `--force` is given; `--fail-fast` skips later chapters after the first failure. `--report PATH` overrides the report location. Duplicate output names, report/plan collisions, and writes into the source `chapters/` directory or over `manifest.json` are rejected before writing.
 
-Shared planning options are `--language`/`--lang`, `--unit`, `--text-preparation`, `--pause-mode`, `--renderability`, and `--spacy`. Chapter documents are SSMD 0.9 by contract, so `compile-book` does not accept `--input-format`. The manifest is read-only: edited chapter content is compiled as it currently exists even if its recorded digest is stale, and UtterPlan never refreshes the manifest or chapter hashes. Only selected chapter files are opened, so an unrelated broken chapter outside the selection does not block the request.
+Shared planning options are `--language`/`--lang`, `--text-preparation`, `--renderability`, and `--spacy`. Chapter documents are SSMD 0.9 by contract, so `compile-book` does not accept `--input-format`. The manifest is read-only: edited chapter content is compiled as it currently exists even if its recorded digest is stale, and UtterPlan never refreshes the manifest or chapter hashes. Only selected chapter files are opened, so an unrelated broken chapter outside the selection does not block the request.
 
 The version-2 compile report identifies each successful chapter's resolved preparation mode (`ssmd`, `spokenform`, or `identity`), reports a deterministic list of segmentation/renderability repair diagnostics and a `degraded_linguistics` flag, and includes a `repair_count`. The report is operational metadata; partial-success, atomic per-plan writes, and manifest immutability are unchanged.
 
@@ -129,7 +131,7 @@ utterplan explain chapter.utterplan.toml
 utterplan explain chapter.utterplan.toml --details
 ```
 
-The explanation presents executable flow: prepared segment text, unit order, effective languages, semantic pause intents, headings, markers, and typed directives. The v6 plan retains exact raw source when available and compact replacement views show local prepared surfaces with original spellings. Complete compiler source diagnostics and preparation maps remain absent unless a trace sidecar was saved. Add `--details` for local token offsets, flow hashes, plan identity, and trace preparation mappings. Pass `--trace PATH` to attach a matching sidecar; the TOML trace can also be read independently with `inspect-trace`.
+The explanation presents executable flow: prepared segment text, paragraph-local unit order, effective languages, canonical boundary opportunities, authored pause intents, headings, markers, and typed directives. The v7 plan retains exact raw source when available and compact replacement views show local prepared surfaces with original spellings. Complete compiler source diagnostics and preparation maps remain absent unless a trace sidecar was saved. Add `--details` for local token offsets, flow hashes, plan identity, and trace preparation mappings. Pass `--trace PATH` to attach a matching sidecar; the TOML trace can also be read independently with `inspect-trace`.
 
 ## Inspect a persisted planning attempt
 
@@ -151,18 +153,16 @@ inspect-only draft, not a canonical plan, and is rejected by `FlowPlan.load()`.
 
 ## Planning controls
 
-- `--unit paragraph|sentence` chooses render-unit grouping.
 - `--text-preparation auto|ssmd|spokenform|identity` chooses written-to-spoken handling.
-- `--pause-mode tts|manual|auto` selects semantic pause policy.
 - `--spacy off|auto|sm|md|lg|trf` selects deterministic fallback, automatic
   spaCy use, or a required model tier.
 - `--renderability repair|strict` defaults to safe punctuation-only repair. Semantic blockers remain failures with source context and an actionable next step; strict mode reports safe repair opportunities without applying them.
 
 The default spaCy policy is `auto`: inspect only already-installed compatible local models in `sm`, `md`, `lg`, `trf` preference order. If spaCy or every compatible model is unavailable, compilation continues with deterministic fallback; no model is downloaded.
 
-The defaults are `--text-preparation auto`, `--pause-mode tts`, and `--spacy auto`. Preparation `auto` selects authoritative `ssmd` for SSMD input and TTSReady/Spokenform for plain text; explicit `spokenform` on SSMD is a warned legacy mode. SpaCy `auto` uses a compatible local model when available and otherwise falls back safely.
+The defaults are `--text-preparation auto` and `--spacy auto`. Preparation `auto` selects authoritative `ssmd` for SSMD input and TTSReady/Spokenform for plain text; explicit `spokenform` on SSMD is a warned legacy mode. SpaCy `auto` uses a compatible local model when available and otherwise falls back safely. Compilation does not select renderer chunking or pause realization: schema-v7 boundaries and authored pause intents are realized downstream.
 
-Use `--spacy off` to force deterministic fallback. `--spacy sm|md|lg|trf` requires that local model tier and fails if it is unavailable. V6 token columns carry final prepared-text linguistic context; the optional `replacement` fields describe local output spans, not source coordinates. Preserve the trace sidecar for full source maps and preparation diagnostics.
+Use `--spacy off` to force deterministic fallback. `--spacy sm|md|lg|trf` requires that local model tier and fails if it is unavailable. Token columns in v7 carry final prepared-text linguistic context, not model-token counts; the optional `replacement` fields describe local output spans, not source coordinates. Preserve the trace sidecar for full source maps and preparation diagnostics.
 
 ## Other commands
 
@@ -179,27 +179,22 @@ utterplan inspect-trace chapter.trace.toml --preparation --boundaries
 utterplan inspect-attempt chapter.attempt.toml --issues
 ```
 
+`inspect --unit` selects a stored flow unit for inspection; it does not choose compilation grouping. Compilation always writes paragraph-local flow blocks, and downstream renderers choose their own chunk boundaries from the saved boundary opportunities.
+
 `inspect-trace --preparation` reports source/prepared text lengths, maps, preparation changes, and repair/diagnostic evidence from the optional trace. `inspect-trace --boundaries` shows compiler-only boundary events and semantic candidates. These fields are intentionally absent from the executable plan TOML.
 
 ## Migrate a saved plan
 
-Import a supported legacy JSON plan to the current schema without rerunning
-planning. `migrate` is the only CLI path that reads saved plan JSON; its output is
-always canonical TOML:
+Use `utterplan migrate` to inspect sequential data-only migrations for legacy saved plans. Schema-v6 files cannot prove the complete v7 boundary inventory, so promotion intentionally fails with `migration.recompile_required`; recompiling the original source is the supported route to a current plan.
 
 ```bash
-utterplan migrate old.utterplan.json -o current.utterplan.toml
 utterplan migrate old.utterplan.json --check
-utterplan migrate old.utterplan.json > current.utterplan.toml
+utterplan compile source.ssmd.md -o current.utterplan.toml
 ```
 
-Without `-o`, TOML is written to stdout and status is written to stderr. Existing
-output files are refused unless `--force` is supplied. `--check` validates the
-route and reports source schema, target schema, and whether migration is required
-without writing a file. A future schema version is rejected rather than guessed
-or downgraded.
+When a migration is available, `-o` writes TOML to that path, while stdout and status messages remain separated; an existing output requires `--force`. `--check` reports source and target schema without writing. A historical plan that reaches schema v6 is rejected with `migration.recompile_required` because boundary opportunities cannot be recovered from serialized data; the CLI never silently reparses or replans. Future schema versions are rejected rather than guessed or downgraded.
 
-Schema migration is separate from SSMD source migration. Frozen JSON schemas v1–v4 and saved schema-v5 TOML migrate through the registered sequential chain to current schema v6. These migrations do not rerun parsing, text preparation, NLP, or planning; the v5-to-v6 step preserves compiled flow and leaves unavailable source provenance absent. The v4-to-v5 projection refuses ambiguous token coordinates or pause meanings rather than guessing. Use `ssmd migrate FILE --to 0.9` for older SSMD source documents.
+Schema migration is separate from SSMD source migration. Frozen JSON schemas v1–v4 and saved schema-v5 TOML use the registered sequential path through schema v6; v6-to-v7 conversion reports `migration.recompile_required` rather than fabricating boundaries. These migrations do not rerun parsing, text preparation, NLP, or planning; the v5-to-v6 step preserves compiled flow and leaves unavailable source provenance absent. The v4-to-v5 projection refuses ambiguous token coordinates or pause meanings rather than guessing. Use `ssmd migrate FILE --to 0.9` for older SSMD source documents.
 
 For a saved TOML plan, `validate` verifies the current semantic schema and plan
 invariants; JSON plan paths are rejected outside `migrate`. For an SSMD or

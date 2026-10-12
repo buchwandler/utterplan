@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as _datetime
 import math
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 import tomlkit
 from tomlkit.exceptions import ParseError
@@ -11,7 +11,7 @@ from tomlkit.items import DottedKey
 
 from ..exceptions import PlanFormatError
 from ..hashing import V5_FLOW_HASH_SCHEMA
-from ..model import FlowPlan
+from ..model import LegacyFlowPlan
 
 _ROOT_KEYS = frozenset(
     {
@@ -202,8 +202,8 @@ def _segment_to_wire(segment: Any, default_language: str) -> dict[str, Any]:
     return result
 
 
-def to_v5_toml_data(plan: FlowPlan) -> dict[str, Any]:
-    if not isinstance(plan, FlowPlan) or plan.schema_version != 5:
+def to_v5_toml_data(plan: LegacyFlowPlan) -> dict[str, Any]:
+    if not isinstance(plan, LegacyFlowPlan) or plan.schema_version != 5:
         raise _error("v5 TOML serialization requires a schema-v5 FlowPlan", code="plan.type")
     if plan.hash_schema != V5_FLOW_HASH_SCHEMA:
         raise _error(
@@ -471,7 +471,7 @@ def _segment_from_wire(value: Any, default_language: str, path: str) -> dict[str
     return result
 
 
-def from_v5_toml_data(data: Mapping[str, Any]) -> FlowPlan:
+def from_v5_toml_data(data: Mapping[str, Any]) -> LegacyFlowPlan:
     plain = _plain(data)
     _check_values(plain)
     if not isinstance(plain, Mapping):
@@ -535,7 +535,7 @@ def from_v5_toml_data(data: Mapping[str, Any]) -> FlowPlan:
     for key in ("producer", "warnings"):
         if key in plain:
             semantic[key] = plain[key]
-    return FlowPlan.from_dict(semantic)
+    return LegacyFlowPlan.from_dict(semantic)
 
 
 def _toml_value(value: Any, *, inline: bool = False) -> Any:
@@ -552,7 +552,7 @@ def _toml_value(value: Any, *, inline: bool = False) -> Any:
     return value
 
 
-def dumps_v5_toml(plan: FlowPlan) -> str:
+def dumps_v5_toml(plan: LegacyFlowPlan) -> str:
     wire = to_v5_toml_data(plan)
     document = tomlkit.document()
     for key in ("format", "schema_version", "plan_id", "language", "unit", "hash_schema"):
@@ -585,9 +585,9 @@ def dumps_v5_toml(plan: FlowPlan) -> str:
             for key, value in segment.items():
                 if key in {"token", "replacement"}:
                     for column, values in value.items():
-                        segment_table[DottedKey([tomlkit.key(key), tomlkit.key(column)])] = (
-                            _toml_value(values)
-                        )
+                        segment_table[
+                            DottedKey(cast(Any, [tomlkit.key(key), tomlkit.key(column)]))
+                        ] = _toml_value(values)
                 else:
                     segment_table[key] = _toml_value(value, inline=isinstance(value, Mapping))
             segment_array.append(segment_table)
@@ -597,7 +597,7 @@ def dumps_v5_toml(plan: FlowPlan) -> str:
     return tomlkit.dumps(document)
 
 
-def loads_v5_toml(value: str) -> FlowPlan:
+def loads_v5_toml(value: str) -> LegacyFlowPlan:
     try:
         parsed = tomlkit.parse(value)
     except ParseError as exc:

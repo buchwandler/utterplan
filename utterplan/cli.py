@@ -15,7 +15,7 @@ from .atomic_io import atomic_write_text
 from .attempts import PlanningAttempt
 from .batch import CompileOutcome, CompileRequest, compile_to_files
 from .compiler import InputFormat, PreparationTrace, compile_document
-from .config import LinguisticsConfig, PauseConfig, PlannerConfig
+from .config import LinguisticsConfig, PlannerConfig
 from .exceptions import PlanFormatError, PlanRenderabilityError, UtterPlanError
 from .explain import format_explanation
 from .migration import MigrationResult, migrate_plan_data
@@ -28,7 +28,7 @@ from .ssmdbook import (
     selected_chapter_path,
 )
 from .trace_codec import loads_trace
-from .versioning import CURRENT_SCHEMA_VERSION, V5_SCHEMA_VERSION
+from .versioning import CURRENT_SCHEMA_VERSION, V5_SCHEMA_VERSION, V6_SCHEMA_VERSION
 
 _EXAMPLES = """examples:
   utterplan compile chapter.ssmd.md
@@ -88,13 +88,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help="input interpretation; auto detects .ssmd, .ssmd.md, and Markdown with SSMD version front matter",
     )
-    compile_parser.add_argument("--unit", choices=("paragraph", "sentence"), default="paragraph")
     compile_parser.add_argument(
         "--text-preparation",
         choices=("auto", "ssmd", "spokenform", "identity"),
         default="auto",
     )
-    compile_parser.add_argument("--pause-mode", choices=("tts", "manual", "auto"), default="tts")
     compile_parser.add_argument(
         "--renderability",
         choices=("strict", "repair"),
@@ -130,11 +128,9 @@ def build_parser() -> argparse.ArgumentParser:
     batch_parser.add_argument("--output-dir", type=Path, required=True)
     batch_parser.add_argument("--language", "--lang", dest="language")
     batch_parser.add_argument("--input-format", choices=("auto", "plain", "ssmd"), default="auto")
-    batch_parser.add_argument("--unit", choices=("paragraph", "sentence"), default="paragraph")
     batch_parser.add_argument(
         "--text-preparation", choices=("auto", "ssmd", "spokenform", "identity"), default="auto"
     )
-    batch_parser.add_argument("--pause-mode", choices=("tts", "manual", "auto"), default="tts")
     batch_parser.add_argument(
         "--renderability",
         choices=("strict", "repair"),
@@ -179,11 +175,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir", type=Path, help="plan output directory (default: <ssmdbook>/utterplan)"
     )
     book_parser.add_argument("--language", "--lang", dest="language")
-    book_parser.add_argument("--unit", choices=("paragraph", "sentence"), default="paragraph")
     book_parser.add_argument(
         "--text-preparation", choices=("auto", "ssmd", "spokenform", "identity"), default="auto"
     )
-    book_parser.add_argument("--pause-mode", choices=("tts", "manual", "auto"), default="tts")
     book_parser.add_argument(
         "--renderability",
         choices=("strict", "repair"),
@@ -391,8 +385,6 @@ def _planner_config_from_batch_args(args: argparse.Namespace) -> PlannerConfig:
         language=args.language or "en-US",
         document_format="plain",
         text_preparation=args.text_preparation,
-        unit=args.unit,
-        pauses=PauseConfig(mode=args.pause_mode),
         linguistics=_linguistics_config(args.spacy),
         renderability_mode=args.renderability,
     )
@@ -628,8 +620,6 @@ def _compile(args: argparse.Namespace) -> int:
         language=fallback_language,
         document_format=input_format,
         text_preparation=args.text_preparation,
-        unit=args.unit,
-        pauses=PauseConfig(mode=args.pause_mode),
         linguistics=_linguistics_config(args.spacy),
         renderability_mode=args.renderability,
     )
@@ -700,11 +690,16 @@ def _migration_result(path: Path) -> MigrationResult:
             from .codecs.v4_toml import decode_v4_toml_data
 
             return migrate_plan_data(decode_v4_toml_data(wire))
-        if version in {V5_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION}:
+        if version in {V5_SCHEMA_VERSION, V6_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION}:
             if version == V5_SCHEMA_VERSION:
                 from .codecs.v5_toml import from_v5_toml_data
 
                 legacy = from_v5_toml_data(wire)
+                return migrate_plan_data(legacy.to_dict())
+            if version == V6_SCHEMA_VERSION:
+                from .codecs.v6_toml import from_v6_toml_data
+
+                legacy = from_v6_toml_data(wire)
                 return migrate_plan_data(legacy.to_dict())
             plan = FlowPlan.from_toml(content)
             return migrate_plan_data(plan.to_dict())

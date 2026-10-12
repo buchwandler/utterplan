@@ -7,7 +7,7 @@ source / SSMD -> FlowPlan -> renderer diagnostics -> audio
                          \\-> optional compiler trace
 ```
 
-`utterplan explain FILE` shows prepared segment text, flow order, languages, semantic pause intents, directives, markers, headings, compact replacement views, and tokens. `utterplan inspect` shows local tokens and segment details. Complete source diagnostics and preparation mappings are not embedded in FlowPlan; request and retain a trace sidecar when those details are needed after compilation:
+`utterplan explain FILE` shows prepared segment text, paragraph-local flow order, languages, safe boundary opportunities, authored pause intents, directives, markers, headings, compact replacement views, and tokens. `utterplan inspect` shows local tokens and segment details. Complete source diagnostics and preparation mappings are not embedded in FlowPlan; request and retain a trace sidecar when those details are needed after compilation:
 
 ```bash
 utterplan compile chapter.ssmd.md -o chapter.utterplan.toml --trace chapter.trace.toml
@@ -17,11 +17,11 @@ utterplan inspect-trace chapter.trace.toml --preparation --boundaries
 
 Safe punctuation-only repair is the default during compilation. If a semantic blocker prevents repair, the error includes source location, prepared fragment, spoken context, blocked repair reason, and a concrete next action; UtterPlan never guesses symbol pronunciation. Use `--renderability strict` to see safe repair opportunities without applying them. Batch compilation reports each repair and continues with later sources.
 
-Sentence segmentation is a compiler-integrity step, not a renderability repair. PhraseSplit is advisory: dependency failure or a malformed/partial proposal batch produces a `segmentation.phrasplit_*` diagnostic and triggers conservative fallback. Unsafe automatic token-edge candidates are dropped or merged before projection; exact text and non-whitespace coverage are checked in both strict and repair modes. Inspect compiler diagnostics with `compile --trace FILE` and `inspect-trace FILE --boundaries`; sentence-part topology itself is intentionally not persisted in v6.
+Sentence segmentation is a compiler-integrity step, not a renderability repair. PhraseSplit is advisory: dependency failure or a malformed/partial proposal batch produces a `segmentation.phrasplit_*` diagnostic and triggers conservative fallback. Unsafe automatic token-edge candidates are dropped or merged before projection; exact text and non-whitespace coverage are checked in both strict and repair modes. Inspect compiler diagnostics with `compile --trace FILE` and `inspect-trace FILE --boundaries`; sentence-part spans remain private in v7; safe canonical boundary kinds are persisted separately from authored pauses.
 
-Use `inspect --tokens` to inspect local `TokenView` values. V6 `pos`, `tag`, `lemma`, and `morph` describe prepared segment text and are authoritative downstream context; fallback analysis may leave some unavailable. `explain --details` shows token and compact replacement spans relative to the owning segment and its flow hash. These output spans are not offsets into original source or another segment; use the trace for complete source mappings.
+Use `inspect --tokens` to inspect local `TokenView` values. V7 `pos`, `tag`, `lemma`, and `morph` describe prepared segment text and are authoritative linguistic context, not model-token IDs or counts; fallback analysis may leave some unavailable. `explain --details` shows token and compact replacement spans relative to the owning segment and its flow hash. These output spans are not offsets into original source or another segment; use the trace for complete source mappings.
 
-If spoken wording is wrong, inspect `FlowSegment.text`. If effective language is wrong, inspect the segment and `FlowPlan.linguistics`. If a pause seems missing, distinguish the semantic `PauseIntent` on the segment edge from the consumer's engine-specific timing policy. Exact authored timed breaks remain explicit; semantic strengths do not prescribe a duration.
+If spoken wording is wrong, inspect `FlowSegment.text`. If effective language is wrong, inspect the segment and `FlowPlan.linguistics`. If a pause seems missing, distinguish an authored `PauseIntent` from a safe sentence/paragraph boundary opportunity; the consumer chooses native, automatic, or manual realization. Exact authored timed breaks remain explicit, while automatic boundary kinds carry no duration or pause command.
 
 `utterplan inspect FILE --boundaries --tokens` operates only on persisted executable flow and does not require a renderer. Trace inspection shows compiler-only boundary events and candidates separately.
 

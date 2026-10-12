@@ -3,36 +3,32 @@ from __future__ import annotations
 import pytest
 
 from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
-from utterplan import PauseConfig, PauseIntent, PlanFormatError, PlannerConfig, SSMDConfig
+from utterplan import PlanFormatError, PlannerConfig, SSMDConfig
 
 
 def test_reusable_planner_isolates_request_configuration() -> None:
-    base = PlannerConfig(
-        language="en-us", document_format="plain", text_preparation="identity", unit="sentence"
-    )
+    base = PlannerConfig(language="en-us", document_format="plain", text_preparation="identity")
     alternate = PlannerConfig(
-        language="de-de",
-        document_format="plain",
-        text_preparation="identity",
-        unit="paragraph",
-        pauses=PauseConfig(mode="auto", enabled=False),
+        language="de-de", document_format="plain", text_preparation="identity"
     )
     planner = UtterancePlanner(base)
-    first = planner.plan("One. Two.", unit="sentence")
+    first = planner.plan("One. Two.")
     second = planner.plan("Eins. Zwei.", config=alternate)
-    third = planner.plan("One. Two.", unit="sentence")
-    fresh = UtterancePlanner(base).plan("One. Two.", unit="sentence")
+    third = planner.plan("One. Two.")
+    fresh = UtterancePlanner(base).plan("One. Two.")
     assert first == fresh == third
     assert second.config["language"] == "de-de"
-    assert second.config["pauses"] == {"mode": "auto", "enabled": False}
+    assert second.config["unit"] == "paragraph"
+    assert second.config["pauses"] == {"mode": "tts", "enabled": True}
     assert planner.config == base
     planner.close()
 
 
-def test_pause_config_contains_activation_policy_only() -> None:
-    assert PauseConfig().__dataclass_fields__.keys() == {"mode", "enabled"}
-    with pytest.raises(TypeError, match="sentence"):
-        PauseConfig(sentence="500ms")  # type: ignore[call-arg]
+def test_planner_config_rejects_removed_unit_and_pause_policy_options() -> None:
+    with pytest.raises(TypeError, match="unit"):
+        PlannerConfig(language="en-us", unit="sentence")
+    with pytest.raises(TypeError, match="pauses"):
+        PlannerConfig(language="en-us", pauses={})
 
 
 def _ssmd_plan(text: str, **kwargs: object):
@@ -69,7 +65,8 @@ pause_defaults:
 ---
 One. Two."""
     )
-    assert plan.segments[0].pause_after == PauseIntent("sentence")
+    assert plan.segments[0].boundary_after == ("sentence",)
+    assert plan.segments[0].pause_after is None
 
 
 def test_ssmd_unknown_header_uses_parser_diagnostic() -> None:
@@ -152,7 +149,8 @@ pause_defaults:
 ---
 One. Two."""
     )
-    assert plan.segments[0].pause_after == PauseIntent("sentence")
+    assert plan.segments[0].boundary_after == ("sentence",)
+    assert plan.segments[0].pause_after is None
 
 
 def test_voice_change_pause_uses_logical_voice_in_one_language() -> None:
@@ -160,13 +158,13 @@ def test_voice_change_pause_uses_logical_voice_in_one_language() -> None:
         language="en-us",
         document_format="ssmd",
         text_preparation="identity",
-        pauses=PauseConfig(mode="auto"),
     )
     plan = UtterancePlanner(config).plan('[One]{voice="a"} [Two]{voice="b"}.')
     voice_events = [event for event in plan.boundaries if event.kind == "voice_change"]
     assert voice_events
     assert voice_events
-    assert plan.segments[0].pause_after == PauseIntent("voice_change")
+    assert plan.segments[0].boundary_after == ("voice_change",)
+    assert plan.segments[0].pause_after is None
 
 
 def test_prepared_contract_uses_spoken_coordinates_and_public_token_fields() -> None:
@@ -288,7 +286,8 @@ Next paragraph."""
     assert plan.segments[0].directives.prosody.rate == "slow"
     assert plan.segments[0].directives.prosody.pitch == "high"
     assert plan.segments[0].directives.prosody.volume == "soft"
-    assert plan.segments[0].pause_after == PauseIntent("sentence")
+    assert plan.segments[0].boundary_after == ("sentence",)
+    assert plan.segments[0].pause_after is None
     assert plan.document_metadata["prosody_transitions"]["same_voice_only"] is True
     assert plan.document_metadata["language_detection"]["languages"] == ["de-DE", "en-GB"]
     assert plan.document_metadata["requires"]["extensions"] == ["acme.effects.whisper"]

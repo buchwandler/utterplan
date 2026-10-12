@@ -1,13 +1,15 @@
+import inspect
+
 import pytest
 
 import utterplan.planner as planner_module
 from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
-from utterplan import LinguisticsConfig, PauseConfig, PauseIntent, PlannerConfig, PlanningError
+from utterplan import LinguisticsConfig, PauseIntent, PlannerConfig, PlanningError
 from utterplan.linguistics import RunAnalysis
 from utterplan.model import TokenAnnotation
 
 
-def test_plain_sentences_paragraphs_and_pauses():
+def test_plain_sentence_and_paragraph_boundaries():
     value = "One sentence. Two sentences.\n\nSecond paragraph."
     plan = UtterancePlanner(PlannerConfig(language="EN_US", document_format="plain")).plan(value)
     assert plan.source.text == value
@@ -15,30 +17,22 @@ def test_plain_sentences_paragraphs_and_pauses():
     assert plan.texts.spoken == value
     assert len(plan.segments) == 3
     assert len(plan.units) == 2
-    assert plan.segments[0].pause_after == PauseIntent("sentence")
-    assert plan.segments[1].pause_after == PauseIntent("paragraph")
+    assert plan.segments[0].boundary_after == ("sentence",)
+    assert plan.segments[0].pause_after is None
+    assert plan.segments[1].boundary_after == ("paragraph",)
+    assert plan.segments[1].pause_after is None
 
 
-def test_sentence_part_edges_split_renderer_segments_and_auto_pause_at_part_boundary():
+def test_sentence_part_edges_split_canonical_segments_without_pause_policy():
     source = "Before; after."
-    plans = [
-        UtterancePlanner(
-            PlannerConfig(
-                language="en-us",
-                text_preparation="identity",
-                pauses=PauseConfig(mode=mode, enabled=enabled),
-            )
-        ).plan(source)
-        for mode, enabled in (("tts", True), ("auto", True), ("auto", False))
-    ]
-    expected_texts = ["Before; ", "after."]
-    for plan in plans:
-        assert [segment.text for segment in plan.segments] == expected_texts
-        assert [segment.clause for segment in plan.segments] == [0, 1]
-        assert plan.semantic_boundaries[0].position == len("Before; ")
-    assert plans[0].segments[0].pause_after is None
-    assert plans[1].segments[0].pause_after == PauseIntent("clause")
-    assert plans[2].segments[0].pause_after is None
+    plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(
+        source
+    )
+    assert [segment.text for segment in plan.segments] == ["Before; ", "after."]
+    assert [segment.clause for segment in plan.segments] == [0, 1]
+    assert plan.semantic_boundaries[0].position == len("Before; ")
+    assert plan.segments[0].boundary_after == ("clause",)
+    assert plan.segments[0].pause_after is None
 
 
 def test_ssmd_preparation_and_explicit_directives():
@@ -67,8 +61,14 @@ def test_identity_is_deterministic():
     assert left.plan_id == right.plan_id
 
 
-def test_pause_config_default_is_tts():
-    assert PauseConfig().mode == "tts"
+def test_compile_api_has_no_unit_or_pause_policy_parameters():
+    assert {"unit", "pauses"}.isdisjoint(PlannerConfig.__dataclass_fields__)
+    for method in (
+        UtterancePlanner.plan,
+        UtterancePlanner.compile,
+        UtterancePlanner.compile_attempt,
+    ):
+        assert "unit" not in inspect.signature(method).parameters
 
 
 def test_pass_a_tokens_counts_tokens_not_language_runs():

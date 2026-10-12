@@ -10,17 +10,16 @@ def make_units(
     segments: tuple[PlanSegment, ...],
     markers: tuple[Marker, ...],
     tokens: tuple[object, ...],
-    kind: str,
     semantic_boundaries: tuple[SemanticBoundary, ...] = (),
 ) -> tuple[PlanUnit, ...]:
     if not segments:
         return ()
     groups: list[list[PlanSegment]] = []
     current: list[PlanSegment] = []
-    current_key: tuple[int, int] | None = None
-    closed: set[tuple[int, int]] = set()
+    current_key: int | None = None
+    closed: set[int] = set()
     for segment in segments:
-        key = (segment.paragraph, segment.sentence if kind == "sentence" else -1)
+        key = segment.paragraph
         if current and key != current_key:
             groups.append(current)
             if current_key is not None:
@@ -45,7 +44,7 @@ def make_units(
         provisional = PlanUnit(
             f"unit-{index:04d}",
             index,
-            kind,
+            "paragraph",
             start,
             end,
             tuple(segment.id for segment in group),

@@ -8,7 +8,6 @@ import pytest
 
 from utterplan import FlowPlan, LinguisticsConfig, PlannerConfig, compile_attempt
 from utterplan.cli import _linguistics_config, build_parser, main
-from utterplan.migration import migrate_plan_data
 
 
 def _payload(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
@@ -40,10 +39,29 @@ def test_compile_cli_defaults() -> None:
     args = build_parser().parse_args(["compile", "Hello world.", "--lang", "en"])
 
     assert args.text_preparation == "auto"
-    assert args.pause_mode == "tts"
+    assert not hasattr(args, "unit")
+    assert not hasattr(args, "pause_mode")
     assert args.spacy == "auto"
 
     assert args.renderability == "repair"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    (
+        ["compile", "Hello.", "--lang", "en", "--unit", "sentence"],
+        ["compile", "Hello.", "--lang", "en", "--pause-mode", "auto"],
+        ["compile-many", "one.txt", "--output-dir", "plans", "--unit", "sentence"],
+        ["compile-many", "one.txt", "--output-dir", "plans", "--pause-mode", "auto"],
+        ["compile-book", "book.ssmdbook", "--unit", "sentence"],
+        ["compile-book", "book.ssmdbook", "--pause-mode", "auto"],
+    ),
+)
+def test_compilation_commands_reject_removed_renderer_policy_flags(argv: list[str]) -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(argv)
+
+    assert build_parser().parse_args(["inspect", "plan.toml", "--unit", "0"]).unit == 0
 
 
 def test_spacy_cli_policies_preserve_auto_off_and_required_tiers() -> None:
@@ -66,7 +84,7 @@ def test_compile_literal_text_to_stdout_toml(capsys: pytest.CaptureFixture[str])
     assert main(["compile", "Hello world.", "--lang", "en-us"]) == 0
     payload = _payload(capsys)
     assert payload["format"] == "utterplan"
-    assert payload["schema_version"] == 6
+    assert payload["schema_version"] == 7
     assert payload["flow"]
 
 
@@ -413,27 +431,26 @@ def test_migrate_explicitly_checks_legacy_json_plan(
 ) -> None:
     source = tmp_path / "legacy.utterplan.json"
     _write_legacy_json(source)
-    assert main(["migrate", str(source), "--check"]) == 0
+    assert main(["migrate", str(source), "--check"]) == 1
     captured = capsys.readouterr()
-    assert "valid migration path" in captured.out
-    assert "source schema: 4" in captured.out
-    assert "migration required: yes" in captured.out
+    assert "migration.recompile_required" in captured.err
+    assert "Recompile the original source" in captured.err
     assert source.exists()
 
 
-def test_migrate_imports_json_to_toml_stdout_and_file(
+def test_migrate_refuses_legacy_json_without_recompilation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source = tmp_path / "legacy.utterplan.json"
-    original = FlowPlan.from_dict(migrate_plan_data(_write_legacy_json(source)).data)
+    _write_legacy_json(source)
     destination = tmp_path / "copy.utterplan.toml"
 
-    assert main(["migrate", str(source)]) == 0
-    stdout_plan = FlowPlan.from_toml(capsys.readouterr().out)
-    assert stdout_plan.to_dict() == original.to_dict()
-    assert main(["migrate", str(source), "-o", str(destination)]) == 0
-    assert "imported" in capsys.readouterr().err
-    assert FlowPlan.load(destination).to_dict() == original.to_dict()
+    assert main(["migrate", str(source)]) == 1
+    assert "migration.recompile_required" in capsys.readouterr().err
+    assert main(["migrate", str(source), "-o", str(destination)]) == 1
+    assert "migration.recompile_required" in capsys.readouterr().err
+    assert not destination.exists()
+    assert source.exists()
 
 
 def test_migrate_refuses_existing_toml_output_without_force(
@@ -444,8 +461,28 @@ def test_migrate_refuses_existing_toml_output_without_force(
     destination = tmp_path / "copy.utterplan.toml"
     destination.write_text("sentinel", encoding="utf-8")
     assert main(["migrate", str(source), "-o", str(destination)]) == 1
-    assert "--force" in capsys.readouterr().err
+    assert "migration.recompile_required" in capsys.readouterr().err
     assert destination.read_text(encoding="utf-8") == "sentinel"
+
+
+def test_migrate_v6_toml_reports_recompile_required(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from utterplan.codecs.v5_toml import loads_v5_toml
+    from utterplan.codecs.v6_toml import dumps_v6_toml
+    from utterplan.migration import migrate_plan_data
+    from utterplan.model import LegacyFlowPlan
+
+    fixture = Path(__file__).parent / "schema_history/v5/canonical_consumer_contract.toml"
+    v5 = loads_v5_toml(fixture.read_text(encoding="utf-8"))
+    v6_data = migrate_plan_data(v5.to_dict(), target_version=6).data
+    source = tmp_path / "legacy-v6.utterplan.toml"
+    source.write_text(dumps_v6_toml(LegacyFlowPlan.from_dict(v6_data)), encoding="utf-8")
+
+    assert main(["migrate", str(source), "--check"]) == 1
+    captured = capsys.readouterr()
+    assert "migration.recompile_required" in captured.err
+    assert "Recompile the original source" in captured.err
 
 
 def test_validate_reports_current_schema_for_toml_plans(
@@ -456,7 +493,7 @@ def test_validate_reports_current_schema_for_toml_plans(
     capsys.readouterr()
     assert main(["validate", str(source)]) == 0
     captured = capsys.readouterr()
-    assert "schema version: 6" in captured.out
+    assert "schema version: 7" in captured.out
     assert "plan ID: sha256:" in captured.out
     assert "migration required" not in captured.out
 

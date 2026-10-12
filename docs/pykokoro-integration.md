@@ -13,16 +13,17 @@ KokoroPipeline.run(text)
     -> audio
 ```
 
-PyKokoro owns model selection, voice assets, G2P, model tokens, ONNX sessions, acoustic behavior, and audio. UtterPlan owns deterministic document parsing, language planning, written-to-spoken preparation, segmentation, typed directives, semantic pause intent, markers, and render units.
+PyKokoro owns model selection, voice assets, G2P, model tokens, ONNX sessions, acoustic behavior, and audio. UtterPlan owns deterministic document parsing, language planning, written-to-spoken preparation, canonical segmentation, safe boundary opportunities, authored pause intents, typed directives, markers, and paragraph-local flow units.
 
 ## Thin adapter inputs
 
-A future adapter can use only public v6 flow fields:
+A future adapter can use only public v7 flow fields:
 
 - `plan.flow` in order, with each unit's ordered `segments`;
 - `segment.text` and `segment.language`;
 - local `segment.tokens` for optional linguistic context;
 - `segment.directives`, `pause_before`, and `pause_after`;
+- `segment.boundary_before` / `boundary_after` for safe downstream cuts, separately from authored pause intents;
 - `segment.markers` and optional `segment.heading`;
 - compact `plan.document` and `plan.linguistics` metadata.
 
@@ -35,11 +36,11 @@ for unit in plan.flow:
         phonemizer(segment.text, segment.language, tokens)
 ```
 
-Use the V6 token fields as authoritative context: pass available `pos`, `tag`, `lemma`, and `morph` through unchanged rather than rerunning spaCy or inferring tags. Default `auto` uses installed compatible local models, preferring `sm`, `md`, `lg`, `trf`, and safely falls back if unavailable; model packages are never downloaded. When fields are unavailable, follow the adapter's documented non-contextual fallback.
+Use the v7 linguistic token fields (not model-token IDs or counts) as authoritative context: pass available `pos`, `tag`, `lemma`, and `morph` through unchanged rather than rerunning spaCy or inferring tags. Default `auto` uses installed compatible local models, preferring `sm`, `md`, `lg`, `trf`, and safely falls back if unavailable; model packages are never downloaded. When fields are unavailable, follow the adapter's documented non-contextual fallback.
 
 ## Pause behavior
 
-The flow carries semantic pause intents and exact authored timed breaks, not planner-invented renderer durations or a renderer activation mode. PyKokoro may interpret supported semantic intents according to its own behavior. Renderer/acoustic variance remains outside UtterPlan and plan identity.
+Schema v7 carries safe boundary opportunities separately from authored pause intents and exact timed breaks; neither selects a renderer activation policy or fixes a chunk. PyKokoro may choose its own chunking and native, automatic, or manual pause realization. A `FlowSegment` is not necessarily one TTS call, and renderer/acoustic variance remains outside UtterPlan and plan identity.
 
 ## Compatibility ownership
 

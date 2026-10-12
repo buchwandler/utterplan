@@ -7,8 +7,8 @@
 
 UtterPlan is the canonical, engine-independent semantic compiler from one SSMD
 document (or explicitly selected plain-text document) to an executable speech
-plan. It produces deterministic prepared text, ordered flow units, segment-local
-semantics, pause intents, portable document metadata, and typed directives for
+plan. It produces deterministic prepared text, paragraph-local flow units, safe boundary opportunities, authored pause intents, and segment-local
+semantics, portable document metadata, and typed directives for
 independent downstream consumers such as Readio, VoiceRender, and other FlowPlan users. It does not manage or modify book workspaces; `compile-book` reads an SSMDBook manifest only to discover selected source chapters. It uses TTSReady for written-to-spoken preparation and stops before G2P, synthesis, and audio.
 
 ## CLI
@@ -49,7 +49,7 @@ cd "Platform Decay - Martha Wells.ssmdbook"
 utterplan compile-book chapters --chapters 5-17
 ```
 
-The command reads the workspace manifest to discover chapters and writes independent v5 plans and a report under `utterplan/`:
+The command reads the workspace manifest to discover chapters and writes independent v7 plans and a report under `utterplan/`:
 
 ```text
 utterplan/
@@ -94,7 +94,7 @@ command:
 ssmd migrate old.ssmd --to 0.9
 ```
 
-`utterplan migrate` explicitly imports supported historical `.utterplan.json` plans and writes current TOML. It does not migrate SSMD source.
+`utterplan migrate` handles only serialized plan data; v6-to-v7 migration refuses with `migration.recompile_required` when the saved plan cannot prove complete boundary coverage. Recompile the original source to produce a current plan. It does not migrate SSMD source.
 Normal plan loading is TOML-only: `FlowPlan.load()` and plan-inspection commands reject JSON rather than auto-detecting it.
 
 ## Planning defaults
@@ -105,7 +105,7 @@ Python `PlannerConfig` defaults to `document_format="plain"`; set it to `"ssmd"`
 
 Python `PlannerConfig.renderability_mode` also defaults to safe punctuation-only repair; choose `"strict"` to reject every repair opportunity. Neither mode guesses a symbol's pronunciation or crosses semantic blockers.
 
-V5 `token.span`, `pos`, `tag`, `lemma`, and `morph` describe the prepared `segment.text` and are the downstream linguistic context; consumers should not retokenize or rerun spaCy. Optional `replacement.span` / `replacement.source` records compact preparation provenance (for example, `A R T` from `ART`): spans index final prepared segment text, while full source coordinates and maps remain in the optional trace sidecar. Replacement provenance does not change executable hashes or synthesis inputs.
+V7 `token.span`, `pos`, `tag`, `lemma`, and `morph` describe the prepared `segment.text` and are the downstream linguistic context, not engine/model token counts; consumers should not retokenize or rerun spaCy. Optional `replacement.span` / `replacement.source` records compact preparation provenance (for example, `A R T` from `ART`): spans index final prepared segment text, while full source coordinates and maps remain in the optional trace sidecar. Replacement provenance does not change executable hashes or synthesis inputs.
 
 ## Python API
 
@@ -155,7 +155,7 @@ Callbacks run synchronously and exceptions propagate. See the [Python API guide]
 
 ## Renderer-consumer boundary
 
-Renderers consume `FlowPlan.flow` in order. Each `FlowUnit` contains local `FlowSegment` objects with already-prepared speech text, effective language, segment-local token views, semantic pause intents, directives, markers, and optional heading level. Token `start`/`end` offsets are Python-character indexes into that segment's `text`; they are never document-global coordinates. Pause intents express `none`, semantic strengths, or exact authored times and do not prescribe engine-specific duration policy.
+Renderers consume `FlowPlan.flow` in order. Each `FlowUnit` contains local `FlowSegment` objects with already-prepared speech text, effective language, segment-local linguistic token views, canonical boundary opportunities, authored pause intents, directives, markers, and optional heading level. Token `start`/`end` offsets are Python-character indexes into that segment's `text`; they are never document-global coordinates. FlowUnits are fixed paragraph-local blocks, not renderer chunks; a `FlowSegment` is not necessarily one TTS call. `boundary_before` / `boundary_after` hold safe cut opportunities independently from authored `none`, strength, or timed pause intents. Consumers may choose sentence, paragraph, or engine-token-budget chunking and native, automatic, or manual pause realization; linguistic token views are not model-token counts.
 
 `FlowPlan.document` carries compact document metadata and `FlowPlan.linguistics` identifies the analysis provider without retaining provider documents. Compiler source, preparation maps, diagnostics, and renderability details belong only in an optional trace sidecar. Plans contain no phonemes, model token IDs, models, sessions, renderer configuration, provider documents, or audio. UtterPlan does not fetch media or execute extension handlers.
 The intended dependency direction is:
@@ -184,9 +184,9 @@ renderer repository rather than UtterPlan's test suite.
 
 ## Versions
 
-The package version is dynamically derived from Git tags by setuptools-scm. Package version and UtterPlan schema version are independent. Current `.utterplan.toml` plans use semantic schema v6. Historical JSON Schemas v1–v4 remain immutable and supported through sequential migrations; schemas v5 and v6 use their versioned TOML/FlowPlan contracts and have no JSON Schema resources.
+The package version is dynamically derived from Git tags by setuptools-scm. Package version and UtterPlan schema version are independent. Current `.utterplan.toml` plans use semantic schema v7. Historical JSON Schemas v1–v4 remain immutable; schemas v5, v6, and v7 use versioned TOML/FlowPlan contracts and have no JSON Schema resources.
 
-Schema v5 introduced ordered flow units and segment-local semantics. Schema v6 adds an optional portable record of exact raw input and a new plan-identity hash that incorporates its SHA-256 digest when available. Flow-unit cache hashes remain unchanged. Frozen v5 plans remain readable and migrate sequentially to v6 without inventing source text that was not serialized. Migrations operate on serialized plan data only; they do not reparse, run NLP, plan, call G2P, render, or process audio.
+Schema v5 introduced ordered flow units and segment-local semantics; v6 added optional exact-source provenance. Schema v7 removes renderer-selected root `unit` and adds canonical safe-boundary opportunities separate from authored pause intents; boundaries participate in v7 executable identity. Older schemas retain sequential data-only migration steps through v6, but v6-to-v7 returns `migration.recompile_required` because the complete boundary inventory cannot be reconstructed. Migrations never reparse, run NLP, plan, call G2P, render, or process audio.
 
 ## Development
 
