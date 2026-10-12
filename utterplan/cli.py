@@ -19,7 +19,7 @@ from .config import LinguisticsConfig, PlannerConfig
 from .exceptions import PlanFormatError, PlanRenderabilityError, UtterPlanError
 from .explain import format_explanation
 from .migration import MigrationResult, migrate_plan_data
-from .model import FlowPlan
+from .model import FlowPlan, PauseIntent
 from .renderability import format_renderability_error
 from .ssmdbook import (
     SSMDBookError,
@@ -873,7 +873,11 @@ def _inspect(plan: FlowPlan, args: argparse.Namespace) -> None:
             events.extend(f"@{name}" for name in segment.markers)
             for edge, pause in (("before", segment.pause_before), ("after", segment.pause_after)):
                 if pause is not None:
-                    value = f"timed {pause.time}" if pause.type == "timed" else pause.type
+                    value = (
+                        f"timed {pause.time}"
+                        if isinstance(pause, PauseIntent) and pause.type == "timed"
+                        else pause.type
+                    )
                     events.append(f"pause {edge}: {value}")
             if events:
                 found = True
