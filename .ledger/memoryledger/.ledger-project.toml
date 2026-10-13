@@ -1,0 +1,6 @@
+schema_version = 1
+layout_version = 3
+project_uuid = "c4a0577e-8faa-417b-b0da-259b21947378"
+tool = "memoryledger"
+mount = "config"
+storage = "project"

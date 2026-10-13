@@ -1,0 +1,28 @@
+config_version = 2
+
+[ledger]
+code = "ml"
+version = 39
+
+[render]
+root_agents_path = "AGENTS.md"
+linked_docs_dir = "agent_docs"
+nested_agents_enabled = false
+linked_docs_enabled = true
+max_root_agents_chars = 12000
+max_linked_doc_chars = 50000
+include_local = false
+include_rejected = false
+include_evidence = false
+evidence_index_path = ""
+sort_order = ["rule", "procedure", "semantic", "learning", "episode", "document"]
+
+[intake]
+allow_run_html = true
+allow_current_run = true
+default_review_status = "candidate"
+
+[template_policy]
+enabled = false
+ids = []
+auto_accept = false
