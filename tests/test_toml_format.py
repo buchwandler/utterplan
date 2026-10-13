@@ -160,21 +160,28 @@ def test_v6_model_rejects_identity_and_content_hash_mismatches() -> None:
     assert error.value.code == "flow.hash"
 
 
-def test_version_router_requires_recompilation_for_frozen_v4_toml() -> None:
+def test_normal_loader_rejects_frozen_v4_toml_and_explicit_migration_requires_recompile() -> None:
     raw = V4_TOML.read_text(encoding="utf-8")
     frozen = decode_v4_toml_data(tomlkit.parse(raw).unwrap())
     before = copy.deepcopy(frozen)
 
-    with pytest.raises(PlanMigrationError) as error:
+    with pytest.raises(UnsupportedSchemaError) as error:
         loads_toml(raw)
-
-    assert error.value.code == "migration.recompile_required"
+    assert error.value.code == "schema.version_unsupported"
     assert frozen == before
+
+    from utterplan.migration import migrate_plan_data
+
+    with pytest.raises(PlanMigrationError) as migration_error:
+        migrate_plan_data(migrate_v4_to_v5(frozen))
+    assert migration_error.value.code == "migration.recompile_required"
 
 
 def test_v4_toml_with_ambiguous_token_coordinates_fails_safely() -> None:
+    wire = tomlkit.parse(V4_AMBIGUOUS_TOML.read_text(encoding="utf-8")).unwrap()
+    legacy = decode_v4_toml_data(wire)
     with pytest.raises(PlanMigrationError) as error:
-        loads_toml(V4_AMBIGUOUS_TOML.read_text(encoding="utf-8"))
+        migrate_v4_to_v5(legacy)
     assert error.value.code == "migration.token-coordinate-ambiguous"
 
 
@@ -182,17 +189,24 @@ def test_v5_historical_codec_remains_readable_but_current_migration_requires_sou
     import json
 
     from utterplan.codecs.v5_toml import dumps_v5_toml, loads_v5_toml
+    from utterplan.model import LegacyFlowPlan
 
     legacy = json.loads(V4_JSON.read_text(encoding="utf-8"))
-    historical = FlowPlan.from_dict(migrate_v4_to_v5(legacy))
+    historical = LegacyFlowPlan.from_dict(migrate_v4_to_v5(legacy))
     serialized = dumps_v5_toml(historical)
     restored = loads_v5_toml(serialized)
 
     assert historical.schema_version == 5
     assert restored.to_dict() == historical.to_dict()
-    with pytest.raises(PlanMigrationError, match="Recompile") as error:
+    with pytest.raises(UnsupportedSchemaError) as error:
         from_toml_data(tomlkit.parse(serialized).unwrap())
-    assert error.value.code == "migration.recompile_required"
+    assert error.value.code == "schema.version_unsupported"
+
+    from utterplan.migration import migrate_plan_data
+
+    with pytest.raises(PlanMigrationError, match="Recompile") as migration_error:
+        migrate_plan_data(restored.to_dict())
+    assert migration_error.value.code == "migration.recompile_required"
 
 
 @pytest.mark.parametrize(

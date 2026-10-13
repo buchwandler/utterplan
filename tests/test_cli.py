@@ -699,3 +699,13 @@ def test_preview_cli_selects_whole_chunks_and_emits_details_json(
     assert FlowPlan.load(path).plan_id == plan_id
     assert main(["preview", str(path), "--segments", "3-1"]) == 1
     assert "segment range is reversed" in capsys.readouterr().err
+
+
+def test_validate_and_inspect_reject_legacy_flow_plans(tmp_path: Path, capsys) -> None:
+    fixture = Path(__file__).parent / "schema_history/v5/canonical_consumer_contract.toml"
+    legacy_plan = tmp_path / "legacy.utterplan.toml"
+    legacy_plan.write_bytes(fixture.read_bytes())
+
+    for command in ("validate", "inspect"):
+        assert main([command, str(legacy_plan)]) == 1
+        assert "schema.version_unsupported" in capsys.readouterr().err

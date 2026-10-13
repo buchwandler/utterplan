@@ -10,7 +10,7 @@ UtterPlan accepts SSMD source syntax at version 0.9 only. Convert older source w
 
 ## Importing legacy plans
 
-Historical schemas retain their sequential data-only path through v6; v6-to-v7 migration refuses because it cannot reconstruct the complete boundary inventory, so recompile the original source. Import explicitly:
+Normal loading and execution accept schema v7 only. Historical schemas retain an explicit sequential, serialized-data migration path through v6; v6-to-v7 migration refuses because it cannot reconstruct the complete boundary inventory, so recompile the original source. Normal APIs reject older plans with `schema.version_unsupported`. Import explicitly:
 
 ```bash
 utterplan migrate old.utterplan.json --check

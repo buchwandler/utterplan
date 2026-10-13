@@ -51,7 +51,7 @@ jobs:
             "ssmd==0.9.3" \
             "ttsready==0.2.3" \
             "spokenform==0.4.5" \
-            "renderplan==0.1.0" \
+            "renderplan==0.1.1" \
             "typing_extensions==4.0.0" \
             "tomlkit==0.13.0"
           python -m pip install --no-deps -e .
@@ -60,6 +60,26 @@ jobs:
       - name: Run lower-bound tests
         run: python -m pytest -q
 
+  latest-renderplan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install latest supported dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run RenderPlan integration tests
+        run: >-
+          python -m pytest -q
+          tests/test_renderplan_batch.py
+          tests/test_renderplan_export.py
+          tests/test_renderplan_replan.py
+          tests/test_cli_render_book.py
+          tests/test_renderplan_dependency_contract.py
   package-smoke:
     runs-on: ubuntu-latest
     steps:
@@ -100,7 +120,7 @@ jobs:
               "phrasplit": ("0.3.9", "0.4"),
               "ssmd": ("0.9.3", "0.10"),
               "ttsready": ("0.2.3", "0.3"),
-              "renderplan": ("0.1", "0.2"),
+              "renderplan": ("0.1.1", "0.2"),
           }
 
           def check_metadata(contents):
@@ -149,8 +169,11 @@ jobs:
             "$RUNNER_TEMP"/dist/utterplan-*.whl
       - name: Run installed smoke checks
         run: |
+          cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/python" -c \
             "import importlib.metadata as m; import utterplan; assert m.version('utterplan') == utterplan.__version__"
+          "$RUNNER_TEMP/utterplan-wheel-venv/bin/python" -c \
+            "import utterplan.renderplan_batch; from renderplan import RenderPlanSet"
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" --version
           cat > "$RUNNER_TEMP/test.ssmd.md" <<'EOF'
           ---
@@ -166,6 +189,61 @@ jobs:
             > "$RUNNER_TEMP/test.utterplan.toml"
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" validate \
             "$RUNNER_TEMP/test.utterplan.toml"
+          BOOK="$RUNNER_TEMP/render-book.smoke.ssmdbook"
+          mkdir -p "$BOOK/chapters" "$BOOK/utterplan"
+          cat > "$BOOK/chapters/chapter-0001.ssmd.md" <<'EOF'
+          ---
+          ssmd_version: "0.9"
+          language: en-US
+          ---
+          Installed wheel render-book smoke.
+          EOF
+          cat > "$BOOK/manifest.json" <<'EOF'
+          {
+            "format": "ssmdconvert.book",
+            "schema_version": 1,
+            "ssmd_version": "0.9",
+            "chapters": [
+              {
+                "id": "chapter-0001",
+                "source_number": 1,
+                "path": "chapters/chapter-0001.ssmd.md",
+                "title": "Chapter 1"
+              }
+            ]
+          }
+          EOF
+          "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" compile \
+            "$BOOK/chapters/chapter-0001.ssmd.md" --lang en-us --text-preparation identity \
+            -o "$BOOK/utterplan/chapter-0001.utterplan.toml"
+          "$RUNNER_TEMP/utterplan-wheel-venv/bin/python" - "$BOOK/narration.renderprofile.toml" <<'PY'
+          import sys
+          from pathlib import Path
+
+          from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
+          from renderplan import codec
+
+          profile = RenderProfile(
+              roles={"narrator": RoleProfile(language="en-US", binding={"engine": "smoke"})},
+              default_role="narrator",
+              planning=PlanningPolicy(split="sentence"),
+              pauses=PausePolicy(mode="manual"),
+          )
+          codec.save_profile(profile, Path(sys.argv[1]))
+          PY
+          "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" render-book \
+            "$BOOK" --profile "$BOOK/narration.renderprofile.toml" --chapters 1
+          "$RUNNER_TEMP/utterplan-wheel-venv/bin/python" - "$BOOK" <<'PY'
+          import sys
+          from pathlib import Path
+
+          from renderplan import load_renderplan_set
+
+          book = Path(sys.argv[1])
+          set_path = next((book / "renderplan").glob("*/renderplan-set.toml"))
+          renderplan_set = load_renderplan_set(set_path)
+          assert [chapter.id for chapter in renderplan_set.chapters] == ["chapter-0001"]
+          PY
           cat > "$RUNNER_TEMP/test-0.8.ssmd.md" <<'EOF'
           ---
           ssmd_version: "0.8"

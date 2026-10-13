@@ -5,10 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .migration import migrate_plan_data
 from .model import FlowPlan, UtterancePlan
 from .toml_codec import dumps_toml, loads_toml
-from .versioning import CURRENT_SCHEMA_VERSION
 
 
 def to_dict(plan: UtterancePlan | FlowPlan) -> dict[str, Any]:
@@ -17,12 +15,8 @@ def to_dict(plan: UtterancePlan | FlowPlan) -> dict[str, Any]:
 
 
 def from_dict(data: Mapping[str, Any]) -> FlowPlan:
-    """Load current v7 semantics, migrating supported historical plain mappings."""
-    if data.get("schema_version") == CURRENT_SCHEMA_VERSION:
-        plan = FlowPlan.from_dict(data)
-    else:
-        migrated = migrate_plan_data(data)
-        plan = FlowPlan.from_dict(migrated.data)
+    """Load a schema-v7 plan without implicitly migrating historical mappings."""
+    plan = FlowPlan.from_dict(data)
     plan.validate()
     return plan
 
@@ -33,7 +27,7 @@ def to_toml(plan: UtterancePlan | FlowPlan) -> str:
 
 
 def from_toml(value: str) -> FlowPlan:
-    """Deserialize and migrate a supported TOML plan to the current v7 model."""
+    """Deserialize and validate a schema-v7 TOML plan."""
     result = loads_toml(value)
     if not isinstance(result, FlowPlan):
         raise ValueError("TOML did not decode to a current FlowPlan")

@@ -11,6 +11,7 @@ from utterplan.versioning import (
     CURRENT_SCHEMA_VERSION,
     FORMAT,
     JSON_SCHEMA_VERSIONS,
+    MIGRATION_SOURCE_SCHEMA_VERSIONS,
     OLDEST_SUPPORTED_SCHEMA_VERSION,
     SCHEMA_VERSION,
     SUPPORTED_SCHEMA_VERSIONS,
@@ -22,7 +23,8 @@ def test_schema_registry_separates_supported_plans_from_historical_json_schemas(
     assert CURRENT_SCHEMA_VERSION == 7
     assert SCHEMA_VERSION == CURRENT_SCHEMA_VERSION
     assert OLDEST_SUPPORTED_SCHEMA_VERSION == 1
-    assert SUPPORTED_SCHEMA_VERSIONS == (1, 2, 3, 4, 5, 6, 7)
+    assert SUPPORTED_SCHEMA_VERSIONS == (7,)
+    assert MIGRATION_SOURCE_SCHEMA_VERSIONS == (1, 2, 3, 4, 5, 6)
     assert JSON_SCHEMA_VERSIONS == (1, 2, 3, 4)
     assert schema_versions() == JSON_SCHEMA_VERSIONS
     assert all(has_schema(version) for version in JSON_SCHEMA_VERSIONS)

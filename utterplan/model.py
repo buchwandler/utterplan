@@ -1966,6 +1966,15 @@ class FlowPlan:
         if not isinstance(data, Mapping):
             raise PlanFormatError("flow plan must be an object", code="plan.type")
         schema_version = data.get("schema_version")
+        if type(schema_version) is not int or schema_version != CURRENT_SCHEMA_VERSION:
+            raise UnsupportedSchemaError(schema_version)
+        return cls._from_dict(data)
+
+    @classmethod
+    def _from_dict(cls, data: Mapping[str, Any]) -> FlowPlan:
+        if not isinstance(data, Mapping):
+            raise PlanFormatError("flow plan must be an object", code="plan.type")
+        schema_version = data.get("schema_version")
         is_legacy = type(schema_version) is int and schema_version in {
             V5_SCHEMA_VERSION,
             V6_SCHEMA_VERSION,
@@ -2366,7 +2375,7 @@ class LegacyFlowPlan(FlowPlan):
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> LegacyFlowPlan:
-        plan = FlowPlan.from_dict(data)
+        plan = FlowPlan._from_dict(data)
         if not isinstance(plan, cls):
             raise PlanFormatError(
                 "expected a schema-v5 or schema-v6 flow plan", code="schema.version"

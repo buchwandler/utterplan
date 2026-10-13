@@ -7,12 +7,17 @@ from pathlib import Path
 
 import pytest
 import tomlkit
-from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
+from renderplan import (
+    PausePolicy,
+    PlanningPolicy,
+    RenderProfile,
+    RoleProfile,
+    load_renderplan_set,
+)
 from renderplan import codec as renderplan_codec
 
 from utterplan import FlowPlan, FlowSegment, FlowUnit, TokenView
 from utterplan.cli import build_parser, main
-from utterplan.renderplan_batch import load_renderplan_set
 
 
 def _ssmd(text: str) -> str:
@@ -384,6 +389,21 @@ def test_invalid_profile_and_unsafe_paths_do_not_create_outputs(tmp_path: Path, 
         _render(root, profile_path, "--chapters", "5", "--report", str(root / "manifest.json")) == 2
     )
     capsys.readouterr()
+    assert not (root / "renderplan").exists()
+
+
+def test_render_book_rejects_legacy_plan_before_collection_state_is_written(
+    tmp_path: Path, capsys
+) -> None:
+    root = _write_book(tmp_path / "legacy.ssmdbook", (5,))
+    profile_path = root / "narration.renderprofile.toml"
+    _profile(profile_path)
+    source_plan = root / "utterplan" / "chapter-0005.utterplan.toml"
+    legacy_fixture = Path(__file__).parent / "schema_history/v5/canonical_consumer_contract.toml"
+    shutil.copyfile(legacy_fixture, source_plan)
+
+    assert _render(root, profile_path, "--chapters", "5") == 1
+    assert "schema.version_unsupported" in capsys.readouterr().err
     assert not (root / "renderplan").exists()
 
 

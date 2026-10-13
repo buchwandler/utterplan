@@ -38,12 +38,11 @@ class MigrationPathError(PlanMigrationError):
 
 class UnsupportedSchemaError(PlanFormatError):
     def __init__(self, version: object) -> None:
-        from .versioning import CURRENT_SCHEMA_VERSION
 
         super().__init__(
-            f"Unsupported UtterPlan schema version {version}. "
-            f"This version of utterplan supports schema version {CURRENT_SCHEMA_VERSION}.",
-            code="schema.unsupported_version",
+            "This build accepts UtterPlan schema 7 only. "
+            "Recompile the source with the current UtterPlan.",
+            code="schema.version_unsupported",
             path="$.schema_version",
         )
 

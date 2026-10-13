@@ -5,23 +5,24 @@ from pathlib import Path
 
 import pytest
 import tomlkit
-from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
-from renderplan import codec as renderplan_codec
-
-from utterplan import FlowPlan, FlowSegment, FlowUnit, TokenView
-from utterplan.renderplan_batch import (
+from renderplan import (
+    PausePolicy,
+    PlanningPolicy,
     RenderPlanSet,
     RenderPlanSetChapter,
     RenderPlanSetError,
-    RenderRequest,
+    RenderProfile,
+    RoleProfile,
     load_renderplan_set,
-    new_renderplan_set,
-    render_to_files,
     renderplan_set_from_dict,
     renderplan_set_to_dict,
     save_renderplan_set,
     validate_renderplan_set_profile,
 )
+from renderplan import codec as renderplan_codec
+
+from utterplan import FlowPlan, FlowSegment, FlowUnit, TokenView
+from utterplan.renderplan_batch import RenderRequest, new_renderplan_set, render_to_files
 
 
 def _profile(binding: str = "fixture") -> RenderProfile:

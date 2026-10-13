@@ -9,12 +9,10 @@ from typing import Any
 import tomlkit
 from tomlkit.exceptions import ParseError
 
-from .codecs import v4_toml
 from .codecs.v7_toml import dumps_v7_toml, from_v7_toml_data, to_v7_toml_data
 from .exceptions import PlanFormatError, UnsupportedSchemaError
-from .migration import migrate_plan_data
 from .model import FlowPlan, UtterancePlan
-from .versioning import CURRENT_SCHEMA_VERSION, V4_SCHEMA_VERSION
+from .versioning import CURRENT_SCHEMA_VERSION
 
 
 def _plain(value: Any) -> Any:
@@ -31,7 +29,7 @@ def _current_flow_plan(plan: UtterancePlan | FlowPlan) -> FlowPlan:
     if isinstance(plan, FlowPlan):
         if plan.schema_version == CURRENT_SCHEMA_VERSION:
             return plan
-        return FlowPlan.from_dict(migrate_plan_data(plan.to_dict()).data)
+        raise UnsupportedSchemaError(plan.schema_version)
     if not isinstance(plan, UtterancePlan):
         raise PlanFormatError("unsupported plan object for TOML serialization", code="plan.type")
     from .flow_projection import project_compiler_plan
@@ -45,31 +43,16 @@ def to_toml_data(plan: UtterancePlan | FlowPlan) -> dict[str, Any]:
 
 
 def from_toml_data(data: Mapping[str, object]) -> FlowPlan:
-    """Decode v7 TOML or sequentially migrate frozen historical TOML into the current model."""
+    """Decode and validate only schema-v7 TOML data."""
     plain = _plain(data)
     if not isinstance(plain, Mapping):
         raise PlanFormatError("TOML root must be a table", code="toml.root")
     version = plain.get("schema_version")
-    if type(version) is not int:
+    if type(version) is not int or version != CURRENT_SCHEMA_VERSION:
         raise UnsupportedSchemaError(version)
-    if version == CURRENT_SCHEMA_VERSION:
-        current_plan = from_v7_toml_data(plain)
-        current_plan.validate()
-        return current_plan
-    if version in {5, 6}:
-        migrated = migrate_plan_data(plain)
-        current_plan = FlowPlan.from_dict(migrated.data)
-        current_plan.validate()
-        return current_plan
-    if version == V4_SCHEMA_VERSION:
-        from .migrations.v4_to_v5 import migrate_v4_to_v5
-
-        legacy_v4 = v4_toml.decode_v4_toml_data(plain)
-        migrated_v4 = migrate_plan_data(migrate_v4_to_v5(legacy_v4))
-        current_plan = FlowPlan.from_dict(migrated_v4.data)
-        current_plan.validate()
-        return current_plan
-    raise UnsupportedSchemaError(version)
+    current_plan = from_v7_toml_data(plain)
+    current_plan.validate()
+    return current_plan
 
 
 def dumps_toml(plan: UtterancePlan | FlowPlan) -> str:
@@ -99,7 +82,7 @@ def dump(plan: UtterancePlan | FlowPlan, path: str | Path) -> None:
 
 
 def load(path: str | Path) -> FlowPlan:
-    """Read and decode a schema-v7 or sequentially migratable schema-v4/v5 TOML plan."""
+    """Read and decode a schema-v7 TOML plan."""
     return loads_toml(Path(path).read_text(encoding="utf-8"))
 
 

@@ -27,4 +27,4 @@ changelog
 ```
 
 The [SSMDBook guide](ssmdbook.md) covers workspace compilation and the profile-specific `render-book` workflow, including how RenderPlan and VoiceRender fit after semantic planning.
-The package version and the UtterPlan schema version are independent. The current interchange schema is version `6`; schema-v5 TOML and schemas v1–v4 remain available as immutable historical inputs with sequential migration paths.
+The package version and the UtterPlan schema version are independent. Schema v7 is the only version accepted by normal loading and execution. Schema-v5/v6 TOML and schemas v1–v4 remain immutable historical migration inputs; the sequential path reaches v6, while v6-to-v7 requires recompiling the original source.

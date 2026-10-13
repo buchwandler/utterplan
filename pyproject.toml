@@ -17,7 +17,7 @@ dependencies = [
   "ttsready>=0.2.3,<0.3",
   "typing_extensions>=4.0",
   "tomlkit>=0.13,<1",
-  "renderplan>=0.1,<0.2",
+  "renderplan>=0.1.1,<0.2",
  ]
 classifiers = [
   "Development Status :: 3 - Alpha",

@@ -5,8 +5,9 @@ import pytest
 from utterplan import FlowPlan, FlowSegment, FlowUnit, PauseIntent, PlanSource
 from utterplan.boundaries import BoundaryKind
 from utterplan.codecs.v7_toml import to_v7_toml_data
-from utterplan.exceptions import PlanFormatError
+from utterplan.exceptions import PlanFormatError, UnsupportedSchemaError
 from utterplan.hashing import FLOW_HASH_SCHEMA
+from utterplan.serialization import from_dict as load_flow_plan
 from utterplan.toml_codec import from_toml_data
 
 
@@ -24,6 +25,23 @@ def _plan(
         flow=(FlowUnit((segment,)),),
         source=PlanSource("plain", "Hello."),
     )
+
+
+@pytest.mark.parametrize("schema_version", [5, 6])
+def test_normal_flow_plan_decoders_reject_legacy_schemas(schema_version: int) -> None:
+    semantic = _plan().to_dict()
+    semantic["schema_version"] = schema_version
+    with pytest.raises(UnsupportedSchemaError) as error:
+        FlowPlan.from_dict(semantic)
+    assert error.value.code == "schema.version_unsupported"
+    with pytest.raises(UnsupportedSchemaError):
+        load_flow_plan(semantic)
+
+    wire = to_v7_toml_data(_plan())
+    wire["schema_version"] = schema_version
+    with pytest.raises(UnsupportedSchemaError) as error:
+        from_toml_data(wire)
+    assert error.value.code == "schema.version_unsupported"
 
 
 def test_v7_flow_has_no_root_unit_and_roundtrips_coexisting_boundary_and_authored_pause() -> None:

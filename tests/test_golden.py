@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from utterplan import FlowPlan, PauseIntent, PlannerConfig, UtterancePlanner
-from utterplan.exceptions import PlanMigrationError
+from utterplan.exceptions import UnsupportedSchemaError
 
 ROOT = Path(__file__).resolve().parent
 HISTORICAL_TOML = sorted(
@@ -16,12 +16,12 @@ HISTORICAL_TOML = sorted(
 COMPREHENSIVE_SOURCE = ROOT / "fixtures" / "ssmd_09_comprehensive.ssmd"
 
 
-def test_historical_toml_goldens_require_source_recompilation_for_v7() -> None:
+def test_historical_toml_goldens_are_rejected_by_normal_loaders() -> None:
     assert HISTORICAL_TOML
     for path in HISTORICAL_TOML:
-        with pytest.raises(PlanMigrationError) as error:
+        with pytest.raises(UnsupportedSchemaError) as error:
             FlowPlan.load(path)
-        assert error.value.code == "migration.recompile_required"
+        assert error.value.code == "schema.version_unsupported"
 
 
 def test_canonical_ssmd_09_compiles_to_deterministic_v7_flow() -> None:

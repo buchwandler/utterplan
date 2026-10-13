@@ -111,10 +111,15 @@ def test_v3_fixtures_validate_and_migrate_immutably() -> None:
 
 def test_historical_json_schema_registry_is_distinct_from_supported_plan_versions() -> None:
     from utterplan.schema_registry import has_schema
-    from utterplan.versioning import JSON_SCHEMA_VERSIONS, SUPPORTED_SCHEMA_VERSIONS
+    from utterplan.versioning import (
+        JSON_SCHEMA_VERSIONS,
+        MIGRATION_SOURCE_SCHEMA_VERSIONS,
+        SUPPORTED_SCHEMA_VERSIONS,
+    )
 
     assert JSON_SCHEMA_VERSIONS == (1, 2, 3, 4)
-    assert SUPPORTED_SCHEMA_VERSIONS == (1, 2, 3, 4, 5, 6, 7)
+    assert SUPPORTED_SCHEMA_VERSIONS == (7,)
+    assert MIGRATION_SOURCE_SCHEMA_VERSIONS == (1, 2, 3, 4, 5, 6)
     assert all(has_schema(version) for version in JSON_SCHEMA_VERSIONS)
     assert not has_schema(5)
     assert not has_schema(6)

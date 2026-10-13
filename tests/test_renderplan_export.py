@@ -168,6 +168,58 @@ def test_render_plan_cli_initial_json_replan_and_explain(tmp_path: Path, capsys)
     assert "pause-after: 0ms capacity" in explanation
 
 
+def test_render_plan_cli_rejects_mutated_source_before_writing_output(
+    tmp_path: Path, capsys
+) -> None:
+    original = _source()
+    profile = _profile()
+    previous = build_render_plan(original, profile)
+    report = _preflight(previous, profile)
+    source_path = tmp_path / "chapter.utterplan.toml"
+    profile_path = tmp_path / "voice.renderprofile.toml"
+    previous_path = tmp_path / "previous.renderplan.toml"
+    preflight_path = tmp_path / "preflight.toml"
+    output_path = tmp_path / "should-not-exist.renderplan.toml"
+    mutated = FlowPlan(
+        language="en-US",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment(
+                        "one two four.",
+                        "en-US",
+                        tokens=(TokenView(0, 3), TokenView(4, 7), TokenView(8, 12)),
+                        boundary_after=("sentence",),
+                    ),
+                )
+            ),
+        ),
+    )
+    mutated.save(source_path)
+    renderplan_codec.save_profile(profile, profile_path)
+    renderplan_codec.save_plan(previous, previous_path)
+    renderplan_codec.save_preflight(report, preflight_path)
+
+    result = main(
+        [
+            "render-plan",
+            str(source_path),
+            "--profile",
+            str(profile_path),
+            "--previous",
+            str(previous_path),
+            "--preflight",
+            str(preflight_path),
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert result == 1
+    assert "renderplan.replan.source_plan_id" in capsys.readouterr().err
+    assert not output_path.exists()
+
+
 def test_repository_ssmd_fixture_compiles_and_projects() -> None:
     fixture = Path(__file__).parent / "fixtures" / "canonical_consumer_contract.ssmd"
     compiled = compile_document(

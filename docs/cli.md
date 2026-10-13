@@ -158,6 +158,8 @@ For the full editable-workspace behavior and examples, see the [SSMDBook guide](
 UtterPlans for selected manifest chapters and writes one RenderPlan per chapter
 for a shared RenderProfile.
 
+All ordinary load, validation, inspection, explanation, preview, and RenderPlan commands accept schema v7 only. Older plans fail with `schema.version_unsupported` and the guidance `This build accepts UtterPlan schema 7 only. Recompile the source with the current UtterPlan.` Use `utterplan migrate` only for the explicit serialized-data migration path; it is not invoked implicitly by normal loading.
+
 ```text
 utterplan render-book INPUT --profile PROFILE [--chapters SELECTOR]
   [--utterplan-dir PATH] [--output-root PATH] [--variant LABEL]

@@ -7,7 +7,7 @@ import pytest
 
 from utterplan import PlannerConfig, PlanValidationError, compile_document
 from utterplan.codecs.v5_toml import loads_v5_toml
-from utterplan.exceptions import PlanFormatError, PlanMigrationError
+from utterplan.exceptions import PlanFormatError, PlanMigrationError, UnsupportedSchemaError
 from utterplan.flow_projection import _validate_replacement_ownership
 from utterplan.hashing import V5_FLOW_HASH_SCHEMA
 from utterplan.migration import migrate_plan_data
@@ -60,7 +60,7 @@ def test_source_digest_changes_plan_identity_but_not_renderer_unit_hashes() -> N
     assert first.flow == second.flow
 
 
-def test_frozen_v5_toml_remains_readable_but_migration_requires_recompilation() -> None:
+def test_frozen_v5_toml_is_explicit_migration_only(tmp_path: Path) -> None:
     raw = V5_FIXTURE.read_text(encoding="utf-8")
     frozen = loads_v5_toml(raw)
     before = frozen.to_dict()
@@ -75,8 +75,16 @@ def test_frozen_v5_toml_remains_readable_but_migration_requires_recompilation() 
     with pytest.raises(PlanMigrationError) as error:
         migrate_plan_data(before)
     assert error.value.code == "migration.recompile_required"
-    with pytest.raises(PlanMigrationError, match="Recompile"):
+    with pytest.raises(UnsupportedSchemaError) as error:
         FlowPlan.from_toml(raw)
+    legacy_path = tmp_path / "legacy.utterplan.toml"
+    legacy_path.write_text(raw, encoding="utf-8")
+    with pytest.raises(UnsupportedSchemaError):
+        FlowPlan.load(legacy_path)
+    assert error.value.code == "schema.version_unsupported"
+    assert str(error.value).endswith(
+        "This build accepts UtterPlan schema 7 only. Recompile the source with the current UtterPlan."
+    )
     assert before == frozen.to_dict()
     assert V5_FIXTURE.read_text(encoding="utf-8") == raw
 

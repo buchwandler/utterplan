@@ -75,7 +75,7 @@ Plan identity is deterministic and renderer-independent. The v7 `plan_id` includ
 
 ## Persistence compatibility boundary
 
-Current plans persist as deterministic `.utterplan.toml` files with schema v7; `FlowPlan.load()` accepts TOML only. The v7 TOML codec validates and constructs `FlowPlan`; v5/v6 codecs remain historical readers, while v6-to-v7 promotion requires recompiling source because legacy data cannot prove a complete boundary inventory. Schemas v5, v6, and v7 have no JSON Schema resources or JSON plan format. Frozen JSON Schema definitions for historical schemas v1–v4 remain under versioned resources.
+Current plans persist as deterministic `.utterplan.toml` files with schema v7; `FlowPlan.load()` accepts TOML only. The v7 TOML codec validates and constructs `FlowPlan`; v5/v6 codecs are migration-only and are never selected by normal loading. Normal load/decode and execution paths reject non-v7 schemas with `schema.version_unsupported` and direct users to recompile. Historical migration remains an explicit serialized-data operation; v6-to-v7 promotion requires recompiling source because legacy data cannot prove a complete boundary inventory. Schemas v5, v6, and v7 have no JSON Schema resources or JSON plan format. Frozen JSON Schema definitions for historical schemas v1–v4 remain under versioned resources.
 
 ```text
 current plan:

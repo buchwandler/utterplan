@@ -26,6 +26,7 @@ from utterplan import (
     SegmentDirectives,
     TokenView,
 )
+from utterplan.renderplan_export import build_render_plan
 from utterplan.renderplan_grouping import group_initial_plan
 from utterplan.renderplan_projection import (
     RenderPlanProjectionError,
@@ -105,6 +106,45 @@ def _preflight(
 
 def _speech_text(flow: tuple[object, ...] | list[object]) -> list[SpeechItem]:
     return [item for item in flow if isinstance(item, SpeechItem)]
+
+
+def test_public_replan_loop_preserves_unchanged_requests_and_refines_only_failed_source() -> None:
+    text = "one two three four"
+    plan = _plan(
+        FlowSegment(
+            text,
+            "en-US",
+            tokens=(TokenView(0, 3), TokenView(4, 7), TokenView(8, 13), TokenView(14, 18)),
+            boundary_after=("sentence",),
+        ),
+        FlowSegment("Unchanged later.", "en-US", boundary_after=("sentence",)),
+    )
+    profile = _profile()
+    previous = build_render_plan(plan, profile)
+    failed = previous.speech[0]
+    unchanged = previous.speech[-1]
+    report = _preflight(previous, profile, (failed,))
+
+    replanned = build_render_plan(plan, profile, previous_plan=previous, preflight=report)
+    replanned.validate_against_profile(profile)
+    children = [
+        speech
+        for speech in replanned.speech
+        if speech.source
+        and all(
+            span.locator == failed.source[0].locator
+            and failed.source[0].start <= span.start < span.end <= failed.source[0].end
+            for span in speech.source
+        )
+    ]
+
+    assert replanned.plan_id != previous.plan_id
+    assert replanned.speech[-1].text == unchanged.text
+    assert replanned.speech[-1].segment_id == unchanged.segment_id
+    assert len(children) == 2
+    assert "".join(speech.text for speech in children) == failed.text
+    assert all(len(speech.text) < len(failed.text) for speech in children)
+    assert all(speech.segment_id != failed.segment_id for speech in children)
 
 
 def test_replan_replaces_only_failed_occurrence_and_preserves_later_id() -> None:

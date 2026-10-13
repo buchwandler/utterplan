@@ -122,7 +122,7 @@ topology, and `--json` emits the complete attempt as JSON for inspection.
 
 ## TOML persistence
 
-Schema v7 is the current semantic contract, while `.utterplan.toml` is the canonical persisted format. `FlowPlan.to_toml()` and `FlowPlan.from_toml()` round-trip the current executable plan; `save()` writes atomically, and `load()` accepts TOML only. Historical inputs retain their sequential data-only migration steps through v6, but v6-to-v7 refuses with `migration.recompile_required` because omitted boundary opportunities cannot be recovered; recompile the original source.
+Schema v7 is the current semantic contract, while `.utterplan.toml` is the canonical persisted format. `FlowPlan.to_toml()` and `FlowPlan.from_toml()` round-trip the current executable plan; `save()` writes atomically, and `load()` accepts TOML only. All normal decode/load and execution paths reject non-v7 plans with `schema.version_unsupported`; they never migrate implicitly. Historical inputs retain a separate sequential data-only migration path through v6, but v6-to-v7 refuses with `migration.recompile_required` because omitted boundary opportunities cannot be recovered; recompile the original source.
 
 ```python
 from utterplan import FlowPlan
@@ -134,7 +134,7 @@ plan.save("chapter.utterplan.toml")
 assert FlowPlan.load("chapter.utterplan.toml") == plan
 ```
 
-`FlowPlan.to_dict()` and `FlowPlan.from_dict()` expose the current v7 executable mapping. Versioned v5/v6 codecs retain historical reads, but promotion to v7 requires source recompilation and does not invent boundaries. `utterplan migrate` reports that requirement; SSMD source migration remains a separate operation.
+`FlowPlan.to_dict()` and `FlowPlan.from_dict()` expose the current v7 executable mapping. Normal decoding accepts v7 only; versioned v5/v6 codecs are reachable solely through explicit serialized-data migration. Promotion to v7 requires source recompilation and does not invent boundaries. `utterplan migrate` reports that requirement; SSMD source migration remains a separate operation.
 
 ## Incremental batch compilation
 
@@ -168,6 +168,24 @@ for outcome in compile_to_files(
 ```
 
 The report is operational data, not a semantic plan, and must not be passed to `FlowPlan.load()`. Unexpected programming and progress-callback errors propagate rather than being converted to document failures.
+
+## RenderPlan batch projection
+
+The shared RenderPlan set contract is owned by `renderplan`. Import its types and codecs from that package; use UtterPlan's batch module only for UtterPlan-specific request, outcome, set-construction, and projection orchestration APIs. Although `utterplan.renderplan_batch` retains compatibility re-exports, new consumers should not depend on them.
+
+```python
+from renderplan import (
+    RenderPlanSet,
+    RenderPlanSetChapter,
+    RenderPlanSetError,
+    RenderProfile,
+    load_renderplan_set,
+    save_renderplan_set,
+)
+from utterplan.renderplan_batch import RenderRequest, new_renderplan_set, render_to_files
+```
+
+`render_to_files()` projects schema-v7 `FlowPlan` inputs; grouping, source mapping, export, and replan logic remain UtterPlan-owned.
 
 ## Planner progress callbacks
 

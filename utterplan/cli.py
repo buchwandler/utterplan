@@ -10,6 +10,13 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import tomlkit
+from renderplan import (
+    RenderPlanSet,
+    RenderPlanSetError,
+    load_renderplan_set,
+    save_renderplan_set,
+    validate_renderplan_set_profile,
+)
 from renderplan import codec as renderplan_codec
 from tomlkit.exceptions import ParseError
 
@@ -27,14 +34,9 @@ from .preview import PreviewChunk, preview_plan
 from .renderability import format_renderability_error
 from .renderplan_batch import (
     RenderOutcome,
-    RenderPlanSet,
-    RenderPlanSetError,
     RenderRequest,
-    load_renderplan_set,
     new_renderplan_set,
     render_to_files,
-    save_renderplan_set,
-    validate_renderplan_set_profile,
 )
 from .renderplan_export import build_render_plan, format_render_plan_explanation
 from .ssmdbook import (
@@ -909,6 +911,10 @@ def _render_book(args: argparse.Namespace) -> int:
             label, profile_id, profile_path, book.root, utterplan_dir, variant_dir, manifest_path
         )
 
+    # Validate every selected source plan before creating collection state.
+    for source_plan_path in source_plans:
+        if source_plan_path.is_file():
+            FlowPlan.load(source_plan_path)
     if not variant_dir.exists():
         try:
             variant_dir.mkdir(parents=True)
