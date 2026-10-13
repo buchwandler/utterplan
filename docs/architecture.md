@@ -1,6 +1,6 @@
 # Architecture
 
-UtterPlan is an engine-independent compiler from one SSMD document (or explicitly selected plain-text document) to an executable speech plan. It owns document parsing, language runs, source linguistic analysis, SSMD annotation meanings, coordinate mapping, spoken-text analysis, segmentation, canonical boundary opportunities, authored pause intent, directives, and FlowPlan construction. It uses TTSReady for reusable written-to-spoken preparation and stops before G2P, synthesis, and audio. Consumers compile documents independently; UtterPlan does not load books or manage workspaces.
+UtterPlan is an engine-independent compiler from one SSMD document (or explicitly selected plain-text document) to an executable speech plan. It owns document parsing, language runs, source linguistic analysis, SSMD annotation meanings, coordinate mapping, spoken-text analysis, segmentation, canonical boundary opportunities, authored pause intent, directives, and FlowPlan construction. It uses TTSReady for reusable written-to-spoken preparation and stops before G2P, synthesis, and audio. The compiler still handles one document at a time; the CLI's explicit SSMDBook commands discover chapters and orchestrate per-file workspaces without changing book content.
 
 ```text
 SSMD / plain text
@@ -39,7 +39,7 @@ UtterPlan
 Readio / VoiceRender / other FlowPlan consumers
 ```
 
-UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady. TTSReady owns the direct Spokenform integration; production UtterPlan code does not import Spokenform. Readio, VoiceRender, and other consumers consume FlowPlan and may perform downstream G2P, synthesis, and audio work. UtterPlan must not depend on those consumer or engine packages, model runtimes, or audio libraries. Book iteration belongs to consumers and conversion tools.
+UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady. TTSReady owns the direct Spokenform integration; production UtterPlan code does not import Spokenform. Readio, VoiceRender, and other consumers consume FlowPlan and may perform downstream G2P, synthesis, and audio work. UtterPlan must not depend on those consumer or engine packages, model runtimes, or audio libraries. UtterPlan's `compile-book` and `render-book` CLI commands provide safe SSMDBook chapter discovery and per-file orchestration; they do not introduce a book-level semantic plan or modify source chapters.
 
 ## Compiler and public plan boundary
 
@@ -88,3 +88,41 @@ schema-v1–v6 saved plan -- historical reader / data-only chain --> v6; v6-to-v
 Migration is not planning. Registered data-only steps cover the sequential v1 -> v2 -> v3 -> v4 -> v5 -> v6 chain; the v6-to-v7 step intentionally returns `migration.recompile_required`: serialized v6 semantics cannot prove the complete boundary inventory. Every step operates on serialized plain data and does not rerun source parsing, preparation, NLP, planning, G2P, rendering, or audio processing. The v4-to-v5 projection verifies token spans and pause evidence and fails rather than guessing; v5-to-v6 preserves executable semantics and never invents unavailable source text. Downgrades are not supported.
 
 `compile-many` orchestrates independent source documents in order. Each successful FlowPlan is validated and atomically saved before the next source is processed; ordinary failures are reported and later inputs continue unless fail-fast is requested. Its TOML report is operational data, not a FlowPlan.
+
+
+## Book-level RenderPlan projection boundary
+
+The SSMDBook workflow composes per-file operations without creating a combined
+book plan or crossing UtterPlan's engine-independent boundary:
+
+```text
+SSMDBook manifest + chapter source
+    -> utterplan compile-book
+    -> independent FlowPlans in utterplan/
+
+saved FlowPlans + one RenderProfile
+    -> utterplan render-book (existing RenderPlan projection)
+    -> profile-specific RenderPlans in renderplan/<label>--<profile-id-prefix>/
+       + UtterPlan-owned renderplan-set.toml and render-report.toml
+
+RenderProfile + RenderPlan set
+    -> VoiceRender profile validation / preflight / G2P / synthesis / audio
+```
+
+`compile-book` reads the manifest and selected chapter source to produce each
+canonical semantic FlowPlan. `render-book` does not re-read chapter content: it
+loads already saved plans, projects each independently through the existing
+`build_render_plan()` path, and records successful chapter identities in the
+variant-local `renderplan-set.toml`. The index and operational report are not
+RenderPlan schema objects and do not change shared RenderPlan contracts. Variant
+directories include a readable label and a prefix of the canonical profile ID;
+the profile snapshot and strict set validation prevent mixing profiles or adopting
+unindexed output. Existing `render-plan` remains the low-level one-file projection
+and deterministic refinement interface.
+
+The profile and RenderPlan data contract belongs to [RenderPlan](https://pypi.org/project/renderplan/).
+[VoiceRender](https://pypi.org/project/voicerender/) creates engine-backed profiles
+and owns runtime validation, preflight, and speech execution. UtterPlan loads shared
+RenderPlan data without importing VoiceRender, checking engine availability, or
+invoking G2P, model runtimes, synthesis, or audio packages. Neither book command
+modifies the manifest or source chapter files.

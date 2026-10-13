@@ -74,3 +74,67 @@ Compilation always uses paragraph-local flow units; `compile-book` has no render
 `compile-book` uses the same best-effort spaCy `auto` default as `compile`: installed models are preferred in `sm`, `md`, `lg`, `trf` order and missing resources fall back safely. `--spacy off` forces fallback; explicit tier flags require that local model.
 
 Chapter input is SSMD by contract, so `compile-book` deliberately has no `--input-format` option. When no `--language` is supplied, a selected chapter must declare its language in SSMD metadata.
+
+
+## From semantic chapter plans to RenderPlan variants
+
+The complete file-based workflow keeps UtterPlans renderer-neutral while allowing
+several independent RenderPlan collections for one book:
+
+```text
+SSMD chapters
+    -> utterplan/*.utterplan.toml
+    -> renderplan/<profile-label>--<profile-id-prefix>/*.renderplan.toml
+```
+
+Create engine-backed RenderProfiles with VoiceRender, compile chapters once, then
+project them using `utterplan render-book`:
+
+```bash
+voicerender profile create \
+  --engine piper --target en_US-amy-medium --language en-US \
+  --offline --output amy.renderprofile.toml
+voicerender profile create \
+  --engine piper --target en_US-joe-medium --language en-US \
+  --offline --output joe.renderprofile.toml
+
+utterplan compile-book . --chapters 5-17
+utterplan render-book . --profile amy.renderprofile.toml --chapters 5-17
+utterplan render-book . --profile joe.renderprofile.toml --chapters 5-17
+```
+
+The result has one shared semantic collection and distinct renderer-specific
+variants, for example:
+
+```text
+utterplan/
+├── chapter-0005.utterplan.toml
+└── ...
+renderplan/
+├── amy--<profile-id-prefix>/
+│   ├── renderprofile.toml
+│   ├── renderplan-set.toml
+│   ├── render-report.toml
+│   └── chapter-0005.renderplan.toml
+└── joe--<profile-id-prefix>/
+    └── ...
+```
+
+A variant is keyed by the canonical full RenderProfile `profile_id`; its directory
+uses a readable label plus a short fingerprint. A semantic profile change selects
+a new default directory instead of overwriting an earlier voice or policy. The
+snapshot is the profile authority for that collection; the UtterPlan-owned
+`renderplan-set.toml` records the full identity, original profile reference, and
+per-chapter source/render plan identities. `render-report.toml` describes only the
+latest invocation, while the set index accumulates successful chapters across
+ranges.
+
+UtterPlan structurally loads the shared profile through RenderPlan and does not
+import VoiceRender, inspect engine availability, preflight requests, or synthesize.
+VoiceRender is responsible for profile creation/refresh and downstream preflight
+and synthesis; it is not required merely to run `render-book`. A later
+`render-book` invocation still needs the profile passed on its command line, while
+the collection's snapshot remains available for inspection and reproducible
+replanning. See the [CLI reference](cli.md#produce-renderplans-for-selected-ssmdbook-chapters),
+[RenderPlan](https://pypi.org/project/renderplan/), and
+[VoiceRender](https://pypi.org/project/voicerender/).

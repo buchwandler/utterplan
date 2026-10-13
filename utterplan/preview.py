@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -86,6 +87,7 @@ def resolve_segment_selector(selector: str | None, segment_count: int) -> frozen
         item = raw_item.strip()
         if not item or _SELECTOR_ITEM.fullmatch(item) is None:
             raise ValueError(f"invalid segment selector item: {raw_item!r}")
+        indexes: Sequence[int]
         if "-" in item:
             first_text, last_text = item.split("-", 1)
             first, last = int(first_text), int(last_text)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import replace
-from typing import Any
+from typing import Any, TypeAlias
 
 from renderplan import (
     AudioItem,
@@ -19,7 +19,7 @@ from renderplan import (
 from .model import FlowSegment, PauseIntent
 from .renderplan_projection import RenderPlanProjectionError, SourceSegmentIndex, SourceSegmentRef
 
-FlowItem = AudioItem | PauseItem | SpeechItem
+FlowItem: TypeAlias = AudioItem | PauseItem | SpeechItem
 
 _TIMED_PAUSE = re.compile(r"^(0|[1-9][0-9]*)ms$")
 _BOUNDARY_PRIORITY = {"clause": 1, "sentence": 2, "paragraph": 3, "voice_change": 4}
@@ -552,7 +552,7 @@ def _partition_source(
     index: SourceSegmentIndex, source: Sequence[SourceSpan], offsets: Sequence[int]
 ) -> tuple[tuple[SourceSpan, ...], ...]:
     chunks: list[tuple[SourceSpan, ...]] = []
-    remainder = tuple(source)
+    remainder: Sequence[SourceSpan] = tuple(source)
     previous = 0
     for offset in sorted(set(offsets)):
         left, remainder = _split_source(index, remainder, offset - previous)

@@ -9,7 +9,7 @@ UtterPlan is the canonical, engine-independent semantic compiler from one SSMD
 document (or explicitly selected plain-text document) to an executable speech
 plan. It produces deterministic prepared text, paragraph-local flow units, safe boundary opportunities, authored pause intents, and segment-local
 semantics, portable document metadata, and typed directives for
-independent downstream consumers such as Readio, VoiceRender, and other FlowPlan users. It does not manage or modify book workspaces; `compile-book` reads an SSMDBook manifest only to discover selected source chapters. It uses TTSReady for written-to-spoken preparation and stops before G2P, synthesis, and audio.
+independent downstream consumers such as Readio, VoiceRender, and other FlowPlan users. Its book commands read the SSMDBook manifest only for chapter discovery, never modify the manifest or source chapters, and write derived plans to separate directories. It uses TTSReady for written-to-spoken preparation and stops before G2P, synthesis, and audio.
 
 ## CLI
 
@@ -61,6 +61,57 @@ utterplan/
 ```
 
 Omit `--chapters` to compile all manifest chapters. Use comma-separated source-number selections for non-contiguous ranges, for example `utterplan compile-book chapters --chapters 1,3-5`. `--diagnostics warnings|all|none` defaults to warnings; failures are always shown and reports retain complete diagnostics. The book root itself is also accepted as input; see the [SSMDBook guide](docs/ssmdbook.md).
+## From an SSMDBook to RenderPlans
+
+UtterPlan keeps one canonical semantic plan per chapter. A RenderProfile is a
+separate renderer configuration; create and validate it with VoiceRender, then
+project the selected saved plans into a profile-specific RenderPlan collection:
+
+```bash
+voicerender profile create \
+  --engine piper \
+  --target en_US-amy-medium \
+  --language en-US \
+  --offline \
+  --output narration.renderprofile.toml
+voicerender profile validate narration.renderprofile.toml
+
+utterplan compile-book . --chapters 5-17
+utterplan render-book . --chapters 5-17 --profile narration.renderprofile.toml
+```
+
+The book's `utterplan/` directory remains the shared semantic source. The new
+command writes independent renderer-specific plans into a deterministic variant:
+
+```text
+renderplan/
+└── narration--<profile-fingerprint>/
+    ├── renderprofile.toml
+    ├── renderplan-set.toml
+    ├── render-report.toml
+    ├── chapter-0005.renderplan.toml
+    └── ...
+```
+
+The variant label comes from the profile filename by default; its suffix is the
+first 12 hexadecimal characters of the canonical RenderProfile `profile_id`.
+Changing identity-bearing profile semantics selects a different directory, so
+multiple voices or planning policies can coexist without replacing one another.
+Each variant snapshots the canonical profile; `renderplan-set.toml` records its
+full identity, source profile reference, and chapter plan IDs. `--variant` changes
+the human label without removing the fingerprint, and `--output-root` changes the
+collection root while retaining the automatic variant directory.
+
+`render-book` consumes only the existing schema-v7 UtterPlans and shared
+RenderProfile/RenderPlan contract. VoiceRender is not required to run it: VoiceRender
+creates or refreshes engine-backed profiles, then preflights and renders the
+resulting RenderPlans. The single-file `utterplan render-plan` command remains the
+low-level projection and deterministic replan primitive.
+
+Related packages: [RenderPlan](https://pypi.org/project/renderplan/) defines the
+shared profile and plan contracts; [VoiceRender](https://pypi.org/project/voicerender/)
+creates engine-backed profiles and performs preflight and synthesis.
+
 The CLI also provides:
 
 ```bash

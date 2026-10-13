@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
 from contextlib import suppress
 from pathlib import Path
@@ -23,6 +25,17 @@ from .migration import MigrationResult, migrate_plan_data
 from .model import FlowPlan, PauseIntent
 from .preview import PreviewChunk, preview_plan
 from .renderability import format_renderability_error
+from .renderplan_batch import (
+    RenderOutcome,
+    RenderPlanSet,
+    RenderPlanSetError,
+    RenderRequest,
+    load_renderplan_set,
+    new_renderplan_set,
+    render_to_files,
+    save_renderplan_set,
+    validate_renderplan_set_profile,
+)
 from .renderplan_export import build_render_plan, format_render_plan_explanation
 from .ssmdbook import (
     SSMDBookError,
@@ -303,6 +316,45 @@ def build_parser() -> argparse.ArgumentParser:
     render_plan_parser.add_argument(
         "--json", action="store_true", help="emit the generated plan as machine-readable JSON"
     )
+    render_book_parser = commands.add_parser(
+        "render-book",
+        help="project selected SSMDBook UtterPlans into a profile-specific RenderPlan set",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  utterplan render-book novel.ssmdbook --profile narration.renderprofile.toml\n"
+            "  utterplan render-book novel.ssmdbook --chapters 5-17 --profile narration.renderprofile.toml\n"
+            "  utterplan render-book chapters --chapters 1,3-5 --profile narration.renderprofile.toml"
+        ),
+    )
+    render_book_parser.add_argument(
+        "input", type=Path, help=".ssmdbook directory or its canonical chapters/ directory"
+    )
+    render_book_parser.add_argument(
+        "--profile", type=Path, required=True, help="shared RenderProfile TOML file"
+    )
+    render_book_parser.add_argument(
+        "--chapters",
+        default="all",
+        metavar="SELECTOR",
+        help="source chapter selection: all, N, N-M, or comma-separated ranges (default: all)",
+    )
+    render_book_parser.add_argument(
+        "--utterplan-dir", type=Path, help="directory of existing .utterplan.toml files"
+    )
+    render_book_parser.add_argument(
+        "--output-root", type=Path, help="RenderPlan collection root (default: <ssmdbook>/renderplan)"
+    )
+    render_book_parser.add_argument(
+        "--variant", help="safe human-readable variant label (profile fingerprint is always appended)"
+    )
+    render_book_parser.add_argument(
+        "--force", action="store_true", help="replace only selected existing RenderPlan files"
+    )
+    render_book_parser.add_argument(
+        "--fail-fast", action="store_true", help="skip later chapters after the first item failure"
+    )
+    render_book_parser.add_argument("--report", type=Path, help="TOML operational report path")
     inspect_parser = commands.add_parser("inspect", help="inspect a saved TTS plan")
     inspect_parser.add_argument("input", type=Path)
     inspect_parser.add_argument("--unit", type=int)
@@ -444,13 +496,20 @@ def _linguistics_config(policy: str) -> LinguisticsConfig:
     )
 
 
-def _batch_output_name(source: Path) -> str:
+def _source_output_stem(source: Path) -> str:
     lower_name = source.name.lower()
     for suffix in (".ssmd.md", ".ssmd", ".md"):
         if lower_name.endswith(suffix):
-            return source.name[: -len(suffix)] + ".utterplan.toml"
-    return source.stem + ".utterplan.toml"
+            return source.name[: -len(suffix)]
+    return source.stem
 
+
+def _utterplan_output_name(source: Path) -> str:
+    return _source_output_stem(source) + ".utterplan.toml"
+
+
+def _renderplan_output_name(source: Path) -> str:
+    return _source_output_stem(source) + ".renderplan.toml"
 
 def _planner_config_from_batch_args(args: argparse.Namespace) -> PlannerConfig:
     return PlannerConfig(
@@ -550,6 +609,7 @@ def _print_batch_diagnostics(
     *,
     verbosity: Literal["warnings", "all", "none"],
 ) -> None:
+    labels: tuple[tuple[str, str], ...]
     if verbosity == "all":
         selected = outcome.diagnostics
         labels = (("info", "info"), ("warning", "warnings"), ("error", "errors"))
@@ -586,7 +646,7 @@ def _print_batch_diagnostics(
 
 def _compile_many(args: argparse.Namespace) -> int:
     sources: list[Path] = args.inputs
-    outputs = [args.output_dir / _batch_output_name(source) for source in sources]
+    outputs = [args.output_dir / _utterplan_output_name(source) for source in sources]
     owners: dict[Path, Path] = {}
     for source, output in zip(sources, outputs, strict=True):
         key = output.resolve()
@@ -644,7 +704,7 @@ def _compile_book(args: argparse.Namespace) -> int:
     if _path_is_within(resolved_output_dir, chapters_dir):
         raise _CliUsageError("book plan output must not be inside the source chapters/ directory")
 
-    outputs = [output_dir / _batch_output_name(source) for source in sources]
+    outputs = [output_dir / _utterplan_output_name(source) for source in sources]
     owners: dict[Path, Path] = {}
     for source, output in zip(sources, outputs, strict=True):
         key = output.resolve()
@@ -697,6 +757,246 @@ def _compile_book(args: argparse.Namespace) -> int:
         include_ids=True,
         diagnostics=args.diagnostics,
     )
+
+
+def _render_book(args: argparse.Namespace) -> int:
+    try:
+        book = load_ssmdbook_index(args.input)
+        chapters = select_ssmdbook_chapters(book, args.chapters)
+        sources = [selected_chapter_path(book, chapter) for chapter in chapters]
+    except SSMDBookError as exc:
+        raise _CliUsageError(str(exc)) from exc
+
+    utterplan_dir_arg = args.utterplan_dir or (book.root / "utterplan")
+    try:
+        utterplan_dir = utterplan_dir_arg.expanduser().resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise _CliUsageError(f"cannot resolve UtterPlan directory {utterplan_dir_arg}: {exc}") from exc
+    if not utterplan_dir.is_dir():
+        raise _CliUsageError(f"UtterPlan directory does not exist or is not a directory: {utterplan_dir}")
+
+    profile_input = args.profile.expanduser()
+    try:
+        profile = renderplan_codec.load_profile(profile_input)
+        profile_path = profile_input.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        raise _CliUsageError(f"invalid RenderProfile {profile_input}: {exc}") from exc
+    profile_id = profile.profile_id or profile.computed_id()
+    fingerprint = profile_id.removeprefix("sha256:")[:12]
+    label = _render_variant_label(profile_path, args.variant)
+    variant_name = f"{label}--{fingerprint}"
+
+    output_root_arg = args.output_root or (book.root / "renderplan")
+    output_root = output_root_arg.expanduser().resolve(strict=False)
+    variant_dir = (output_root / variant_name).resolve(strict=False)
+    snapshot_path = variant_dir / "renderprofile.toml"
+    set_path = variant_dir / "renderplan-set.toml"
+    report_arg = args.report or (variant_dir / "render-report.toml")
+    report_path = report_arg.expanduser().resolve(strict=False)
+    chapters_dir = (book.root / "chapters").resolve(strict=False)
+    manifest_path = book.manifest_path.resolve(strict=True)
+
+    source_plans = [utterplan_dir / _utterplan_output_name(source) for source in sources]
+    outputs = [variant_dir / _renderplan_output_name(source) for source in sources]
+    requests = [
+        RenderRequest(
+            id=chapter.id,
+            source_number=chapter.source_number,
+            source_plan=source_plan,
+            output=output,
+            source_chapter=source,
+        )
+        for chapter, source, source_plan, output in zip(
+            chapters, sources, source_plans, outputs, strict=True
+        )
+    ]
+
+    if output_root.exists() and not output_root.is_dir():
+        raise _CliUsageError(f"RenderPlan output root is not a directory: {output_root}")
+    if variant_dir.exists() and not variant_dir.is_dir():
+        raise _CliUsageError(f"RenderPlan variant path is not a directory: {variant_dir}")
+    if _path_is_within(output_root, chapters_dir) or _path_is_within(variant_dir, chapters_dir):
+        raise _CliUsageError("RenderPlan output root and variant must not be inside source chapters/")
+    if _path_is_within(variant_dir, utterplan_dir):
+        raise _CliUsageError("RenderPlan variant must not be inside the active UtterPlan directory")
+
+    write_paths = [*outputs, snapshot_path, set_path, report_path]
+    owners: dict[Path, Path] = {}
+    for path in write_paths:
+        key = path.resolve(strict=False)
+        if key in owners:
+            raise _CliUsageError(f"RenderPlan output paths collide: {owners[key]} and {path}")
+        owners[key] = path
+        if _path_is_within(key, chapters_dir):
+            raise _CliUsageError(f"RenderPlan output would write into source chapters/: {path}")
+    if len({path.resolve(strict=False) for path in outputs}) != len(outputs):
+        raise _CliUsageError("selected chapters map to duplicate RenderPlan output paths")
+
+    input_paths = [manifest_path, profile_path, *source_plans, *sources]
+    input_owners = {path.resolve(strict=False): path for path in input_paths}
+    for path in write_paths:
+        collision = input_owners.get(path.resolve(strict=False))
+        if collision is not None:
+            raise _CliUsageError(f"RenderPlan output path {path} collides with input {collision}")
+    for path in (snapshot_path, set_path, report_path):
+        if path.exists() and path.is_dir():
+            raise _CliUsageError(f"RenderPlan metadata output is a directory: {path}")
+
+    if variant_dir.exists():
+        if set_path.exists():
+            try:
+                renderplan_set = load_renderplan_set(set_path)
+            except RenderPlanSetError as exc:
+                raise _CliUsageError(f"invalid existing renderplan-set.toml: {exc}") from exc
+            if renderplan_set.variant != label:
+                raise _CliUsageError("existing renderplan-set.toml variant does not match its directory")
+            if renderplan_set.snapshot != "renderprofile.toml":
+                raise _CliUsageError("existing renderplan-set.toml does not use the canonical profile snapshot")
+            try:
+                validate_renderplan_set_profile(
+                    renderplan_set,
+                    variant_dir / renderplan_set.snapshot,
+                    expected_profile_id=profile_id,
+                )
+            except RenderPlanSetError as exc:
+                raise _CliUsageError(str(exc)) from exc
+            existing_owners = {
+                (variant_dir / chapter.renderplan).resolve(strict=False): chapter.id
+                for chapter in renderplan_set.chapters
+            }
+            for request in requests:
+                owner = existing_owners.get(request.output.resolve(strict=False))
+                if owner is not None and owner != request.id:
+                    raise _CliUsageError(
+                        f"RenderPlan output {request.output} is already assigned to chapter {owner}"
+                    )
+        else:
+            try:
+                nonempty = next(variant_dir.iterdir(), None) is not None
+            except OSError as exc:
+                raise _CliUsageError(f"cannot inspect RenderPlan variant {variant_dir}: {exc}") from exc
+            if nonempty:
+                raise _CliUsageError(
+                    f"refusing to adopt non-empty RenderPlan variant without a valid set index: {variant_dir}"
+                )
+            renderplan_set = _new_renderplan_set(
+                label, profile_id, profile_path, book.root, utterplan_dir, variant_dir, manifest_path
+            )
+    else:
+        renderplan_set = _new_renderplan_set(
+            label, profile_id, profile_path, book.root, utterplan_dir, variant_dir, manifest_path
+        )
+
+    if not variant_dir.exists():
+        try:
+            variant_dir.mkdir(parents=True)
+        except OSError as exc:
+            raise _CliUsageError(f"cannot create RenderPlan variant directory {variant_dir}: {exc}") from exc
+    if not set_path.exists():
+        try:
+            renderplan_codec.save_profile(profile, snapshot_path)
+            save_renderplan_set(set_path, renderplan_set)
+        except (OSError, ValueError, TypeError) as exc:
+            raise _CliUsageError(f"cannot initialize RenderPlan variant {variant_dir}: {exc}") from exc
+
+    print("UtterPlan book render", file=sys.stderr)
+    print(f"  workspace:  {book.root}", file=sys.stderr)
+    print(f"  chapters:   {args.chapters}", file=sys.stderr)
+    print(f"  selected:   {len(requests)}", file=sys.stderr)
+    print(f"  profile:    {profile_path}", file=sys.stderr)
+    print(f"  profile-id: {profile_id}", file=sys.stderr)
+    print(f"  variant:    {variant_name}", file=sys.stderr)
+    print(f"  utterplans: {utterplan_dir}", file=sys.stderr)
+    print(f"  output:     {variant_dir}", file=sys.stderr)
+
+    written = 0
+
+    def report_progress(outcome: RenderOutcome) -> None:
+        nonlocal written
+        print(f"[{outcome.index}/{len(requests)}] {outcome.id}  {outcome.source_plan}", file=sys.stderr)
+        if outcome.status == "written":
+            written += 1
+            print(f"       wrote {outcome.output}", file=sys.stderr)
+        elif outcome.status == "failed":
+            print("       FAILED", file=sys.stderr)
+            print(
+                f"       {outcome.error_code or 'unknown'}: {outcome.error_message or 'projection failed'}",
+                file=sys.stderr,
+            )
+            if not args.fail_fast and outcome.index < len(requests):
+                print(
+                    f"       continuing with {requests[outcome.index].id}; "
+                    f"{written} RenderPlans are already saved",
+                    file=sys.stderr,
+                )
+        else:
+            print("       skipped after an earlier failure", file=sys.stderr)
+
+    try:
+        outcomes = render_to_files(
+            requests,
+            profile=profile,
+            renderplan_set=renderplan_set,
+            set_path=set_path,
+            report_path=report_path,
+            force=args.force,
+            fail_fast=args.fail_fast,
+            chapter_order={chapter.id: index for index, chapter in enumerate(book.chapters)},
+            on_progress=report_progress,
+        )
+    except RenderPlanSetError as exc:
+        raise _CliUsageError(str(exc)) from exc
+
+    failed = sum(outcome.status == "failed" for outcome in outcomes)
+    skipped = sum(outcome.status == "skipped" for outcome in outcomes)
+    print("UtterPlan render summary", file=sys.stderr)
+    print(f"  requested: {len(requests)}", file=sys.stderr)
+    print(f"  written:   {written}", file=sys.stderr)
+    print(f"  failed:    {failed}", file=sys.stderr)
+    if skipped:
+        print(f"  skipped:   {skipped}", file=sys.stderr)
+    return 1 if failed else 0
+
+
+def _new_renderplan_set(
+    label: str,
+    profile_id: str,
+    profile_path: Path,
+    book_root: Path,
+    utterplan_dir: Path,
+    variant_dir: Path,
+    manifest_path: Path,
+) -> RenderPlanSet:
+    profile_in_workspace = _path_is_within(profile_path, book_root) or _path_is_within(
+        profile_path, variant_dir.parent
+    )
+    profile_reference = (
+        _relative_path_reference(profile_path, variant_dir)
+        if profile_in_workspace
+        else str(profile_path)
+    )
+    return new_renderplan_set(
+        variant=label,
+        profile_id=profile_id,
+        manifest=_relative_path_reference(manifest_path, variant_dir),
+        utterplan_dir=_relative_path_reference(utterplan_dir, variant_dir),
+        source_profile=profile_reference,
+    )
+
+
+def _relative_path_reference(path: Path, base: Path) -> str:
+    return Path(os.path.relpath(path.resolve(strict=False), start=base.resolve(strict=False))).as_posix()
+
+
+def _render_variant_label(profile_path: Path, override: str | None) -> str:
+    if override is not None:
+        raw_label = override
+    else:
+        name = profile_path.name
+        suffix = ".renderprofile.toml"
+        raw_label = name[: -len(suffix)] if name.lower().endswith(suffix) else profile_path.stem
+    label = re.sub(r"[^a-z0-9_.-]+", "-", raw_label.lower()).strip("._-")
+    return label or "profile"
 
 
 def _compile(args: argparse.Namespace) -> int:
@@ -951,6 +1251,8 @@ def main(argv: list[str] | None = None) -> int:
             return _compile_many(args)
         if args.command == "compile-book":
             return _compile_book(args)
+        if args.command == "render-book":
+            return _render_book(args)
         if args.command == "migrate":
             return _migrate(args)
         if args.command == "validate":
@@ -1042,8 +1344,8 @@ def _preview(plan: FlowPlan, args: argparse.Namespace) -> None:
                     "markers",
                     "heading",
                 ):
-                    value = facts.get(key)
-                    if value not in (None, [], {}):
+                    fact_value = facts.get(key)
+                    if fact_value not in (None, [], {}):
                         print(
                             f"      {key}: {json.dumps(value, ensure_ascii=False, sort_keys=True)}"
                         )

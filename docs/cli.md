@@ -151,6 +151,58 @@ The version-2 compile report identifies each successful chapter's resolved prepa
 
 For the full editable-workspace behavior and examples, see the [SSMDBook guide](ssmdbook.md).
 
+## Produce RenderPlans for selected SSMDBook chapters
+
+`render-plan` remains the low-level one-file projection and replan command.
+`render-book` is the batch convenience workflow: it loads existing schema-v7
+UtterPlans for selected manifest chapters and writes one RenderPlan per chapter
+for a shared RenderProfile.
+
+```text
+utterplan render-book INPUT --profile PROFILE [--chapters SELECTOR]
+  [--utterplan-dir PATH] [--output-root PATH] [--variant LABEL]
+  [--force] [--fail-fast] [--report PATH]
+```
+
+`INPUT` is an SSMDBook root containing `manifest.json` or its canonical
+`chapters/` directory. `--chapters` uses the same manifest `source_number`
+selector as `compile-book`: `all` (default), one number, an inclusive range, or
+comma-separated selections such as `1,3-5,9`. Chapters remain in manifest order.
+`--profile` is required and is loaded once through the shared RenderPlan codec;
+UtterPlan does not call VoiceRender or probe engines.
+
+Defaults and behavior:
+
+- `--utterplan-dir`: `<book-root>/utterplan`; it must already exist. A missing
+  selected plan is an item failure, not a shared configuration error.
+- `--output-root`: `<book-root>/renderplan`. The command appends a profile
+  variant directory named `<label>--<profile-id-prefix>`; it is not an output
+  directory override for individual files.
+- `--variant`: optional safe human-readable label. By default, the label comes
+  from the profile filename (`narration.renderprofile.toml` becomes `narration`);
+  the 12-hex-character fingerprint is always appended.
+- `--force`: replace selected existing RenderPlan files only. It does not bypass
+  profile-ID mismatches, invalid set metadata, unsafe paths, or collisions.
+- `--fail-fast`: after the first item failure, later selected chapters are
+  recorded as skipped. Otherwise, processing continues.
+- `--report`: override the per-invocation `render-report.toml` location.
+
+Each variant contains a canonical `renderprofile.toml` snapshot,
+`renderplan-set.toml` collection index, latest-invocation `render-report.toml`,
+and one `.renderplan.toml` file per successful chapter. The set index stores the
+full canonical `profile_id`, source profile location, and source/render plan IDs.
+Repeated invocations with the same profile reuse the variant and upsert entries
+without removing other successful chapters; a different profile identity selects
+a different default variant. UtterPlan refuses to adopt a non-empty directory
+without a valid set or to reuse a missing/mismatched snapshot.
+
+The command does not read chapter content or modify the source manifest, chapter
+files, or UtterPlans. Unsafe output roots inside `chapters/`, input/output or
+metadata collisions, duplicate basenames, and invalid shared profile/set state
+are rejected before chapter processing. Exit status is 0 when all selected
+chapters succeed, 1 when any chapter fails, and 2 for usage or shared-configuration
+errors. See the [SSMDBook workflow guide](ssmdbook.md) for end-to-end and multi-voice examples.
+
 ## Explain a plan
 
 Explain an existing compiled plan as a human-readable speech narrative:

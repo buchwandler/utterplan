@@ -238,7 +238,7 @@ class UtterancePlanner:
             parsed.annotations,
             parsed.boundaries,
         )
-        if ssmd_mode:
+        if isinstance(preparer, SSMDSubstitutionPreparer):
             prepared = preparer.prepare(*preparation_args, analyses=pass_a, parsed_document=parsed)
         else:
             prepared = preparer.prepare(*preparation_args, analyses=pass_a)

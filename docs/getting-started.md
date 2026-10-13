@@ -97,6 +97,26 @@ utterplan/
 Omit `--chapters` to compile all manifest chapters. Select non-contiguous chapters with a comma-separated selector, for example `utterplan compile-book chapters --chapters 1,3-5`. You can also pass the `.ssmdbook` root instead of `chapters/`, and override the destination with `--output-dir build/plans`. UtterPlan reads the manifest and current selected chapter content but does not modify the book or refresh stale chapter hashes. See the [SSMDBook guide](ssmdbook.md) for selection rules and safety details.
 Safe punctuation repair is enabled by default for both `compile` and `compile-many`. Use `--renderability strict` to reject repair opportunities and inspect their explanation without modifying the plan.
 
+## Render a book for a profile
+
+After compiling the selected source chapters, project their saved UtterPlans into
+a profile-specific RenderPlan collection:
+
+```bash
+voicerender profile create \
+  --engine piper --target en_US-amy-medium --language en-US \
+  --offline --output narration.renderprofile.toml
+utterplan render-book . --chapters 5-17 --profile narration.renderprofile.toml
+```
+
+This writes under `renderplan/<label>--<profile-fingerprint>/` and leaves the
+canonical `utterplan/` plans and source book untouched. VoiceRender is needed to
+create/refresh the engine profile and later preflight/render the result, but it is
+not required to run `render-book`; UtterPlan reads the shared RenderPlan profile
+contract. See the [SSMDBook workflow](ssmdbook.md#from-semantic-chapter-plans-to-renderplan-variants),
+[VoiceRender](https://pypi.org/project/voicerender/), and
+[RenderPlan](https://pypi.org/project/renderplan/).
+
 ## Inspect and validate
 
 ```bash

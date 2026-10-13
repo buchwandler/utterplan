@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
+from typing import TypeAlias
 
 from renderplan import (
     AudioItem,
@@ -27,7 +28,7 @@ from .renderplan_grouping import (
 )
 from .renderplan_projection import RenderPlanProjectionError, SourceSegmentIndex
 
-FlowItem = AudioItem | PauseItem | SpeechItem
+FlowItem: TypeAlias = AudioItem | PauseItem | SpeechItem
 
 
 def replan_flow(
