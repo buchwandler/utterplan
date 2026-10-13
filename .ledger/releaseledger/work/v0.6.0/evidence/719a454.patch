@@ -1,0 +1,1553 @@
+ README.md                            |   4 +-
+ docs/architecture.md                 |   4 +-
+ docs/cli.md                          |   8 +-
+ docs/consumer-guide.md               |   7 +-
+ docs/coordinate-spaces.md            |   2 +
+ docs/debugging.md                    |   4 +-
+ docs/format.md                       |  13 ++-
+ docs/getting-started.md              |  10 +-
+ docs/index.md                        |   4 +-
+ docs/pykokoro-integration.md         |   4 +-
+ docs/python-api.md                   |   6 +-
+ docs/ssmdbook.md                     |   2 +
+ tests/migration/cases.py             |  10 +-
+ tests/test_cli.py                    |  25 ++++-
+ tests/test_cli_batch.py              |   1 +
+ tests/test_cli_ssmdbook.py           |   3 +-
+ tests/test_consumer_contract.py      |   3 +-
+ tests/test_flow_compilation.py       |   1 +
+ tests/test_format.py                 |   2 +-
+ tests/test_linguistics.py            | 112 +++++++++++++++----
+ tests/test_migration_v4_to_v5.py     |  31 +++++
+ tests/test_planner.py                |   4 +-
+ tests/test_progress.py               |   1 +
+ tests/test_replacement_provenance.py | 211 +++++++++++++++++++++++++++++++++++
+ tests/test_segment_topology.py       |   3 +-
+ utterplan/__init__.py                |   2 +
+ utterplan/cli.py                     |  12 +-
+ utterplan/codecs/v5_toml.py          | 118 ++++++++++++++++++--
+ utterplan/config.py                  |   2 +-
+ utterplan/explain.py                 |   8 ++
+ utterplan/flow_projection.py         |  40 +++++++
+ utterplan/linguistics.py             |   2 +-
+ utterplan/migrations/v4_to_v5.py     |  75 +++++++++++++
+ utterplan/model.py                   |  85 ++++++++++++++
+ 34 files changed, 736 insertions(+), 83 deletions(-)
+
+diff --git a/README.md b/README.md
+index 6c2e2d2..170d80d 100644
+--- a/README.md
++++ b/README.md
+@@ -99,13 +99,13 @@ Normal plan loading is TOML-only: `FlowPlan.load()` and plan-inspection commands
+
+ ## Planning defaults
+
+-The minimal CLI defaults are explicit: `spokenform` is the default text-preparation backend, `tts` is the default pause activation mode, and `spacy off` is the default linguistic-resource policy. With `spacy off`, UtterPlan uses its deterministic fallback tokenizer and analysis and does not depend on an installed spaCy model.
++The CLI and Python planner default to best-effort spaCy enrichment (`auto`). UtterPlan prefers an already-installed compatible model in `sm`, `md`, `lg`, `trf` order; if spaCy or every compatible local model is unavailable, planning continues with deterministic fallback tokens. UtterPlan never downloads models. Use `--spacy off` or `LinguisticsConfig(use_spacy=False)` to opt out, or request an explicit tier to require that local model.
+
+ Python `PlannerConfig` defaults to `document_format="plain"`; set it to `"ssmd"` when a Python string contains SSMD source.
+
+ Python `PlannerConfig.renderability_mode` also defaults to safe punctuation-only repair; choose `"strict"` to reject every repair opportunity. Neither mode guesses a symbol's pronunciation or crosses semantic blockers.
+
+-`spacy auto` is opt-in. When enabled and a compatible local model is available, UtterPlan may expose richer tokenization, POS tags, lemmas, and tags; `auto` is not the default.
++V5 `token.span`, `pos`, `tag`, `lemma`, and `morph` describe the prepared `segment.text` and are the downstream linguistic context; consumers should not retokenize or rerun spaCy. Optional `replacement.span` / `replacement.source` records compact preparation provenance (for example, `A R T` from `ART`): spans index final prepared segment text, while full source coordinates and maps remain in the optional trace sidecar. Replacement provenance does not change executable hashes or synthesis inputs.
+
+ ## Python API
+
+diff --git a/docs/architecture.md b/docs/architecture.md
+index e48e56c..103306c 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -26,7 +26,7 @@ The dependency direction is from SSMD, spokenform, and phrasplit into UtterPlan,
+
+ `compile_document` returns a `CompileResult` containing the current immutable `FlowPlan`, renderer-independent diagnostics, and an optional `PreparationTrace`. `UtterancePlanner.plan` also returns `FlowPlan`. Compiler-only normalized graph state remains private. When requested, the trace retains source text/hash, coordinate maps, preparation provenance, diagnostics, and renderability evidence in a separate versioned TOML sidecar. Trace state is not renderer input and does not affect plan identity or TOML.
+
+-`FlowPlan` is the current v5 executable contract: ordered `FlowUnit` objects each own ordered `FlowSegment` records. Segments include prepared text, effective language, local tokens, semantic pause intents, directives, markers, and optional heading metadata. `DocumentInfo` retains compact portable document information; `LinguisticProvenance` identifies providers without retaining their documents. UtterPlan ends before G2P. Engine/model selection, synthesis, and audio composition happen downstream.
++`FlowPlan` is the current v5 executable contract: ordered `FlowUnit` objects each own ordered `FlowSegment` records. Segments include prepared text, effective language, local tokens with authoritative linguistic facts, optional compact replacement views, semantic pause intents, directives, markers, and optional heading metadata. Replacement spans are local to the final prepared segment text; full source maps remain in the optional trace. `DocumentInfo` retains compact portable document information; `LinguisticProvenance` identifies providers without retaining their documents. UtterPlan ends before G2P. Engine/model selection, synthesis, and audio composition happen downstream.
+
+ ## Compiler-owned segmentation topology
+
+@@ -40,7 +40,7 @@ The document parser calls SSMD with `dialect="0.9"` for every SSMD source path,
+
+ SSMD header language is authoritative over a fallback. The CLI can omit `--language` when the header declares a language; plain input always needs a fallback. A fallback never forces or rewrites document semantics.
+
+-Preparation creates structural and spoken representations internally. The executable FlowPlan retains only prepared segment text; it does not retain the exact source string, structural text, dense source-to-spoken maps, parser annotations, or global compiler token tables. These diagnostics/provenance survive only when an optional trace is requested. See the [coordinate-space contract](coordinate-spaces).
++Preparation creates structural and spoken representations internally. The executable FlowPlan retains prepared segment text and compact segment-local replacement views, but not the complete source string, structural text, full source-to-spoken maps, parser annotations, or global compiler token tables. Detailed diagnostics and complete provenance mappings remain in an optional trace. See the [coordinate-space contract](coordinate-spaces).
+
+ ## Pause and directive semantics
+
+diff --git a/docs/cli.md b/docs/cli.md
+index 77a2b03..c50f028 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -125,7 +125,7 @@ utterplan explain chapter.utterplan.toml
+ utterplan explain chapter.utterplan.toml --details
+ ```
+
+-The default output explains executable flow: prepared segment text, unit order, effective languages, semantic pause intents, headings, markers, and typed directives. Compiler source diagnostics and preparation provenance are intentionally absent from the plan unless a trace sidecar was saved. Add `--details` for local token offsets, flow hashes, plan identity, and trace preparation mappings. Pass `--trace PATH` to attach a matching sidecar; the TOML trace can also be read independently with `inspect-trace`.
++The explanation presents executable flow: prepared segment text, unit order, effective languages, semantic pause intents, headings, markers, and typed directives. Compact replacement views may preserve local output spans and original spellings, but complete compiler source diagnostics and preparation maps are intentionally absent unless a trace sidecar was saved. Add `--details` for local token offsets, flow hashes, plan identity, and trace preparation mappings. Pass `--trace PATH` to attach a matching sidecar; the TOML trace can also be read independently with `inspect-trace`.
+
+ ## Inspect a persisted planning attempt
+
+@@ -154,11 +154,11 @@ inspect-only draft, not a canonical plan, and is rejected by `FlowPlan.load()`.
+   spaCy use, or a required model tier.
+ - `--renderability repair|strict` defaults to safe punctuation-only repair. Semantic blockers remain failures with source context and an actionable next step; strict mode reports safe repair opportunities without applying them.
+
+-The default spaCy policy is `off`, so the CLI does not depend on whichever optional model happens to be installed.
++The default spaCy policy is `auto`: inspect only already-installed compatible local models in `sm`, `md`, `lg`, `trf` preference order. If spaCy or every compatible model is unavailable, compilation continues with deterministic fallback; no model is downloaded.
+
+-The complete defaults are `--text-preparation spokenform`, `--pause-mode tts`, and `--spacy off`. `spokenform` is the default text-preparation backend, while `tts` is the default pause mode. `--spacy off` uses UtterPlan's deterministic fallback tokenizer and analysis and does not require an installed spaCy model.
++The complete defaults are `--text-preparation spokenform`, `--pause-mode tts`, and `--spacy auto`. `auto` is best-effort and uses a compatible local model when available; otherwise it safely falls back.
+
+-Use `--spacy auto` only as an opt-in enrichment policy. If a compatible local model is available, it may provide richer tokenization, POS tags, lemmas, and tags; `auto` is not the default and no model is downloaded automatically.
++Use `--spacy off` to force deterministic fallback. `--spacy sm|md|lg|trf` requires that local model tier and fails if it is unavailable. V5 token columns carry final prepared-text linguistic context; the optional `replacement` fields describe local output spans, not source coordinates. Preserve the trace sidecar for full source maps and preparation diagnostics.
+
+ ## Other commands
+
+diff --git a/docs/consumer-guide.md b/docs/consumer-guide.md
+index 5755a50..367da73 100644
+--- a/docs/consumer-guide.md
++++ b/docs/consumer-guide.md
+@@ -18,7 +18,7 @@ Migration operates on serialized plain data and does not reparse, reprepare, rer
+
+ ## Planning defaults
+
+-The default text-preparation backend is `spokenform`, pause activation mode is `tts`, and the default CLI linguistic-resource policy is `spacy off`. Deterministic fallback tokenization and analysis do not require an installed spaCy model. `spacy auto` is opt-in; it may expose richer tokenization, POS, lemmas, and tags, but provider documents remain internal.
++The default text-preparation backend is `spokenform`, pause activation mode is `tts`, and spaCy policy is best-effort `auto`. Auto uses only installed compatible local models in `sm`, `md`, `lg`, `trf` preference order and falls back deterministically if unavailable; provider documents remain internal. Use `--spacy off` to force fallback or a tier flag to require that model.
+
+ In Python, `PlannerConfig.document_format` defaults to `"plain"`; select `"ssmd"` for SSMD source. `PauseConfig.mode` controls whether eligible semantic pause intents are activated by the compiler. The executable plan carries semantic intent (or an exact authored timed pause), not numeric durations invented from an activation policy. A renderer may interpret supported intents according to its own capabilities.
+
+@@ -34,6 +34,7 @@ In Python, `PlannerConfig.document_format` defaults to `"plain"`; select `"ssmd"
+ - `markers` and optional `heading` metadata already localized to the owning segment.
+
+ Token offsets are half-open Python-character ranges into the owning `segment.text`. Do not use them to slice document text or add offsets from another segment. Consumers render flow units and segments in their stored order.
++Token `pos`, `tag`, `lemma`, and `morph` describe that exact prepared text and are the authoritative downstream linguistic context. Consumers should pass them through rather than retokenizing or rerunning spaCy. Optional replacements are provenance only: their output spans are segment-local, source values are original spellings, and they are excluded from executable hashes and synthesis inputs.
+
+ ```python
+ from utterplan import FlowPlan
+@@ -57,7 +58,7 @@ for unit in plan.flow:
+         )
+ ```
+
+-`FlowPlan.document` retains compact document information such as format, title, SSMD version, and portable semantics. `FlowPlan.linguistics` identifies analysis provider/model provenance without retaining provider state. Source text, source locations, compiler diagnostics, preparation mappings, and renderability details are intentionally not executable-plan fields.
++`FlowPlan.document` retains compact document information such as format, title, SSMD version, and portable semantics. `FlowPlan.linguistics` identifies analysis provider/model provenance without retaining provider state. Compact replacement views preserve local prepared-text spans and original spellings; full source text, source offsets, complete preparation mappings, compiler diagnostics, and renderability details belong only in an optional trace sidecar.
+
+ ## Optional compiler trace
+
+@@ -70,7 +71,7 @@ utterplan inspect-trace chapter.trace.toml --preparation --boundaries
+ ```
+
+ The trace contains source text/hash, structural/prepared text, coordinate maps, preparation changes, diagnostics, and renderability evidence. It is not renderer input, does not affect `FlowPlan.plan_id`, and does not change the resulting plan TOML. See the [coordinate-space contract](coordinate-spaces) for every trace offset's coordinate space.
+-
++The trace contains source text/hash, structural/prepared text, full coordinate maps, preparation changes, diagnostics, and renderability evidence. Compact replacement views are available in v5 segments, but the trace is still needed for original source offsets and complete mappings. The trace is not renderer input, does not affect `FlowPlan.plan_id`, and does not change the executable plan.
+ ## Directives and media
+
+ Voice bindings and directive voice references are logical names, not backend voice IDs; consumers translate them to engine-specific resources. UtterPlan resolves SSMD scopes and defaults but does not choose engine settings or recompute pause policy.
+diff --git a/docs/coordinate-spaces.md b/docs/coordinate-spaces.md
+index d7baba7..eb6a18a 100644
+--- a/docs/coordinate-spaces.md
++++ b/docs/coordinate-spaces.md
+@@ -6,6 +6,8 @@ Schema v5 keeps the executable plan compact: token coordinates are local to each
+
+ `FlowSegment.text` is the prepared speech text for that segment. Each `TokenView.start` and `TokenView.end` is a half-open Python-character offset into that segment's text. Slice a token with `segment.text[token.start:token.end]`. Do not add a unit, segment, document, or compiler offset to these values. Token membership is stored locally in `segment.tokens`; there are no plan-global token indices or lookup joins.
+
++Optional `replacement.span` entries use this same segment-local coordinate space: they slice the final prepared text. The paired `replacement.source` value is the original spelling, not a source offset. Thus a prepared output such as `A R T` can record source `ART` while the exact original source location and complete transformation maps remain available only in the optional trace sidecar.
++
+ Pauses, directives, markers, and optional heading levels are attached directly to their owning flow-segment edge or segment. They have no independent text coordinate. Flow-unit and segment order is the render order.
+
+ ## Optional trace coordinates
+diff --git a/docs/debugging.md b/docs/debugging.md
+index b850577..22aaba9 100644
+--- a/docs/debugging.md
++++ b/docs/debugging.md
+@@ -7,7 +7,7 @@ source / SSMD -> FlowPlan -> renderer diagnostics -> audio
+                          \\-> optional compiler trace
+ ```
+
+-`utterplan explain FILE` shows prepared segment text, flow order, languages, semantic pause intents, directives, markers, and headings. `utterplan inspect` shows local tokens and segment details. Compiler source diagnostics and preparation mappings are not embedded in FlowPlan; request and retain a trace sidecar when those details are needed after compilation:
++`utterplan explain FILE` shows prepared segment text, flow order, languages, semantic pause intents, directives, markers, headings, compact replacement views, and tokens. `utterplan inspect` shows local tokens and segment details. Complete source diagnostics and preparation mappings are not embedded in FlowPlan; request and retain a trace sidecar when those details are needed after compilation:
+
+ ```bash
+ utterplan compile chapter.ssmd.md -o chapter.utterplan.toml --trace chapter.trace.toml
+@@ -19,7 +19,7 @@ Safe punctuation-only repair is the default during compilation. If a semantic bl
+
+ Sentence segmentation is a compiler-integrity step, not a renderability repair. PhraseSplit is advisory: dependency failure or a malformed/partial proposal batch produces a `segmentation.phrasplit_*` diagnostic and triggers conservative fallback. Unsafe automatic token-edge candidates are dropped or merged before projection; exact text and non-whitespace coverage are checked in both strict and repair modes. Inspect compiler diagnostics with `compile --trace FILE` and `inspect-trace FILE --boundaries`; sentence-part topology itself is intentionally not persisted in v5.
+
+-Use `inspect --tokens` to inspect local `TokenView` values. Fallback analysis may leave POS, tag, and morphology unavailable. `explain --details` shows token spans relative to the owning segment and its flow hash. Token spans always slice `segment.text`; they are not offsets into the original source or another segment.
++Use `inspect --tokens` to inspect local `TokenView` values. V5 `pos`, `tag`, `lemma`, and `morph` describe prepared segment text and are authoritative downstream context; fallback analysis may leave some unavailable. `explain --details` shows token and compact replacement spans relative to the owning segment and its flow hash. These output spans are not offsets into original source or another segment; use the trace for complete source mappings.
+
+ If spoken wording is wrong, inspect `FlowSegment.text`. If effective language is wrong, inspect the segment and `FlowPlan.linguistics`. If a pause seems missing, distinguish the semantic `PauseIntent` on the segment edge from the consumer's engine-specific timing policy. Exact authored timed breaks remain explicit; semantic strengths do not prescribe a duration.
+
+diff --git a/docs/format.md b/docs/format.md
+index 3f5e0ee..8285c31 100644
+--- a/docs/format.md
++++ b/docs/format.md
+@@ -32,21 +32,24 @@ Sentence parts and their indices are deliberately absent from this v5 format. Th
+
+ ## Executable flow
+
+-Each ordered `flow` entry is a `FlowUnit` with a stable local `hash` and one or more `segment` entries. A segment contains already-prepared speech `text`, an optional language override, local token columns, optional semantic `pause_before` / `pause_after` intents, typed renderer-neutral directives, markers, and an optional heading level. Language defaults to the root `language`; `unit` identifies paragraph or sentence grouping. Consumers render segments in the stored order and do not need compiler lookup tables or segment-ID joins.
++Each ordered `flow` entry is a `FlowUnit` with a stable local `hash` and one or more `segment` entries. A segment contains already-prepared speech `text`, an optional language override, local token columns, optional compact replacement provenance, optional semantic `pause_before` / `pause_after` intents, typed renderer-neutral directives, markers, and an optional heading level. Language defaults to the root `language`; `unit` identifies paragraph or sentence grouping. Consumers render segments in the stored order and do not need compiler lookup tables or segment-ID joins.
+
+-Token `span` entries are half-open Python-character ranges local to their owning segment's `text`. `pos`, `tag`, `lemma`, and `morph` columns carry token facts. Dense columns align with the spans; sparse columns are ascending `[token_index, value]` pairs. Absent lemma entries derive from case-folded surface text, while an explicit empty sparse lemma preserves an unknown value. Tokens and their semantics are never indexed by plan-global token IDs.
++Token `span` entries are half-open Python-character ranges local to their owning segment's `text`. `pos`, `tag`, `lemma`, and `morph` carry final prepared-text linguistic facts; dense columns align with spans and sparse columns use ascending `[token_index, value]` pairs. Absent lemma values derive from case-folded surface text; an explicit empty sparse lemma preserves an unknown value. These fields are the downstream context, so consumers should not retokenize or rerun spaCy.
++
++Optional compact `replacement` columns explain text preparation without restoring the compiler graph. `replacement.span` is a list of half-open spans in the final prepared segment `text`; `replacement.source` holds the original spelling for each span. For example, in `"Because someone (A R T) thought..."`, `replacement.span = [[17, 22]]` and `replacement.source = ["ART"]`, because `segment.text[17:22] == "A R T"`. Optional `kind` and `rule` columns are sparse `[replacement_index, value]` pairs. Replacement provenance is not a synthesis input and does not change flow hashes or `plan_id`; full source offsets and preparation maps remain in the trace sidecar.
++The prepared output string is not duplicated; recover it as `segment.text[start:end]`.
+
+ Pause intents represent `none`, semantic strengths such as `sentence` or `parenthetical`, or an exact authored timed break. They do not contain planner-invented durations or renderer activation policies. A consumer decides how supported semantic intents map to engine behavior; exact authored times remain explicit. Directives are typed renderer-neutral semantics for voice, pronunciation, prosody, emphasis, say-as, substitution, audio references, and extension references. UtterPlan does not fetch audio or execute extensions.
+
+ `document` holds compact `DocumentInfo` such as source format, SSMD version, title, and portable document semantics. `linguistics` optionally lists provider/model provenance. `producer` and `warnings` are informational. The executable plan does not retain the original source document, compiler text-preparation objects, parser/provider documents, arbitrary global token tables, or diagnostic lookup graphs.
+
+-`plan_id` identifies canonical executable semantics, not TOML bytes. Flow-unit hashes use the `utterplan-flow-v1` contract and are computed from each unit's local segments. Producer identity and formatting do not alter executable identity. Plans contain no phonemes, model token IDs, models, sessions, renderer configuration, or audio.
++`plan_id` identifies canonical executable semantics, not TOML bytes. Flow-unit hashes use the `utterplan-flow-v1` contract and are computed from each unit's executable segment semantics; compact replacement provenance is excluded. Producer identity, replacement metadata, and formatting do not alter executable identity. Plans contain no phonemes, model token IDs, models, sessions, renderer configuration, or audio.
+
+ ## TOML API and optional compiler trace
+
+ `FlowPlan.to_toml()`, `FlowPlan.from_toml()`, `FlowPlan.save()`, and `FlowPlan.load()` are the persistence APIs. `save()` writes atomically. Normal plan loading and the `validate`, `inspect`, and `explain` commands accept TOML; JSON is never auto-detected as a current plan format. Import a historical JSON plan explicitly with `utterplan migrate old.utterplan.json -o current.utterplan.toml`.
+
+-Compiler provenance is optional and separate from executable flow. `utterplan compile --trace plan.trace.toml` writes a versioned trace sidecar containing source text/hash, structural and prepared text, coordinate maps, preparation changes, compiler-only plan state, diagnostics, and renderability evidence. Use `utterplan explain plan.utterplan.toml --trace plan.trace.toml` or `utterplan inspect-trace plan.trace.toml`. Trace data does not enter `FlowPlan`, plan identity, or plan TOML; compiling with and without a trace produces identical executable plans.
++Full compiler provenance is optional and separate from executable flow. `utterplan compile --trace plan.trace.toml` writes a versioned trace sidecar containing source text/hash, structural and prepared text, coordinate maps, preparation changes, compiler-only plan state, diagnostics, and renderability evidence. Compact segment-local replacement views may appear in v5 flow, but are not a substitute for full source maps. Use `utterplan explain plan.utterplan.toml --trace plan.trace.toml` or `utterplan inspect-trace plan.trace.toml`. Trace data does not enter `FlowPlan`, plan identity, or plan TOML; compiling with and without a trace produces identical executable plans.
+
+ The v5 TOML codec is a deterministic human-oriented projection of `FlowPlan`, not a dump of arbitrary Python object state. Direct TOML nulls, dates/times, non-finite floats, and unknown fields are rejected. Optional typed fields are omitted; free-form `document.semantics` preserves embedded nulls with the reserved `__utterplan_null__ = true` table. The `__utterplan_` prefix is reserved. Use the public codec rather than manually reconstructing model objects.
+
+@@ -63,6 +66,6 @@ Package version and plan schema version are independent. Historical schema files
+ - Token `span` offsets address Python characters in the owning `FlowSegment.text` only.
+ - `FlowSegment.text` is the prepared speech text for that segment.
+ - Compiler trace source spans address exact input-source Python-character offsets; trace structural/spoken maps and preparation changes document their coordinate spaces explicitly.
+-- The executable plan does not contain source offsets or dense text maps. Preserve a trace sidecar when source diagnostics or preparation provenance must survive a process boundary.
++- The executable plan does not contain complete source offsets or dense text maps. Compact replacement views retain only segment-local output spans and original spelling strings; preserve a trace sidecar for source diagnostics, full preparation maps, or provenance that must survive a process boundary.
+
+ The codec validates token ordering and bounds, directive shape, flow hashes, plan identity, and supported schema version before returning a `FlowPlan`. Historical model decoding remains separate from the current v5 model.
+diff --git a/docs/getting-started.md b/docs/getting-started.md
+index 4535766..89602e6 100644
+--- a/docs/getting-started.md
++++ b/docs/getting-started.md
+@@ -41,10 +41,12 @@ Without `-o`, the complete canonical TOML plan is written to stdout. Status mess
+
+ ## Defaults and linguistic resources
+
+-The default compile policy is `spokenform` for text preparation, `tts` for pause activation, and `spacy off` for linguistic resources. The fallback path records `linguistics[*].provider = "fallback"` and leaves unavailable POS, tag, and morphology empty. It does not require an installed spaCy model.
++The default compile policy is `spokenform` for text preparation, `tts` for pause activation, and best-effort spaCy `auto`. Auto mode uses only an already-installed compatible model, preferring `sm`, `md`, `lg`, then `trf`; if spaCy or a compatible model is unavailable, planning continues with deterministic fallback tokens. UtterPlan never downloads models.
+
+-`--spacy auto` is an explicit opt-in. With a compatible local model, final pass-B tokens may contain POS, tag, lemma, and morphology, and the plan records the actual provider, model, and known versions. `sm`, `md`, `lg`, and `trf` require the requested local model. UtterPlan never downloads models automatically.
+-Install the optional library with `python -m pip install 'utterplan[spacy]'` when needed. Language model packages remain explicit environment dependencies and are never downloaded by UtterPlan.
++Use `--spacy off` to force fallback, or `--spacy sm|md|lg|trf` to require a specific local tier. Python `LinguisticsConfig` has the same best-effort default. Install the optional library with `python -m pip install 'utterplan[spacy]'` when needed; install language model packages separately.
++Language model packages remain explicit environment dependencies; UtterPlan never downloads them.
++
++Final V5 token fields (`pos`, `tag`, `lemma`, and `morph`) describe prepared segment text and are the downstream linguistic context. Optional replacement spans are local to that final text; preserve the trace sidecar for full source-coordinate maps and preparation diagnostics.
+
+ ```bash
+ utterplan compile "Hello world." --lang en-us -o hello.utterplan.toml
+@@ -115,7 +117,7 @@ UtterPlan parses SSMD dialect 0.9 only, including canonical fragments without a
+
+ The compiled plan preserves compact document metadata, effective directives, and semantic pause intent. Audio and extension references are descriptive data only; consumers decide how to interpret them.
+
+-The plan stores prepared segment text and local token spans, not source-level structural text or dense maps. Preserve compiler details in an optional trace sidecar:
++The plan stores prepared segment text and local token spans, plus optional compact replacement views with segment-local output spans and original spellings. It does not store structural source text or dense source/preparation maps; preserve an optional trace sidecar for those details:
+
+ ```bash
+ utterplan compile chapter.ssmd.md -o chapter.utterplan.toml --trace chapter.trace.toml
+diff --git a/docs/index.md b/docs/index.md
+index 31a29f2..77130d0 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -26,6 +26,4 @@ python-api
+ changelog
+ ```
+
+-The package version and the UtterPlan schema version are independent. The
+-current interchange schema is version `4`; schemas v1, v2, and v3 remain
+-available as immutable historical resources with sequential migration paths.
++The package version and the UtterPlan schema version are independent. The current interchange schema is version `5`; schemas v1–v4 remain available as immutable historical resources with sequential migration paths.
+diff --git a/docs/pykokoro-integration.md b/docs/pykokoro-integration.md
+index 7ae043c..e446c49 100644
+--- a/docs/pykokoro-integration.md
++++ b/docs/pykokoro-integration.md
+@@ -26,7 +26,7 @@ A future adapter can use only public v5 flow fields:
+ - `segment.markers` and optional `segment.heading`;
+ - compact `plan.document` and `plan.linguistics` metadata.
+
+-Token offsets are local to the owning `segment.text`. A consumer must not use compiler source offsets or retokenize the document. Provider/model provenance is descriptive; when contextual G2P requires a specific provider, the adapter must fail clearly or use its documented non-contextual fallback.
++Token offsets are local to the owning `segment.text`. A consumer must not use compiler source offsets. Optional replacement spans slice prepared text and record original spellings; they are not source offsets. Preserve the trace sidecar for exact source locations and complete preparation mappings.
+
+ ```python
+ for unit in plan.flow:
+@@ -35,7 +35,7 @@ for unit in plan.flow:
+         phonemizer(segment.text, segment.language, tokens)
+ ```
+
+-The renderer must not rerun spaCy or infer missing POS/tag values. No JSON serialization is required for in-process use.
++Use the V5 token fields as authoritative context: pass available `pos`, `tag`, `lemma`, and `morph` through unchanged rather than rerunning spaCy or inferring tags. Default `auto` uses installed compatible local models, preferring `sm`, `md`, `lg`, `trf`, and safely falls back if unavailable; model packages are never downloaded. When fields are unavailable, follow the adapter's documented non-contextual fallback.
+
+ ## Pause behavior
+
+diff --git a/docs/python-api.md b/docs/python-api.md
+index 05d9df2..22b86b1 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -7,10 +7,10 @@ diagnostics describe compilation, and an optional `PreparationTrace` holds compi
+ provenance separately. `UtterancePlanner.plan` is also supported and returns the
+ same current `FlowPlan` directly.
+
+-The Python defaults are deliberately spaCy-free and repair-first: `PlannerConfig` uses `spokenform` text preparation and `renderability_mode="repair"`, while `PauseConfig().mode` is `"tts"`. The CLI additionally defaults to the `spacy off` linguistic-resource policy, which uses deterministic fallback tokenization and analysis without requiring an installed spaCy model.
++The Python defaults are repair-first with best-effort spaCy enrichment: `PlannerConfig` uses `spokenform` preparation and `renderability_mode="repair"`, `PauseConfig().mode` is `"tts"`, and `LinguisticsConfig` uses local-model `auto`. Auto prefers installed compatible models `sm`, `md`, `lg`, `trf`, then falls back safely if spaCy or models are unavailable. No model is downloaded.
+
+-For an explicit contextual-G2P configuration, use `LinguisticsConfig(use_spacy=True, spacy_model="en_core_web_sm", require_spacy=True)`. The resulting plan records final pass-B token provenance in `linguistic_runs`; no provider document is retained.
+-spaCy enrichment is opt-in through the CLI's `--spacy auto` policy or an explicit `LinguisticsConfig` with a compatible local model. It may provide richer tokenization, POS tags, lemmas, and tags, but UtterPlan never downloads a model implicitly.
++To require a specific installed model, set `require_spacy=True` and configure its model or tier. The plan records final pass-B token provenance in `linguistic_runs`; provider documents are not retained. Set `use_spacy=False` for deterministic opt-out.
++V5 `token.span`, `pos`, `tag`, `lemma`, and `morph` are the authoritative linguistic context for the exact prepared segment text. Consumers should not retokenize or rerun spaCy. Optional replacement spans are local to final prepared `segment.text`; original spellings are stored as provenance strings, while complete source offsets and preparation maps belong in the optional trace sidecar.
+
+ ## Sentence segmentation and private topology
+
+diff --git a/docs/ssmdbook.md b/docs/ssmdbook.md
+index 1195186..52a736a 100644
+--- a/docs/ssmdbook.md
++++ b/docs/ssmdbook.md
+@@ -69,4 +69,6 @@ An SSMDBook directory is an editable workspace. If a selected chapter was edited
+ - `--spacy auto|off|sm|md|lg|trf`
+ - `--force`, `--fail-fast`, and `--report PATH`
+
++`compile-book` uses the same best-effort spaCy `auto` default as `compile`: installed models are preferred in `sm`, `md`, `lg`, `trf` order and missing resources fall back safely. `--spacy off` forces fallback; explicit tier flags require that local model.
++
+ Chapter input is SSMD by contract, so `compile-book` deliberately has no `--input-format` option. When no `--language` is supplied, a selected chapter must declare its language in SSMD metadata.
+diff --git a/tests/migration/cases.py b/tests/migration/cases.py
+index 0c16476..1a9f0ed 100644
+--- a/tests/migration/cases.py
++++ b/tests/migration/cases.py
+@@ -2,7 +2,7 @@ from __future__ import annotations
+
+ from dataclasses import dataclass
+
+-from utterplan import PauseConfig, PlannerConfig
++from utterplan import LinguisticsConfig, PauseConfig, PlannerConfig
+
+
+ @dataclass(frozen=True)
+@@ -12,24 +12,28 @@ class MigrationCase:
+     config: PlannerConfig
+
+
+-PLAIN = PlannerConfig(language="en-us", document_format="plain", renderability_mode="strict")
++FALLBACK_LINGUISTICS = LinguisticsConfig(use_spacy=False)
++PLAIN = PlannerConfig(language="en-us", document_format="plain", renderability_mode="strict", linguistics=FALLBACK_LINGUISTICS)
+ IDENTITY = PlannerConfig(
+     language="en-us",
+     document_format="plain",
+     text_preparation="identity",
+     renderability_mode="strict",
++    linguistics=FALLBACK_LINGUISTICS,
+ )
+ AUTO = PlannerConfig(
+     language="en-us",
+     document_format="plain",
+     pauses=PauseConfig(mode="auto"),
+     renderability_mode="strict",
++    linguistics=FALLBACK_LINGUISTICS,
+ )
+-SSMD = PlannerConfig(language="en-us", document_format="ssmd", renderability_mode="strict")
++SSMD = PlannerConfig(language="en-us", document_format="ssmd", renderability_mode="strict", linguistics=FALLBACK_LINGUISTICS)
+ SSMD_IDENTITY = PlannerConfig(
+     language="en-us",
+     document_format="ssmd",
+     text_preparation="identity",
++    linguistics=FALLBACK_LINGUISTICS,
+     renderability_mode="strict",
+ )
+
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 41e0035..bd1481e 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -6,8 +6,8 @@ from pathlib import Path
+
+ import pytest
+
+-from utterplan import FlowPlan, PlannerConfig, compile_attempt
+-from utterplan.cli import build_parser, main
++from utterplan import FlowPlan, LinguisticsConfig, PlannerConfig, compile_attempt
++from utterplan.cli import _linguistics_config, build_parser, main
+ from utterplan.migration import migrate_plan_data
+
+
+@@ -41,11 +41,28 @@ def test_compile_cli_defaults() -> None:
+
+     assert args.text_preparation == "spokenform"
+     assert args.pause_mode == "tts"
+-    assert args.spacy == "off"
++    assert args.spacy == "auto"
+
+     assert args.renderability == "repair"
+
+
++
++
++def test_spacy_cli_policies_preserve_auto_off_and_required_tiers() -> None:
++    parser = build_parser()
++    assert parser.parse_args(["compile", "Hello.", "--lang", "en"]).spacy == "auto"
++    assert parser.parse_args(["compile", "Hello.", "--lang", "en", "--spacy", "off"]).spacy == "off"
++    assert parser.parse_args(["compile-many", "one.txt", "--output-dir", "plans"]).spacy == "auto"
++    assert parser.parse_args(["compile-book", "book.ssmdbook"]).spacy == "auto"
++
++    assert _linguistics_config("auto") == LinguisticsConfig(use_spacy=True, require_spacy=False)
++    assert _linguistics_config("off") == LinguisticsConfig(use_spacy=False)
++    for tier in ("sm", "md", "lg", "trf"):
++        config = _linguistics_config(tier)
++        assert config.use_spacy is True
++        assert config.spacy_model_size == tier
++        assert config.require_spacy is True
++
+ def test_compile_literal_text_to_stdout_toml(capsys: pytest.CaptureFixture[str]) -> None:
+     assert main(["compile", "Hello world.", "--lang", "en-us"]) == 0
+     payload = _payload(capsys)
+@@ -291,7 +308,7 @@ def test_inspect_tokens_shows_linguistic_fields(
+     tmp_path: Path, capsys: pytest.CaptureFixture[str]
+ ) -> None:
+     output = tmp_path / "plan.utterplan.toml"
+-    assert main(["compile", "Hello.", "--lang", "en-us", "-o", str(output)]) == 0
++    assert main(["compile", "Hello.", "--lang", "en-us", "--spacy", "off", "-o", str(output)]) == 0
+     capsys.readouterr()
+     assert main(["inspect", str(output), "--tokens"]) == 0
+     captured = capsys.readouterr()
+diff --git a/tests/test_cli_batch.py b/tests/test_cli_batch.py
+index 87dd4b2..30383cd 100644
+--- a/tests/test_cli_batch.py
++++ b/tests/test_cli_batch.py
+@@ -309,3 +309,4 @@ def test_compile_many_parser_defaults_to_repair_and_continue() -> None:
+     args = build_parser().parse_args(["compile-many", "one.txt", "--output-dir", "plans"])
+     assert args.renderability == "repair"
+     assert args.fail_fast is False
++    assert args.spacy == "auto"
+diff --git a/tests/test_cli_ssmdbook.py b/tests/test_cli_ssmdbook.py
+index 6b77409..95aeafe 100644
+--- a/tests/test_cli_ssmdbook.py
++++ b/tests/test_cli_ssmdbook.py
+@@ -373,6 +373,7 @@ def test_compile_book_parser_exposes_shared_options_but_no_input_format() -> Non
+     assert args.chapters == "1,3-5"
+     assert args.language == "en-US"
+     assert args.output_dir is None
++    assert args.spacy == "auto"
+     with pytest.raises(SystemExit):
+         build_parser().parse_args(["compile-book", "book.ssmdbook", "--input-format", "ssmd"])
+
+@@ -444,7 +445,7 @@ def test_compile_book_localizes_fallback_boundaries_with_default_settings(
+         },
+     )
+
+-    result = main(["compile-book", str(root), "--chapters", "5-6"])
++    result = main(["compile-book", str(root), "--chapters", "5-6", "--spacy", "off"])
+     capsys.readouterr()
+
+     assert result == 0
+diff --git a/tests/test_consumer_contract.py b/tests/test_consumer_contract.py
+index 04e008f..ba3cb93 100644
+--- a/tests/test_consumer_contract.py
++++ b/tests/test_consumer_contract.py
+@@ -4,6 +4,7 @@ from pathlib import Path
+
+ from utterplan import (
+     FlowPlan,
++    LinguisticsConfig,
+     PauseConfig,
+     PauseIntent,
+     PlannerConfig,
+@@ -162,7 +163,7 @@ def test_shared_fixture_has_one_canonical_v5_interpretation() -> None:
+     result = compile_document(
+         source,
+         input_format="ssmd",
+-        config=PlannerConfig(language="fr-FR", document_format="ssmd", text_preparation="identity"),
++        config=PlannerConfig(language="fr-FR", document_format="ssmd", text_preparation="identity", linguistics=LinguisticsConfig(use_spacy=False)),
+     )
+
+     assert result.plan.plan_id == expected.plan_id
+diff --git a/tests/test_flow_compilation.py b/tests/test_flow_compilation.py
+index 4a14d0f..d3209a5 100644
+--- a/tests/test_flow_compilation.py
++++ b/tests/test_flow_compilation.py
+@@ -67,6 +67,7 @@ def test_fresh_compilation_converges_with_v4_migration_on_unambiguous_input(
+             mode=old_pauses.get("mode", "tts"),
+             enabled=old_pauses.get("enabled", True),
+         ),
++        linguistics=LinguisticsConfig(use_spacy=False),
+     )
+     fresh = compile_document(
+         v4_plan["source"]["text"],
+diff --git a/tests/test_format.py b/tests/test_format.py
+index ca8b950..1f06821 100644
+--- a/tests/test_format.py
++++ b/tests/test_format.py
+@@ -74,7 +74,7 @@ def test_toml_output_is_plain_engine_independent_flow_data() -> None:
+     assert "phonemes" not in text
+     assert "numpy" not in text
+     assert "schema_version = 5" in text
+-    assert "source =" not in text
++    assert not any(line.startswith("source =") for line in text.splitlines())
+     assert "token_indices" not in text
+
+
+diff --git a/tests/test_linguistics.py b/tests/test_linguistics.py
+index ad08dee..c8a9154 100644
+--- a/tests/test_linguistics.py
++++ b/tests/test_linguistics.py
+@@ -52,49 +52,107 @@ def test_provider_documents_are_not_serialized():
+     assert "spacy.tokens" not in serialized
+
+
+-def test_default_planner_does_not_load_spacy(monkeypatch):
+-    def fail_if_loaded(*args, **kwargs):
+-        raise AssertionError("default planning must not load spaCy")
++def test_default_planner_falls_back_when_spacy_cannot_be_imported(monkeypatch):
++    monkeypatch.setitem(sys.modules, "spacy", None)
++    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello world.")
++
++    assert LinguisticsConfig().use_spacy is True
++    assert plan.linguistic_runs[0].provider == "fallback"
++    assert all(token.pos is None and token.tag is None and token.morph is None for token in plan.tokens)
+
+-    monkeypatch.setattr(LinguisticResourcePool, "pipeline", fail_if_loaded)
++
++def test_default_planner_falls_back_when_no_compatible_model_is_installed(monkeypatch):
++    fake_spacy = SimpleNamespace(
++        util=SimpleNamespace(get_installed_models=lambda: []),
++        load=lambda model: pytest.fail(f"unexpected model load: {model}"),
++    )
++    monkeypatch.setitem(sys.modules, "spacy", fake_spacy)
+     plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello world.")
+
++    assert plan.linguistic_runs[0].provider == "fallback"
++
++
++
++def test_default_planner_falls_back_when_auto_model_loading_fails(monkeypatch):
++    def fail_load(model):
++        raise OSError("model cannot load")
++
++    fake_spacy = SimpleNamespace(
++        util=SimpleNamespace(get_installed_models=lambda: ["en_core_web_sm"]),
++        load=fail_load,
++    )
++    monkeypatch.setitem(sys.modules, "spacy", fake_spacy)
++    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello world.")
++
++    assert plan.linguistic_runs[0].provider == "fallback"
++
++
++def test_explicit_spacy_off_never_inspects_or_loads_spacy(monkeypatch):
++    fake_spacy = SimpleNamespace(
++        util=SimpleNamespace(get_installed_models=lambda: pytest.fail("spaCy must not be inspected")),
++        load=lambda model: pytest.fail(f"spaCy must not be loaded: {model}"),
++    )
++    monkeypatch.setitem(sys.modules, "spacy", fake_spacy)
++    config = PlannerConfig(language="en-us", linguistics=LinguisticsConfig(use_spacy=False))
++    plan = UtterancePlanner(config).plan("Hello world.")
++
++    assert plan.linguistic_runs[0].provider == "fallback"
+     assert plan.texts.spoken == "Hello world."
+     assert all(token.pos is None and token.tag is None for token in plan.tokens)
+
+
+-def test_spacy_auto_uses_fake_compatible_local_model(monkeypatch):
++def test_default_planner_uses_small_installed_spacy_model_and_reuses_it(monkeypatch):
+     loaded_models = []
++    model_names = ["en_core_web_lg", "en_core_web_trf", "en_core_web_sm"]
+
+     class Pipeline:
+-        def __init__(self):
+-            self.last_doc = None
++        meta = {"version": "1.0"}
+
+         def __call__(self, text):
+-            self.last_doc = [
+-                SimpleNamespace(idx=0, text=text, pos_="NOUN", tag_="NN", lemma_=text.lower())
+-            ]
+-            return self.last_doc
++            tags = {
++                "I": ("PRON", "PRP", "I", "Case=Nom"),
++                "live": ("VERB", "VBP", "live", "Tense=Pres|VerbForm=Fin"),
++                "here.": ("ADV", "RB", "here", ""),
++            }
++            return FakeProviderDoc(
++                text,
++                [
++                    SimpleNamespace(
++                        idx=match.start(),
++                        text=match.group(0),
++                        pos_=tags.get(match.group(0), ("X", "", "", ""))[0],
++                        tag_=tags.get(match.group(0), ("X", "", "", ""))[1],
++                        lemma_=tags.get(match.group(0), ("X", "", "", ""))[2],
++                        morph=tags.get(match.group(0), ("X", "", "", ""))[3],
++                    )
++                    for match in re.finditer(r"\S+", text)
++                ],
++            )
+
+     pipeline = Pipeline()
+-
+     fake_spacy = SimpleNamespace(
+-        util=SimpleNamespace(get_installed_models=lambda: ["en_core_web_sm"]),
++        __version__="3.7.0",
++        util=SimpleNamespace(get_installed_models=lambda: model_names),
+         load=lambda model: loaded_models.append(model) or pipeline,
+     )
+     monkeypatch.setitem(sys.modules, "spacy", fake_spacy)
++    planner = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity"))
+
+-    analysis = LinguisticResourcePool().analyze(
+-        "Hello",
+-        LanguageRun("lang-0", 0, 5, "en-us"),
+-        PlannerConfig(language="en-us").linguistics.__class__(use_spacy=True),
+-    )
++    first = planner.plan("I live here.")
++    second = planner.plan("I live here.")
++    live = next(token for token in first.tokens if token.text == "live")
+
++    assert LinguisticsConfig().use_spacy is True
+     assert loaded_models == ["en_core_web_sm"]
+-    assert analysis.model_name == "en_core_web_sm"
+-    assert analysis.provider_doc is pipeline.last_doc
+-    assert analysis.tokens[0].pos == "NOUN"
+-
++    assert first.linguistic_runs[0].provider == "spacy"
++    assert first.linguistic_runs[0].model == "en_core_web_sm"
++    assert second.linguistic_runs[0].provider == "spacy"
++    assert (live.pos, live.tag, live.lemma, live.morph) == (
++        "VERB",
++        "VBP",
++        "live",
++        "Tense=Pres|VerbForm=Fin",
++    )
+
+ def test_spacy_enrichment_does_not_collapse_sentence_topology(monkeypatch):
+     class Pipeline:
+@@ -321,7 +379,11 @@ def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):
+         raise AssertionError("fallback analysis must not infer syntactic clauses")
+
+     monkeypatch.setattr(phrasplit, "detect_clause_boundaries", fail_if_called)
+-    plan = UtterancePlanner(PlannerConfig(language="en-us", text_preparation="identity")).plan(
++    plan = UtterancePlanner(
++        PlannerConfig(
++            language="en-us", text_preparation="identity", linguistics=LinguisticsConfig(use_spacy=False)
++        )
++    ).plan(
+         "I wanted to go, but it was raining."
+     )
+
+@@ -403,7 +465,9 @@ def test_fake_spacy_fields_and_provenance_survive_roundtrip(monkeypatch):
+
+
+ def test_fallback_provenance_is_explicit():
+-    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("I live here.")
++    plan = UtterancePlanner(
++        PlannerConfig(language="en-us", linguistics=LinguisticsConfig(use_spacy=False))
++    ).plan("I live here.")
+     assert plan.linguistic_runs[0].provider == "fallback"
+     assert plan.linguistic_runs[0].model is None
+     assert all(
+diff --git a/tests/test_migration_v4_to_v5.py b/tests/test_migration_v4_to_v5.py
+index 36a3c66..d8ac4f0 100644
+--- a/tests/test_migration_v4_to_v5.py
++++ b/tests/test_migration_v4_to_v5.py
+@@ -75,6 +75,37 @@ def test_token_facts_are_local_and_surface_verified() -> None:
+     assert error.value.code == "migration.token-coordinate-ambiguous"
+
+
++
++def test_v4_replacements_migrate_to_segment_local_compact_views() -> None:
++    plan = migrate_v4_to_v5(_fixture("spokenform_offsets.utterplan.json"))
++    segment = _segments(plan)[0]
++    replacements = segment["replacements"]
++
++    assert replacements[0]["source"] == "Dr."
++    assert segment["text"][replacements[0]["start"] : replacements[0]["end"]] == "Doctor"
++    assert replacements[1]["source"] == "5 kg"
++    assert segment["text"][replacements[1]["start"] : replacements[1]["end"]] == "five kilograms"
++    assert "preparation" not in plan
++
++
++def test_v4_migration_skips_malformed_and_cross_segment_replacements() -> None:
++    malformed = _fixture("spokenform_offsets.utterplan.json")
++    malformed["preparation"]["replacements"][0]["kind"] = ""
++    plan = migrate_v4_to_v5(malformed)
++    assert all(item["source"] != "Dr." for segment in _segments(plan) for item in segment.get("replacements", []))
++
++    crossing = _fixture("multilingual.utterplan.json")
++    crossing["preparation"]["replacements"] = [
++        {
++            "source": "whole document",
++            "output_start": 0,
++            "output_end": len(crossing["texts"]["spoken"]),
++        }
++    ]
++    plan = migrate_v4_to_v5(crossing)
++    assert all("replacements" not in segment for segment in _segments(plan))
++
++
+ def test_pause_migration_uses_provenance_not_numeric_thresholds() -> None:
+     plan = migrate_v4_to_v5(_fixture("ssmd_breaks.utterplan.json"))
+     segments = _segments(plan)
+diff --git a/tests/test_planner.py b/tests/test_planner.py
+index 7f6ffd5..ee9a6f3 100644
+--- a/tests/test_planner.py
++++ b/tests/test_planner.py
+@@ -1,7 +1,7 @@
+ import pytest
+
+ from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+-from utterplan import PauseConfig, PauseIntent, PlannerConfig, PlanningError
++from utterplan import LinguisticsConfig, PauseConfig, PauseIntent, PlannerConfig, PlanningError
+ from utterplan.exceptions import PlanValidationError
+
+
+@@ -71,7 +71,7 @@ def test_pause_config_default_is_tts():
+
+ def test_pass_a_tokens_counts_tokens_not_language_runs():
+     plan = UtterancePlanner(
+-        PlannerConfig(language="en-us", document_format="plain", text_preparation="identity")
++        PlannerConfig(language="en-us", document_format="plain", text_preparation="identity", linguistics=LinguisticsConfig(use_spacy=False))
+     ).plan("One two three.")
+
+     assert plan.document_metadata["planning"]["pass_a_tokens"] == 3
+diff --git a/tests/test_progress.py b/tests/test_progress.py
+index 4608e86..42fa6aa 100644
+--- a/tests/test_progress.py
++++ b/tests/test_progress.py
+@@ -21,6 +21,7 @@ TEXT = "Hello world."
+
+
+ def _identity_config(**kwargs: object) -> PlannerConfig:
++    kwargs.setdefault("linguistics", LinguisticsConfig(use_spacy=False))
+     return PlannerConfig(
+         language="en-us",
+         document_format="plain",
+diff --git a/tests/test_replacement_provenance.py b/tests/test_replacement_provenance.py
+new file mode 100644
+index 0000000..5f93731
+--- /dev/null
++++ b/tests/test_replacement_provenance.py
+@@ -0,0 +1,211 @@
++from __future__ import annotations
++
++from copy import deepcopy
++from dataclasses import replace
++
++import pytest
++
++from tests.compiler_helpers import CompilerTestPlanner
++from utterplan import (
++    FlowPlan,
++    FlowSegment,
++    FlowUnit,
++    LinguisticsConfig,
++    PlanFormatError,
++    PlannerConfig,
++    ReplacementView,
++    TokenView,
++)
++from utterplan.codecs.v5_toml import from_v5_toml_data, to_v5_toml_data
++from utterplan.explain import format_explanation
++from utterplan.flow_projection import project_compiler_plan
++
++
++def _compile_flow(text: str, *, unit: str = "paragraph") -> FlowPlan:
++    config = PlannerConfig(
++        language="en-us",
++        unit=unit,
++        linguistics=LinguisticsConfig(use_spacy=False),
++    )
++    compiler_plan = CompilerTestPlanner(config).plan(text, unit=unit)
++    return project_compiler_plan(compiler_plan)
++
++
++def test_art_replacement_projects_to_compact_segment_local_v5_provenance() -> None:
++    compiler_plan = CompilerTestPlanner(
++        PlannerConfig(language="en-us", linguistics=LinguisticsConfig(use_spacy=False))
++    ).plan("Because someone (ART) thought this part could use some more verisimilitude.")
++    flow = project_compiler_plan(compiler_plan)
++    segment, replacement = next(
++        (segment, item)
++        for unit in flow.flow
++        for segment in unit.segments
++        for item in segment.replacements
++        if item.source == "ART"
++    )
++
++    assert replacement.surface(segment.text) == "A R T"
++    assert segment.text[replacement.start : replacement.end] == "A R T"
++    toml = flow.to_toml()
++    assert f"replacement.span = [[{replacement.start}, {replacement.end}]]" in toml
++    assert 'replacement.source = ["ART"]' in toml
++
++    restored = FlowPlan.from_toml(toml)
++    restored_segment, restored_replacement = next(
++        (segment, item)
++        for unit in restored.flow
++        for segment in unit.segments
++        for item in segment.replacements
++    )
++    assert restored_replacement == replacement
++    assert restored_replacement.surface(restored_segment.text) == "A R T"
++    assert (
++        f'[{replacement.start}:{replacement.end}] "A R T" <- "ART"'
++        in format_explanation(restored)
++    )
++
++    example = FlowPlan(
++        language="en-us",
++        unit="paragraph",
++        flow=(
++            FlowUnit(
++                (
++                    FlowSegment(
++                        "Because someone (A R T) thought this part could use some more verisimilitude.",
++                        "en-us",
++                        replacements=(ReplacementView(17, 22, "ART"),),
++                    ),
++                )
++            ),
++        ),
++    )
++    example_toml = example.to_toml()
++    assert "replacement.span = [[17, 22]]" in example_toml
++    assert 'replacement.source = ["ART"]' in example_toml
++
++def test_multiple_replacements_keep_ordered_parallel_columns_and_round_trip() -> None:
++    flow = _compile_flow("Dr. bought 5 kg.")
++    segment = flow.flow[0].segments[0]
++    replacements = segment.replacements
++
++    assert len(replacements) == 2
++    assert list(replacements) == sorted(
++        replacements, key=lambda item: (item.start, item.end, item.source)
++    )
++    assert [segment.text[item.start : item.end] for item in replacements] == [
++        "Doctor",
++        "five kilograms",
++    ]
++    assert [item.source for item in replacements] == ["Dr.", "5 kg"]
++
++    wire = FlowPlan.from_toml(flow.to_toml()).to_dict()
++    wire_segment = wire["flow"][0]["segments"][0]
++    assert wire_segment["replacements"] == [item.to_dict() for item in replacements]
++
++
++def test_malformed_or_unlocalizable_replacement_provenance_is_skipped() -> None:
++    source_plan = CompilerTestPlanner(
++        PlannerConfig(language="en-us", linguistics=LinguisticsConfig(use_spacy=False))
++    ).plan("(ART)")
++    valid = dict(source_plan.preparation.replacements[0])
++    malformed = {**valid, "kind": ""}
++    preparation = replace(source_plan.preparation, replacements=(malformed,))
++    flow = project_compiler_plan(replace(source_plan, preparation=preparation))
++    assert all(not segment.replacements for unit in flow.flow for segment in unit.segments)
++
++    split_plan = CompilerTestPlanner(
++        PlannerConfig(
++            language="en-us",
++            unit="sentence",
++            linguistics=LinguisticsConfig(use_spacy=False),
++        )
++    ).plan("Alpha. Beta.", unit="sentence")
++    crossing = {
++        "output_start": 4,
++        "output_end": 7,
++        "source": "cross-segment",
++    }
++    preparation = replace(split_plan.preparation, replacements=(crossing,))
++    flow = project_compiler_plan(replace(split_plan, preparation=preparation))
++    assert all(not segment.replacements for unit in flow.flow for segment in unit.segments)
++
++
++def test_replacement_view_and_flow_segment_validate_local_spans() -> None:
++    with pytest.raises(ValueError, match="coordinates must be integers"):
++        ReplacementView(True, 1, "source")
++    with pytest.raises(ValueError, match="non-negative"):
++        ReplacementView(2, 1, "source")
++    with pytest.raises(ValueError, match="non-empty string"):
++        ReplacementView(0, 1, "source", kind="")
++    with pytest.raises(ValueError, match="outside segment text"):
++        FlowSegment("short", "en-us", replacements=(ReplacementView(0, 6, "source"),))
++
++
++
++def test_v5_replacement_columns_reject_invalid_cardinality_bounds_and_sparse_indexes() -> None:
++    flow = _compile_flow("Dr. bought 5 kg.")
++    base = to_v5_toml_data(flow)
++
++    invalid_bounds = deepcopy(base)
++    segment = next(
++        item for item in invalid_bounds["flow"][0]["segment"] if "replacement" in item
++    )
++    segment["replacement"]["span"][0][1] = len(segment["text"]) + 1
++    with pytest.raises(PlanFormatError, match="replacement span"):
++        from_v5_toml_data(invalid_bounds)
++
++    invalid_cardinality = deepcopy(base)
++    segment = next(
++        item for item in invalid_cardinality["flow"][0]["segment"] if "replacement" in item
++    )
++    segment["replacement"]["source"].pop()
++    with pytest.raises(PlanFormatError, match="equal lengths"):
++        from_v5_toml_data(invalid_cardinality)
++
++    invalid_sparse_index = deepcopy(base)
++    segment = next(
++        item for item in invalid_sparse_index["flow"][0]["segment"] if "replacement" in item
++    )
++    count = len(segment["replacement"]["span"])
++    segment["replacement"]["kind"] = [[count, "abbreviation"]]
++    with pytest.raises(PlanFormatError, match="sparse replacement indices"):
++        from_v5_toml_data(invalid_sparse_index)
++
++
++
++def test_replacement_provenance_does_not_change_hashes_but_token_semantics_do() -> None:
++    token = TokenView(
++        0,
++        4,
++        lemma="live",
++        pos="VERB",
++        tag="VBP",
++        morph="Tense=Pres|VerbForm=Fin",
++    )
++    segment = FlowSegment(
++        "live",
++        "en-us",
++        tokens=(token,),
++        replacements=(ReplacementView(0, 4, "LIVE", kind="structured", rule="rule-a"),),
++    )
++    plan = FlowPlan(language="en-us", unit="paragraph", flow=(FlowUnit((segment,)),))
++
++    changed_replacement = replace(
++        segment.replacements[0], source="other", kind="abbreviation", rule="rule-b"
++    )
++    provenance_only = replace(
++        plan,
++        flow=(FlowUnit((replace(segment, replacements=(changed_replacement,)),)),),
++        plan_id="",
++    )
++    assert provenance_only.flow[0].content_hash == plan.flow[0].content_hash
++    assert provenance_only.plan_id == plan.plan_id
++
++    changed_token = replace(token, pos="ADJ", tag="JJ")
++    linguistic_change = replace(
++        plan,
++        flow=(FlowUnit((replace(segment, tokens=(changed_token,)),)),),
++        plan_id="",
++    )
++    assert linguistic_change.flow[0].content_hash != plan.flow[0].content_hash
++    assert linguistic_change.plan_id != plan.plan_id
+diff --git a/tests/test_segment_topology.py b/tests/test_segment_topology.py
+index f09ac36..a067597 100644
+--- a/tests/test_segment_topology.py
++++ b/tests/test_segment_topology.py
+@@ -4,7 +4,7 @@ import unicodedata
+ from pathlib import Path
+
+ from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+-from utterplan import PauseIntent, PlannerConfig, classify_segment
++from utterplan import LinguisticsConfig, PauseIntent, PlannerConfig, classify_segment
+ from utterplan.model import AudioDirective, PlanSegment, SegmentDirectives, TokenAnnotation
+ from utterplan.planner import _is_neutral_punctuation_text
+
+@@ -15,6 +15,7 @@ def _planner() -> UtterancePlanner:
+             language="en-us",
+             document_format="ssmd",
+             text_preparation="identity",
++            linguistics=LinguisticsConfig(use_spacy=False),
+         )
+     )
+
+diff --git a/utterplan/__init__.py b/utterplan/__init__.py
+index 18001b2..3e2fcf6 100644
+--- a/utterplan/__init__.py
++++ b/utterplan/__init__.py
+@@ -53,6 +53,7 @@ from .model import (
+     PlanUnit,
+     PronunciationDirective,
+     ProsodyDirective,
++    ReplacementView,
+     SayAsDirective,
+     SegmentDirectives,
+     SemanticBoundary,
+@@ -129,6 +130,7 @@ __all__ = [
+     "FlowSegment",
+     "PauseIntent",
+     "TokenView",
++    "ReplacementView",
+     "DocumentInfo",
+     "LinguisticProvenance",
+     "PlanSource",
+diff --git a/utterplan/cli.py b/utterplan/cli.py
+index 62f4a1e..6249b36 100644
+--- a/utterplan/cli.py
++++ b/utterplan/cli.py
+@@ -103,8 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
+     compile_parser.add_argument(
+         "--spacy",
+         choices=("auto", "off", "sm", "md", "lg", "trf"),
+-        default="off",
+-        help="linguistic-resource policy; default is the deterministic fallback",
++        default="auto",
++        help="linguistic-resource policy; default auto uses a compatible local spaCy model when available and falls back safely",
+     )
+     compile_parser.add_argument("-o", "--output", type=Path, help="write the plan to this file")
+     compile_parser.add_argument(
+@@ -143,8 +143,8 @@ def build_parser() -> argparse.ArgumentParser:
+     batch_parser.add_argument(
+         "--spacy",
+         choices=("auto", "off", "sm", "md", "lg", "trf"),
+-        default="off",
+-        help="linguistic-resource policy; default is the deterministic fallback",
++        default="auto",
++        help="linguistic-resource policy; default auto uses a compatible local spaCy model when available and falls back safely",
+     )
+     batch_parser.add_argument("--force", action="store_true", help="replace existing plan files")
+     batch_parser.add_argument(
+@@ -192,8 +192,8 @@ def build_parser() -> argparse.ArgumentParser:
+     book_parser.add_argument(
+         "--spacy",
+         choices=("auto", "off", "sm", "md", "lg", "trf"),
+-        default="off",
+-        help="linguistic-resource policy; default is the deterministic fallback",
++        default="auto",
++        help="linguistic-resource policy; default auto uses a compatible local spaCy model when available and falls back safely",
+     )
+     book_parser.add_argument("--force", action="store_true", help="replace existing plan files")
+     book_parser.add_argument(
+diff --git a/utterplan/codecs/v5_toml.py b/utterplan/codecs/v5_toml.py
+index 091bf74..cc33196 100644
+--- a/utterplan/codecs/v5_toml.py
++++ b/utterplan/codecs/v5_toml.py
+@@ -161,6 +161,21 @@ def _token_columns(segment: Any) -> dict[str, Any]:
+     if morph:
+         columns["morph"] = morph
+     return columns
++def _replacement_columns(segment: Any) -> dict[str, Any]:
++    replacements = segment.replacements
++    if not replacements:
++        return {}
++    columns: dict[str, Any] = {
++        "span": [[item.start, item.end] for item in replacements],
++        "source": [item.source for item in replacements],
++    }
++    for field in ("kind", "rule"):
++        values = _sparse_column(replacements, field)
++        if values:
++            columns[field] = values
++    return columns
++
++
+
+
+ def _segment_to_wire(segment: Any, default_language: str) -> dict[str, Any]:
+@@ -180,6 +195,9 @@ def _segment_to_wire(segment: Any, default_language: str) -> dict[str, Any]:
+     token = _token_columns(segment)
+     if token:
+         result["token"] = token
++    replacement = _replacement_columns(segment)
++    if replacement:
++        result["replacement"] = replacement
+     return result
+
+
+@@ -222,29 +240,32 @@ def _decode_sparse(
+     field: str,
+     count: int,
+     path: str,
++    record: str = "token",
+ ) -> dict[int, str]:
+     if not isinstance(raw, list):
+-        raise _error(f"token {field} must be an array", code="token.column", path=path)
++        raise _error(f"{record} {field} must be an array", code=f"{record}.column", path=path)
+     result: dict[int, str] = {}
+     previous = -1
+     for entry_index, entry in enumerate(raw):
+         entry_path = f"{path}[{entry_index}]"
+         if not isinstance(entry, list) or len(entry) != 2:
+             raise _error(
+-                "sparse token entries must be [index, value] pairs",
+-                code="token.sparse",
++                f"sparse {record} entries must be [index, value] pairs",
++                code=f"{record}.sparse",
+                 path=entry_path,
+             )
+         index, value = entry
+         if type(index) is not int or not 0 <= index < count or index <= previous:
+             raise _error(
+-                "sparse token indices must be valid, unique, and ascending",
+-                code="token.sparse",
++                f"sparse {record} indices must be valid, unique, and ascending",
++                code=f"{record}.sparse",
+                 path=entry_path,
+             )
+         if not isinstance(value, str):
+             raise _error(
+-                "sparse token values must be strings", code="token.column", path=entry_path
++                f"sparse {record} values must be strings",
++                code=f"{record}.column",
++                path=entry_path,
+             )
+         result[index] = value
+         previous = index
+@@ -328,6 +349,81 @@ def _tokens_from_wire(value: Any, text: str, path: str) -> list[dict[str, Any]]:
+     return tokens
+
+
++def _replacements_from_wire(value: Any, text: str, path: str) -> list[dict[str, Any]]:
++    if not isinstance(value, Mapping):
++        raise _error("replacement block must be an object", code="replacement.type", path=path)
++    unknown = set(value) - {"span", "source", "kind", "rule"}
++    if unknown:
++        raise _error(
++            f"unknown replacement columns: {sorted(unknown)}",
++            code="field.unknown",
++            path=path,
++        )
++    spans = value.get("span")
++    sources = value.get("source")
++    if not isinstance(spans, list) or not isinstance(sources, list):
++        raise _error(
++            "replacement span and source columns are required",
++            code="replacement.column",
++            path=path,
++        )
++    if len(spans) != len(sources):
++        raise _error(
++            "replacement span and source columns must have equal lengths",
++            code="replacement.column",
++            path=path,
++        )
++    normalized_spans: list[tuple[int, int]] = []
++    for index, span in enumerate(spans):
++        span_path = f"{path}.span[{index}]"
++        if (
++            not isinstance(span, list)
++            or len(span) != 2
++            or any(type(point) is not int for point in span)
++        ):
++            raise _error("replacement span must be [start, end]", code="replacement.span", path=span_path)
++        start, end = span
++        if start < 0 or end < start or end > len(text):
++            raise _error(
++                "replacement span must be ordered and within segment text",
++                code="replacement.span",
++                path=span_path,
++            )
++        normalized_spans.append((start, end))
++    if any(not isinstance(source, str) for source in sources):
++        raise _error(
++            "replacement source values must be strings",
++            code="replacement.column",
++            path=f"{path}.source",
++        )
++    optional: dict[str, dict[int, str]] = {}
++    for field in ("kind", "rule"):
++        if field not in value:
++            continue
++        values = _decode_sparse(
++            value[field],
++            field=field,
++            count=len(normalized_spans),
++            path=f"{path}.{field}",
++            record="replacement",
++        )
++        if any(not item for item in values.values()):
++            raise _error(
++                f"replacement {field} values must be non-empty",
++                code="replacement.column",
++                path=f"{path}.{field}",
++            )
++        optional[field] = values
++    result = []
++    for index, (start, end) in enumerate(normalized_spans):
++        item: dict[str, Any] = {"start": start, "end": end, "source": sources[index]}
++        for field, values in optional.items():
++            if index in values:
++                item[field] = values[index]
++        result.append(item)
++    return result
++
++
+ def _segment_from_wire(value: Any, default_language: str, path: str) -> dict[str, Any]:
+     if not isinstance(value, Mapping):
+         raise _error("flow segment must be a table", code="flow.segment", path=path)
+@@ -340,6 +436,7 @@ def _segment_from_wire(value: Any, default_language: str, path: str) -> dict[str
+         "heading",
+         "token",
+         *_DIRECTIVE_KEYS,
++        "replacement",
+     }
+     unknown = set(value) - allowed
+     if unknown:
+@@ -356,6 +453,11 @@ def _segment_from_wire(value: Any, default_language: str, path: str) -> dict[str
+         "tokens": _tokens_from_wire(value["token"], text, f"{path}.token")
+         if "token" in value
+         else [],
++        "replacements": _replacements_from_wire(
++            value["replacement"], text, f"{path}.replacement"
++        )
++        if "replacement" in value
++        else [],
+         "markers": value.get("marker", []),
+     }
+     for key in ("pause_before", "pause_after", "heading"):
+@@ -476,9 +578,9 @@ def dumps_v5_toml(plan: FlowPlan) -> str:
+         for segment in unit["segment"]:
+             segment_table = tomlkit.table()
+             for key, value in segment.items():
+-                if key == "token":
++                if key in {"token", "replacement"}:
+                     for column, values in value.items():
+-                        segment_table[DottedKey([tomlkit.key("token"), tomlkit.key(column)])] = (
++                        segment_table[DottedKey([tomlkit.key(key), tomlkit.key(column)])] = (
+                             _toml_value(values)
+                         )
+                 else:
+diff --git a/utterplan/config.py b/utterplan/config.py
+index a9a8904..433714c 100644
+--- a/utterplan/config.py
++++ b/utterplan/config.py
+@@ -25,7 +25,7 @@ class PauseConfig:
+
+ @dataclass(frozen=True, slots=True)
+ class LinguisticsConfig:
+-    use_spacy: bool | None = None
++    use_spacy: bool | None = True
+     spacy_model: str | None = None
+     spacy_model_size: Literal["sm", "md", "lg", "trf"] | None = None
+     require_spacy: bool = False
+diff --git a/utterplan/explain.py b/utterplan/explain.py
+index b5c1b18..bba5131 100644
+--- a/utterplan/explain.py
++++ b/utterplan/explain.py
+@@ -89,6 +89,14 @@ def format_explanation(
+         lines.append(f"  Unit {unit_index}")
+         for segment_index, segment in enumerate(unit.segments, start=1):
+             lines.append(f"    {segment_index}. [{segment.language}] {_quote(segment.text)}")
++            if segment.replacements:
++                lines.append("       replacements:")
++                for replacement in segment.replacements:
++                    lines.append(
++                        f"         [{replacement.start}:{replacement.end}] "
++                        f"{_quote(replacement.surface(segment.text))} <- "
++                        f"{_quote(replacement.source)}"
++                    )
+             if segment.heading is not None:
+                 lines.append(f"       heading: level {segment.heading}")
+             if segment.markers:
+diff --git a/utterplan/flow_projection.py b/utterplan/flow_projection.py
+index 1abaf6e..892c330 100644
+--- a/utterplan/flow_projection.py
++++ b/utterplan/flow_projection.py
+@@ -11,6 +11,7 @@ from .model import (
+     FlowUnit,
+     LinguisticProvenance,
+     PauseIntent,
++    ReplacementView,
+     TokenView,
+     UtterancePlan,
+ )
+@@ -83,6 +84,7 @@ def project_compiler_plan(plan: UtterancePlan) -> FlowPlan:
+                         )
+                     ),
+                     heading=headings.get(segment.id),
++                    replacements=_replacement_views_for_segment(plan, segment),
+                 )
+             )
+         flow.append(FlowUnit(tuple(unit_segments)))
+@@ -181,6 +183,44 @@ def _tokens_for_segment(
+     return tuple(result)
+
+
++def _replacement_views_for_segment(plan: UtterancePlan, segment: Any) -> tuple[ReplacementView, ...]:
++    views: list[ReplacementView] = []
++    for raw in plan.preparation.replacements:
++        if not isinstance(raw, Mapping):
++            continue
++        output_start = raw.get("output_start")
++        output_end = raw.get("output_end")
++        source = raw.get("source")
++        kind = raw.get("kind")
++        rule = raw.get("rule")
++        if (
++            type(output_start) is not int
++            or type(output_end) is not int
++            or output_start > output_end
++            or not isinstance(source, str)
++            or (kind is not None and (not isinstance(kind, str) or not kind))
++            or (rule is not None and (not isinstance(rule, str) or not rule))
++        ):
++            continue
++        owners = [
++            candidate
++            for candidate in plan.segments
++            if candidate.spoken_start <= output_start and output_end <= candidate.spoken_end
++        ]
++        if len(owners) != 1 or owners[0].id != segment.id:
++            continue
++        views.append(
++            ReplacementView(
++                start=output_start - segment.spoken_start,
++                end=output_end - segment.spoken_start,
++                source=source,
++                kind=kind,
++                rule=rule,
++            )
++        )
++    return tuple(sorted(views, key=lambda item: (item.start, item.end, item.source)))
++
++
+ def _has_word_character(value: str) -> bool:
+     return any(character.isalnum() for character in value)
+
+diff --git a/utterplan/linguistics.py b/utterplan/linguistics.py
+index a099541..e05160c 100644
+--- a/utterplan/linguistics.py
++++ b/utterplan/linguistics.py
+@@ -112,7 +112,7 @@ class LinguisticResourcePool:
+             return None
+         base = language.split("-", 1)[0].lower()
+         families = (f"{base}_core_web_", f"{base}_core_news_")
+-        for suffix in ("trf", "lg", "md", "sm"):
++        for suffix in ("sm", "md", "lg", "trf"):
+             for family in families:
+                 candidate = family + suffix
+                 if candidate in installed:
+diff --git a/utterplan/migrations/v4_to_v5.py b/utterplan/migrations/v4_to_v5.py
+index 435d7b2..15f8a17 100644
+--- a/utterplan/migrations/v4_to_v5.py
++++ b/utterplan/migrations/v4_to_v5.py
+@@ -248,6 +248,76 @@ def _token_views(
+     return result
+
+
++def _replacement_views(
++    preparation: Mapping[str, Any],
++    segment: Mapping[str, Any],
++    segments: list[Mapping[str, Any]],
++    spoken: str,
++) -> list[dict[str, Any]]:
++    records = preparation.get("replacements", preparation.get("replacement", []))
++    if not isinstance(records, (list, tuple)):
++        return []
++    segment_id = segment.get("id")
++    views: list[dict[str, Any]] = []
++    for raw in records:
++        if not isinstance(raw, Mapping):
++            continue
++        span = raw.get("output_span")
++        if span is not None:
++            if (
++                not isinstance(span, (list, tuple))
++                or len(span) != 2
++                or any(type(point) is not int for point in span)
++            ):
++                continue
++            output_start, output_end = span
++        else:
++            output_start = raw.get("output_start")
++            output_end = raw.get("output_end")
++        source = raw.get("source")
++        kind = raw.get("kind")
++        rule = raw.get("rule")
++        if (
++            type(output_start) is not int
++            or type(output_end) is not int
++            or output_start < 0
++            or output_end < output_start
++            or output_end > len(spoken)
++            or not isinstance(source, str)
++            or (kind is not None and (not isinstance(kind, str) or not kind))
++            or (rule is not None and (not isinstance(rule, str) or not rule))
++        ):
++            continue
++        owners = []
++        for candidate in segments:
++            start = candidate.get("spoken_start")
++            end = candidate.get("spoken_end")
++            text = candidate.get("text")
++            if (
++                type(start) is int
++                and type(end) is int
++                and isinstance(text, str)
++                and 0 <= start <= end <= len(spoken)
++                and spoken[start:end] == text
++                and start <= output_start
++                and output_end <= end
++            ):
++                owners.append(candidate)
++        if len(owners) != 1 or owners[0].get("id") != segment_id:
++            continue
++        view: dict[str, Any] = {
++            "start": output_start - cast(int, segment["spoken_start"]),
++            "end": output_end - cast(int, segment["spoken_start"]),
++            "source": source,
++        }
++        if kind is not None:
++            view["kind"] = kind
++        if rule is not None:
++            view["rule"] = rule
++        views.append(view)
++    return sorted(views, key=lambda item: (item["start"], item["end"], item["source"]))
++
++
+ def _locate_segment(
+     position: int,
+     segments: list[Mapping[str, Any]],
+@@ -373,6 +443,8 @@ def migrate_v4_to_v5(data: Mapping[str, Any]) -> dict[str, Any]:
+     spoken = texts.get("spoken")
+     if not isinstance(spoken, str):
+         raise _error("spoken text must be a string", "$.texts.spoken")
++    preparation_value = source.get("preparation", {})
++    preparation = preparation_value if isinstance(preparation_value, Mapping) else {}
+
+     tokens = _list(source.get("tokens"), "$.tokens")
+     boundaries = _list(source.get("boundaries"), "$.boundaries")
+@@ -537,6 +609,9 @@ def migrate_v4_to_v5(data: Mapping[str, Any]) -> dict[str, Any]:
+                     )
+                 ],
+             }
++            replacement_views = _replacement_views(preparation, segment, segments, spoken)
++            if replacement_views:
++                flow_segment["replacements"] = replacement_views
+             for edge in ("pause_before", "pause_after"):
+                 pause = _pause_intent(
+                     segment.get(edge),
+diff --git a/utterplan/model.py b/utterplan/model.py
+index 34cb7ec..990a443 100644
+--- a/utterplan/model.py
++++ b/utterplan/model.py
+@@ -1576,6 +1576,48 @@ class TokenView:
+         }
+
+
++@dataclass(frozen=True, slots=True)
++class ReplacementView:
++    """Compact provenance for one transformed span in prepared segment text."""
++
++    start: int
++    end: int
++    source: str
++    kind: str | None = None
++    rule: str | None = None
++
++    def __post_init__(self) -> None:
++        if type(self.start) is not int or type(self.end) is not int:
++            raise ValueError("replacement span coordinates must be integers")
++        if self.start < 0 or self.end < self.start:
++            raise ValueError("replacement span must be ordered and non-negative")
++        if not isinstance(self.source, str):
++            raise ValueError("replacement source must be a string")
++        for field_name in ("kind", "rule"):
++            value = getattr(self, field_name)
++            if value is not None and (not isinstance(value, str) or not value):
++                raise ValueError(f"replacement {field_name} must be a non-empty string or None")
++
++    def surface(self, text: str) -> str:
++        """Derive the prepared surface from its owning segment text."""
++        if self.end > len(text):
++            raise ValueError("replacement span is outside segment text")
++        return text[self.start : self.end]
++
++    def to_dict(self) -> dict[str, Any]:
++        return {
++            key: value
++            for key, value in (
++                ("start", self.start),
++                ("end", self.end),
++                ("source", self.source),
++                ("kind", self.kind),
++                ("rule", self.rule),
++            )
++            if value is not None
++        }
++
++
+ @dataclass(frozen=True, slots=True)
+ class FlowSegment:
+     """One atomic renderer operation in the ordered executable flow."""
+@@ -1588,6 +1630,7 @@ class FlowSegment:
+     tokens: tuple[TokenView, ...] = ()
+     markers: tuple[str, ...] = ()
+     heading: int | None = None
++    replacements: tuple[ReplacementView, ...] = ()
+
+     def __post_init__(self) -> None:
+         if not isinstance(self.text, str):
+@@ -1615,6 +1658,13 @@ class FlowSegment:
+             if token.start < previous_end:
+                 raise ValueError("token spans must be ordered and non-overlapping")
+             previous_end = token.end
++        if not isinstance(self.replacements, tuple) or any(
++            not isinstance(item, ReplacementView) for item in self.replacements
++        ):
++            raise ValueError("segment replacements must be a tuple of ReplacementView values")
++        for index, replacement in enumerate(self.replacements):
++            if replacement.end > len(self.text):
++                raise ValueError(f"replacement {index} span is outside segment text")
+         if self.heading is not None and (type(self.heading) is not int or self.heading < 1):
+             raise ValueError("heading must be a positive integer")
+
+@@ -1632,6 +1682,8 @@ class FlowSegment:
+             result["pause_after"] = self.pause_after.to_dict()
+         if self.heading is not None:
+             result["heading"] = self.heading
++        if self.replacements:
++            result["replacements"] = [item.to_dict() for item in self.replacements]
+         return result
+
+
+@@ -1895,6 +1947,7 @@ class FlowPlan:
+                     "tokens",
+                     "markers",
+                     "heading",
++                    "replacements",
+                 }
+                 unknown_segment = set(raw_segment) - allowed_segment
+                 if unknown_segment:
+@@ -1950,6 +2003,37 @@ class FlowPlan:
+                                 raw_token.get("morph"),
+                             )
+                         )
++                    raw_replacements = raw_segment.get("replacements", [])
++                    if not isinstance(raw_replacements, (list, tuple)):
++                        raise PlanFormatError(
++                            "segment replacements must be an array",
++                            code="replacement.type",
++                            path=segment_path,
++                        )
++                    replacements: list[ReplacementView] = []
++                    for replacement_index, raw_replacement in enumerate(raw_replacements):
++                        replacement_path = f"{segment_path}.replacements[{replacement_index}]"
++                        if not isinstance(raw_replacement, Mapping):
++                            raise PlanFormatError(
++                                "replacement must be an object",
++                                code="replacement.type",
++                                path=replacement_path,
++                            )
++                        if set(raw_replacement) - {"start", "end", "source", "kind", "rule"}:
++                            raise PlanFormatError(
++                                "unknown replacement fields",
++                                code="field.unknown",
++                                path=replacement_path,
++                            )
++                        replacements.append(
++                            ReplacementView(
++                                _expect(raw_replacement.get("start"), int, f"{replacement_path}.start"),
++                                _expect(raw_replacement.get("end"), int, f"{replacement_path}.end"),
++                                _expect(raw_replacement.get("source"), str, f"{replacement_path}.source"),
++                                raw_replacement.get("kind"),
++                                raw_replacement.get("rule"),
++                            )
++                        )
+                     raw_markers = raw_segment.get("markers", [])
+                     if not isinstance(raw_markers, (list, tuple)) or any(
+                         not isinstance(marker, str) or not marker for marker in raw_markers
+@@ -1971,6 +2055,7 @@ class FlowPlan:
+                             tokens=tuple(tokens),
+                             markers=tuple(raw_markers),
+                             heading=raw_segment.get("heading"),
++                            replacements=tuple(replacements),
+                         )
+                     )
+                 except PlanFormatError:

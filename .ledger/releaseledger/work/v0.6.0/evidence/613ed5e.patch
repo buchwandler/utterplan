@@ -1,0 +1,90 @@
+ tests/test_ssmd_substitution_preparation.py | 50 ++++++++++++++++++++++++++---
+ utterplan/model.py                          |  2 +-
+ 2 files changed, 47 insertions(+), 5 deletions(-)
+
+diff --git a/tests/test_ssmd_substitution_preparation.py b/tests/test_ssmd_substitution_preparation.py
+index c798514..b48e6b0 100644
+--- a/tests/test_ssmd_substitution_preparation.py
++++ b/tests/test_ssmd_substitution_preparation.py
+@@ -5,12 +5,14 @@ from typing import Any, Literal
+ import pytest
+ import ttsready
+
++import utterplan.planner as planner_module
+ from tests.compiler_helpers import CompilerTestPlanner
+-from utterplan import PlannerConfig
++from utterplan import LinguisticsConfig, PlannerConfig
+ from utterplan.exceptions import ConfigurationError, PlanFormatError
+ from utterplan.flow_projection import project_compiler_plan
+ from utterplan.language import LanguageRun
+-from utterplan.model import AnnotationSpan, BoundaryEvent
++from utterplan.linguistics import RunAnalysis
++from utterplan.model import AnnotationSpan, BoundaryEvent, TokenAnnotation
+ from utterplan.preparation import SSMDSubstitutionPreparer
+
+
+@@ -203,9 +205,49 @@ def test_substitution_span_with_unproven_edge_whitespace_fails_safely() -> None:
+     assert error.value.code == "preparation.ssmd_sub_span_ambiguous"
+
+
+-def test_segmentation_diagnostic_offsets_slice_raw_ssmd_source() -> None:
++def test_segmentation_diagnostic_offsets_slice_raw_ssmd_source(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    def fake_analysis(text, runs, _config, _resources, **_kwargs):
++        analyses = []
++        for run in runs:
++            surface = text[run.spoken_start : run.spoken_end]
++            tokens = []
++            cursor = run.spoken_start
++            for word in surface.split():
++                token_start = text.index(word, cursor, run.spoken_end)
++                token_end = token_start + len(word)
++                tokens.append(
++                    TokenAnnotation(
++                        token_start,
++                        token_end,
++                        word,
++                        language=run.language,
++                    )
++                )
++                cursor = token_end
++            analyses.append(
++                RunAnalysis(
++                    run.language,
++                    run.spoken_start,
++                    run.spoken_end,
++                    tuple(tokens),
++                    provider="spacy",
++                    model_name="fake-model",
++                )
++            )
++        return tuple(analyses)
++
++    monkeypatch.setattr(planner_module, "analyze_run_analyses", fake_analysis)
++    planner = CompilerTestPlanner(
++        PlannerConfig(
++            language="en-us",
++            document_format="ssmd",
++            linguistics=LinguisticsConfig(use_spacy=True, spacy_model="fake-model"),
++        )
++    )
+     source = "Tar*get* is here."
+-    plan = _planner().plan(source)
++    plan = planner.plan(source)
+     diagnostic = next(
+         item for item in plan.diagnostics if item.code == "segmentation.token_reanalyzed"
+     )
+diff --git a/utterplan/model.py b/utterplan/model.py
+index e66a7fc..9e95e68 100644
+--- a/utterplan/model.py
++++ b/utterplan/model.py
+@@ -2366,7 +2366,7 @@ class LegacyFlowPlan(FlowPlan):
+
+     @classmethod
+     def from_dict(cls, data: Mapping[str, Any]) -> LegacyFlowPlan:
+-        plan = super().from_dict(data)
++        plan = FlowPlan.from_dict(data)
+         if not isinstance(plan, cls):
+             raise PlanFormatError(
+                 "expected a schema-v5 or schema-v6 flow plan", code="schema.version"

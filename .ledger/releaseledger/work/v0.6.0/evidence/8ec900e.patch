@@ -1,0 +1,1981 @@
+ README.md                                   |  14 +-
+ docs/cli.md                                 |  24 ++-
+ docs/consumer-guide.md                      |  22 +++
+ docs/debugging.md                           |  16 +-
+ docs/format.md                              |   4 +-
+ tests/test_cli.py                           |  98 ++++++++++-
+ tests/test_cli_batch.py                     |   1 +
+ tests/test_cli_ssmdbook.py                  |  72 +++++++-
+ tests/test_consumer_contract.py             |  50 ++++++
+ tests/test_golden.py                        |   2 +-
+ tests/test_linguistics.py                   |  11 +-
+ tests/test_preview.py                       | 161 ++++++++++++++++++
+ tests/test_renderability_repair.py          |   8 +-
+ tests/test_ssmd_substitution_preparation.py |  60 +++++++
+ utterplan/__init__.py                       |  14 ++
+ utterplan/batch.py                          |  21 +++
+ utterplan/cli.py                            | 233 ++++++++++++++++++++++---
+ utterplan/parsers.py                        | 106 +++++++++++-
+ utterplan/planner.py                        | 170 +++++++++++++++++--
+ utterplan/preparation.py                    |  20 +++
+ utterplan/preview.py                        | 255 ++++++++++++++++++++++++++++
+ 21 files changed, 1308 insertions(+), 54 deletions(-)
+
+diff --git a/README.md b/README.md
+index e5ab6c6..bd5bd38 100644
+--- a/README.md
++++ b/README.md
+@@ -39,7 +39,7 @@ Compile independent documents incrementally; every successful plan is saved imme
+ utterplan compile-many examples/*.ssmd --output-dir build/plans
+ ```
+
+-This writes one `.utterplan.toml` per source plus an atomically refreshed `compile-report.toml`. Use `--fail-fast` to skip later inputs after a failure, `--force` to replace existing plans, or `--report PATH` to choose another report location.
++This writes one `.utterplan.toml` per source plus an atomically refreshed `compile-report.toml`. Terminal diagnostics default to warnings; `--diagnostics all` also prints informational records, while `--diagnostics none` suppresses non-failure details. Failures are always reported, and the operational report retains every diagnostic. Use `--fail-fast` to skip later inputs after a failure, `--force` to replace existing plans, or `--report PATH` to choose another report location.
+
+ Compile a selected chapter range directly from an editable SSMDBook workspace:
+
+@@ -60,7 +60,7 @@ utterplan/
+ └── chapter-0017.utterplan.toml
+ ```
+
+-Omit `--chapters` to compile all manifest chapters. Use comma-separated source-number selections for non-contiguous ranges, for example `utterplan compile-book chapters --chapters 1,3-5`. The book root itself is also accepted as input; see the [SSMDBook guide](docs/ssmdbook.md).
++Omit `--chapters` to compile all manifest chapters. Use comma-separated source-number selections for non-contiguous ranges, for example `utterplan compile-book chapters --chapters 1,3-5`. `--diagnostics warnings|all|none` defaults to warnings; failures are always shown and reports retain complete diagnostics. The book root itself is also accepted as input; see the [SSMDBook guide](docs/ssmdbook.md).
+ The CLI also provides:
+
+ ```bash
+@@ -71,6 +71,7 @@ utterplan inspect chapter.utterplan.toml --boundaries --tokens
+ utterplan explain chapter.utterplan.toml --trace chapter.trace.toml
+ utterplan inspect-trace chapter.trace.toml --preparation --boundaries
+ utterplan inspect-attempt chapter.attempt.toml --issues
++utterplan preview chapter.utterplan.toml --segments 58-62 --chunk-by clause --pause-policy automatic
+ ```
+
+ `explain` presents executable flow as a human-readable speech plan. Use `compile --trace PATH` to retain optional compiler provenance; `explain --trace PATH` and `inspect-trace` read that sidecar separately from the plan.
+@@ -157,6 +158,15 @@ Callbacks run synchronously and exceptions propagate. See the [Python API guide]
+
+ Renderers consume `FlowPlan.flow` in order. Each `FlowUnit` contains local `FlowSegment` objects with already-prepared speech text, effective language, segment-local linguistic token views, canonical boundary opportunities, authored pause intents, directives, markers, and optional heading level. Token `start`/`end` offsets are Python-character indexes into that segment's `text`; they are never document-global coordinates. FlowUnits are fixed paragraph-local blocks, not renderer chunks; a `FlowSegment` is not necessarily one TTS call. `boundary_before` / `boundary_after` hold safe cut opportunities independently from authored `none`, strength, or timed pause intents. Consumers may choose sentence, paragraph, or engine-token-budget chunking and native, automatic, or manual pause realization; linguistic token views are not model-token counts.
+
++For renderer-neutral chunk tests and debugging, `preview_plan()` projects stored text and boundaries without changing the plan:
++
++```python
++from utterplan import FlowPlan, preview_plan
++
++plan = FlowPlan.load("chapter.utterplan.toml")
++chunks = preview_plan(plan, chunk_by="clause", pause_policy="automatic")
++```
++
+ `FlowPlan.document` carries compact document metadata and `FlowPlan.linguistics` identifies the analysis provider without retaining provider documents. Compiler source, preparation maps, diagnostics, and renderability details belong only in an optional trace sidecar. Plans contain no phonemes, model token IDs, models, sessions, renderer configuration, provider documents, or audio. UtterPlan does not fetch media or execute extension handlers.
+ The intended dependency direction is:
+
+diff --git a/docs/cli.md b/docs/cli.md
+index d182e7a..b97d02e 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -91,9 +91,9 @@ utterplan compile-many chapters/*.ssmd --output-dir build/plans \
+
+ Source names determine output names: `chapter.ssmd`, `chapter.ssmd.md`, and `chapter.md` each map to `chapter.utterplan.toml`. Duplicate output names and a report path that collides with a plan output are rejected before any writes. Existing plans are protected unless `--force` is supplied. By default the command writes an atomically refreshed `compile-report.toml` in the output directory; the report is operational TOML, not a plan accepted by `FlowPlan.load()`.
+
+-Compile reports use format version 2. Each successful item records its resolved `preparation_mode`, `repair_count`, deterministically ordered structured `repairs`, and a `degraded_linguistics` boolean. Repair entries include diagnostic codes/messages/severity and source ranges where available; source ranges use the original input's Python-character coordinates. Failed or skipped items have no preparation result. Reports remain operational metadata and do not affect plan output or incremental write behavior.
++Compile reports use format version 2. Each successful item records its resolved `preparation_mode`, diagnostic/severity counts, a complete structured `diagnostics` list, `renderability_repair_count`, and a `degraded_linguistics` boolean. For compatibility, `repair_count` and `repairs` remain; they include segmentation diagnostics (including informational ones) as well as renderability repairs, so they are not the terminal warning/repair summary. Diagnostic source ranges use original-input Python-character coordinates where available. Failed or skipped items have no preparation result. Reports remain operational metadata and do not affect plan output or incremental write behavior.
+
+-Shared planning options include `--language`, `--input-format auto|plain|ssmd`, `--text-preparation`, `--spacy`, and `--renderability`. Progress, repair notices, actionable errors, and the final counts are written to stderr. Exit status is 0 if every input succeeds, 1 if any input fails, and 2 for usage errors such as output collisions. `--fail-fast` skips later requests after the first failure but preserves all completed outputs and updates the report.
++Shared planning options include `--language`, `--input-format auto|plain|ssmd`, `--text-preparation`, `--spacy`, and `--renderability`. `--diagnostics warnings|all|none` controls terminal detail (default `warnings`): warnings mode suppresses informational diagnostics, all includes them, and none suppresses non-failure diagnostics. Failures are always reported, and the operational report always retains complete diagnostics. Progress, selected diagnostic details, actionable errors, and final counts are written to stderr. Exit status is 0 if every input succeeds, 1 if any input fails, and 2 for usage errors such as output collisions. `--fail-fast` skips later requests after the first failure but preserves all completed outputs and updates the report.
+
+ ## Compile chapters from an SSMDBook workspace
+
+@@ -116,9 +116,9 @@ utterplan compile-book chapters --chapters 5-17
+
+ By default, plans and the operational report are written to `<book-root>/utterplan/`. Use `--output-dir PATH` to override the destination. One canonical v7 `.utterplan.toml` plan is written per selected chapter, plus `compile-report.toml`. Existing plans are protected unless `--force` is given; `--fail-fast` skips later chapters after the first failure. `--report PATH` overrides the report location. Duplicate output names, report/plan collisions, and writes into the source `chapters/` directory or over `manifest.json` are rejected before writing.
+
+-Shared planning options are `--language`/`--lang`, `--text-preparation`, `--renderability`, and `--spacy`. Chapter documents are SSMD 0.9 by contract, so `compile-book` does not accept `--input-format`. The manifest is read-only: edited chapter content is compiled as it currently exists even if its recorded digest is stale, and UtterPlan never refreshes the manifest or chapter hashes. Only selected chapter files are opened, so an unrelated broken chapter outside the selection does not block the request.
++Shared planning options are `--language`/`--lang`, `--text-preparation`, `--renderability`, `--spacy`, and `--diagnostics warnings|all|none` (default `warnings`). The diagnostics option controls terminal verbosity; failures are always reported, and the operational report retains all diagnostic details. Chapter documents are SSMD 0.9 by contract, so `compile-book` does not accept `--input-format`. The manifest is read-only: edited chapter content is compiled as it currently exists even if its recorded digest is stale, and UtterPlan never refreshes the manifest or chapter hashes. Only selected chapter files are opened, so an unrelated broken chapter outside the selection does not block the request.
+
+-The version-2 compile report identifies each successful chapter's resolved preparation mode (`ssmd`, `spokenform`, or `identity`), reports a deterministic list of segmentation/renderability repair diagnostics and a `degraded_linguistics` flag, and includes a `repair_count`. The report is operational metadata; partial-success, atomic per-plan writes, and manifest immutability are unchanged.
++The version-2 compile report identifies each successful chapter's resolved preparation mode (`ssmd`, `spokenform`, or `identity`), includes complete diagnostics and severity counts, a `renderability_repair_count`, and a `degraded_linguistics` flag. Compatibility fields `repair_count` and `repairs` still include segmentation diagnostics regardless of severity; use the diagnostic severity fields and `diagnostics` list for interpretation. The report is operational metadata; partial-success, atomic per-plan writes, and manifest immutability are unchanged.
+
+ For the full editable-workspace behavior and examples, see the [SSMDBook guide](ssmdbook.md).
+
+@@ -133,6 +133,21 @@ utterplan explain chapter.utterplan.toml --details
+
+ The explanation presents executable flow: prepared segment text, paragraph-local unit order, effective languages, canonical boundary opportunities, authored pause intents, headings, markers, and typed directives. The v7 plan retains exact raw source when available and compact replacement views show local prepared surfaces with original spellings. Complete compiler source diagnostics and preparation maps remain absent unless a trace sidecar was saved. Add `--details` for local token offsets, flow hashes, plan identity, and trace preparation mappings. Pass `--trace PATH` to attach a matching sidecar; the TOML trace can also be read independently with `inspect-trace`.
+
++## Preview a saved consumer plan
++
++`preview` projects chunk text and pause facts from a saved schema-v7 plan. It does not recompile the source, call linguistics providers, modify the plan, or cross into G2P/rendering:
++
++```bash
++utterplan preview chapter.utterplan.toml \
++  --segments 58-62 \
++  --chunk-by clause \
++  --pause-policy automatic
++```
++
++`--segments` accepts zero-based global flow-segment indexes: `N`, `N-M`, comma-separated combinations, or `all`. It is a focus selector: grouping is performed for the full plan first, so selecting one segment returns its complete containing chunk. `--chunk-by` is `segment`, `clause`, `sentence` (default), or `paragraph`; clause grouping closes on clause, sentence, and paragraph opportunities. Chunk text is the exact concatenation of stored `segment.text` values, including spaces at chunk edges.
++
++`--pause-policy native` (default) shows authored pause intent but does not materialize ordinary boundary opportunities. `automatic` exposes saved clause/sentence/paragraph opportunities without inventing durations. `manual` displays authored pause intent and the automatic opportunity separately. These policies affect preview projection only; the saved plan and its identity remain unchanged. Use `--details` to show constituent segments, local spans, directives, and boundary facts, or `--json` for the versioned machine-readable preview object.
++
+ ## Inspect a persisted planning attempt
+
+ `inspect` reads canonical plans. Persistable planning outcomes use the separate
+@@ -177,6 +192,7 @@ utterplan compile chapter.ssmd.md -o chapter.utterplan.toml --trace chapter.trac
+ utterplan explain chapter.utterplan.toml --trace chapter.trace.toml
+ utterplan inspect-trace chapter.trace.toml --preparation --boundaries
+ utterplan inspect-attempt chapter.attempt.toml --issues
++utterplan preview chapter.utterplan.toml --segments 58-62 --chunk-by clause --pause-policy automatic
+ ```
+
+ `inspect --unit` selects a stored flow unit for inspection; it does not choose compilation grouping. Compilation always writes paragraph-local flow blocks, and downstream renderers choose their own chunk boundaries from the saved boundary opportunities.
+diff --git a/docs/consumer-guide.md b/docs/consumer-guide.md
+index 85e1670..db60c2b 100644
+--- a/docs/consumer-guide.md
++++ b/docs/consumer-guide.md
+@@ -64,6 +64,28 @@ for unit in plan.flow:
+         )
+ ```
+
++## Preview consumer chunks
++
++The pure `preview_plan()` API groups persisted segments without changing the plan or invoking parser, planner, linguistics, G2P, or a renderer. It uses the boundary inventory already stored in the `FlowPlan`; safe comma boundaries may be persisted as `clause` opportunities. Selection is a focus over global zero-based segment indexes, and selected indexes expand to their complete containing chunks.
++
++```python
++from utterplan import FlowPlan, preview_plan
++
++plan = FlowPlan.load("chapter.utterplan.toml")
++before, plan_id = plan.to_toml(), plan.plan_id
++chunks = preview_plan(
++    plan,
++    segments="58-62",
++    chunk_by="clause",
++    pause_policy="automatic",
++)
++for chunk in chunks:
++    print(chunk.index, repr(chunk.text), chunk.automatic_pause)
++assert plan.to_toml() == before and plan.plan_id == plan_id
++```
++
++`chunk_by` accepts `segment`, `clause`, `sentence`, or `paragraph`; `pause_policy` accepts `native`, `automatic`, or `manual`. Chunk text exactly concatenates stored `segment.text` and retains spaces at chunk boundaries. Automatic projection exposes saved boundary kinds, never fixed durations; manual projection keeps authored pause intent distinct. `PreviewChunk.segments` contains global/unit/local references, while tokens and replacement spans remain local to each stored segment. The CLI's `preview --json` output is versioned for consumer tests; `--details` shows those stored local facts rather than rewriting them to fabricated chunk offsets.
++
+ `FlowPlan.document` retains compact document information such as format, title, SSMD version, and portable semantics. `FlowPlan.linguistics` identifies analysis provider/model provenance without retaining provider state. Compact replacement views preserve local prepared-text spans and original spellings. The optional `FlowPlan.source` record (introduced in v6 and retained in v7) retains exact raw input once (and may be absent on migrated v5 plans). Source offsets, complete preparation mappings, compiler diagnostics, and renderability details still require an optional trace sidecar.
+
+ ## Optional compiler trace
+diff --git a/docs/debugging.md b/docs/debugging.md
+index d7b836e..b4df508 100644
+--- a/docs/debugging.md
++++ b/docs/debugging.md
+@@ -15,9 +15,21 @@ utterplan explain chapter.utterplan.toml --trace chapter.trace.toml --details
+ utterplan inspect-trace chapter.trace.toml --preparation --boundaries
+ ```
+
+-Safe punctuation-only repair is the default during compilation. If a semantic blocker prevents repair, the error includes source location, prepared fragment, spoken context, blocked repair reason, and a concrete next action; UtterPlan never guesses symbol pronunciation. Use `--renderability strict` to see safe repair opportunities without applying them. Batch compilation reports each repair and continues with later sources.
++To inspect what a saved plan exposes under downstream chunk and pause choices, use the pure preview command:
+
+-Sentence segmentation is a compiler-integrity step, not a renderability repair. PhraseSplit is advisory: dependency failure or a malformed/partial proposal batch produces a `segmentation.phrasplit_*` diagnostic and triggers conservative fallback. Unsafe automatic token-edge candidates are dropped or merged before projection; exact text and non-whitespace coverage are checked in both strict and repair modes. Inspect compiler diagnostics with `compile --trace FILE` and `inspect-trace FILE --boundaries`; sentence-part spans remain private in v7; safe canonical boundary kinds are persisted separately from authored pauses.
++```bash
++utterplan preview chapter.utterplan.toml \
++  --segments 58-62 \
++  --chunk-by clause \
++  --pause-policy automatic \
++  --details
++```
++
++The selector uses global zero-based flow-segment indexes and focuses complete containing chunks. Preview concatenates stored segment text exactly (including boundary spaces) and displays stored local token/replacement spans without rewriting them. Use `--json` for a versioned machine-readable result. If a spoken-space or substitution-provenance issue appears, inspect `FlowSegment.text` and its local replacement span rather than trimming preview output.
++
++Safe punctuation-only repair is the default during compilation. If a semantic blocker prevents repair, the error includes source location, prepared fragment, spoken context, blocked repair reason, and a concrete next action; UtterPlan never guesses symbol pronunciation. Use `--renderability strict` to see safe repair opportunities without applying them. Batch diagnostics default to warnings: informational token reanalysis is suppressed rather than called a repair. Use `--diagnostics all` to display informational records or `--diagnostics none` to suppress non-failure detail; failures are always reported and complete diagnostics remain in the operational report.
++
++Sentence segmentation is a compiler-integrity step, not a renderability repair. PhraseSplit is advisory: dependency failure or a malformed/partial proposal batch produces a `segmentation.phrasplit_*` diagnostic and triggers conservative fallback. Safe commas between lexical content can add soft `clause` opportunities during compilation; candidates respect atomic replacement/media spans and token-edge reconciliation. Unsafe candidates are dropped or merged before projection; exact text and non-whitespace coverage are checked in both strict and repair modes. Inspect compiler diagnostics with `compile --trace FILE` and `inspect-trace FILE --boundaries`; sentence-part spans remain private in v7; safe canonical boundary kinds are persisted separately from authored pauses.
+
+ Use `inspect --tokens` to inspect local `TokenView` values. V7 `pos`, `tag`, `lemma`, and `morph` describe prepared segment text and are authoritative linguistic context, not model-token IDs or counts; fallback analysis may leave some unavailable. `explain --details` shows token and compact replacement spans relative to the owning segment and its flow hash. These output spans are not offsets into original source or another segment; use the trace for complete source mappings.
+
+diff --git a/docs/format.md b/docs/format.md
+index bed6712..d4b56ec 100644
+--- a/docs/format.md
++++ b/docs/format.md
+@@ -32,7 +32,7 @@ pause_after = "none"
+
+ ## Compiler-only segmentation topology
+
+-The compiler validates PhraseSplit proposals and owns paragraph, sentence, and sentence-part spans in spoken-text coordinates. Semicolon/context-safe colon boundaries and optional clause/parenthetical proposals may contribute safe boundary opportunities; language, directive, authored-pause, marker, and media cuts create canonical segments without applying downstream chunk or pause policy. If proposals are malformed or incomplete, deterministic fallback is used and non-whitespace text remains covered exactly.
++The compiler validates PhraseSplit proposals and owns paragraph, sentence, and sentence-part spans in spoken-text coordinates. Semicolon/context-safe colon boundaries, optional clause/parenthetical proposals, and deterministic comma fallback may contribute safe boundary opportunities. A fallback comma is a soft `clause` opportunity only when lexical content occurs on both sides; token-edge reconciliation still applies, and candidates inside atomic replacement/media spans (or immediately after a substitution target) are suppressed. These opportunities do not activate pauses. Language, directive, authored-pause, marker, and media cuts create canonical segments without applying downstream chunk or pause policy. If proposals are malformed or incomplete, deterministic fallback is used and prepared speech text remains intact.
+
+ Sentence parts and their indices remain compiler-private in v7. The `flow` uses fixed paragraph-local `FlowUnit` grouping, and its `FlowSegment` records expose canonical safe-boundary opportunities; renderer chunk topology is not serialized. Released v5/v6 formats and their historical hashes remain unchanged.
+
+@@ -42,6 +42,8 @@ Each ordered `flow` entry is a `FlowUnit` with a stable local `hash` and one or
+
+ `boundary_before` / `boundary_after` list unique safe opportunities from `clause`, `sentence`, `paragraph`, `parenthetical`, and `voice_change` in canonical order; a parenthetical or sentence opportunity is not a pause directive. Authored pause intents are kept separately, so a boundary and an authored `none`, strength, or timed break can coexist at one edge. A `FlowSegment` is a semantic plan segment, not necessarily a renderer call or final TTS chunk.
+
++Consumers may project saved flow into `segment`, `clause`, `sentence`, or `paragraph` preview chunks without changing schema-v7 data. The public preview concatenates each selected chunk's stored `segment.text` exactly; token and replacement spans remain local to their original segments. Pause policies are projections only and do not persist renderer timing or activate boundaries in the plan.
++
+ Token `span` entries are half-open Python-character ranges local to their owning segment's `text`. `pos`, `tag`, `lemma`, and `morph` carry final prepared-text linguistic facts; dense columns align with spans and sparse columns use ascending `[token_index, value]` pairs. Absent lemma values derive from case-folded surface text; an explicit empty sparse lemma preserves an unknown value. These fields describe linguistic tokens, not engine token IDs or model-token counts; consumers may pass the context through without retokenizing or rerunning spaCy.
+
+ Optional compact `replacement` columns explain text preparation without restoring the compiler graph. `replacement.span` is a list of half-open spans in the final prepared segment `text`; `replacement.source` holds the original spelling for each span. For example, in `"Because someone (A R T) thought..."`, `replacement.span = [[17, 22]]` and `replacement.source = ["ART"]`, because `segment.text[17:22] == "A R T"`. Optional `kind` and `rule` columns are sparse `[replacement_index, value]` pairs. Replacement provenance is not a synthesis input and is excluded from flow-unit hashes and `plan_id`; schema v7 includes the exact source digest when a source record is available. Full source offsets and preparation maps remain in the trace sidecar.
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 1b750bf..df6d115 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -6,7 +6,16 @@ from pathlib import Path
+
+ import pytest
+
+-from utterplan import FlowPlan, LinguisticsConfig, PlannerConfig, compile_attempt
++from utterplan import (
++    FlowPlan,
++    FlowSegment,
++    FlowUnit,
++    LinguisticsConfig,
++    PlannerConfig,
++    ReplacementView,
++    TokenView,
++    compile_attempt,
++)
+ from utterplan.cli import _linguistics_config, build_parser, main
+
+
+@@ -603,3 +612,90 @@ def test_inspect_attempt_json_exposes_separate_artifact_schema(
+     assert payload["candidate"]["segments"]
+     assert payload["renderability"]["issues"]
+     assert payload["attempt"]["attempt_id"] == attempt.attempt_id
++
++
++def test_preview_cli_selects_whole_chunks_and_emits_details_json(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    plan = FlowPlan(
++        language="en-us",
++        flow=(
++            FlowUnit(
++                (
++                    FlowSegment("A", "en-us"),
++                    FlowSegment(
++                        "B",
++                        "en-us",
++                        tokens=(TokenView(0, 1, lemma="b"),),
++                        replacements=(ReplacementView(0, 1, "source-B", kind="ssmd-sub"),),
++                    ),
++                    FlowSegment("C.", "en-us", boundary_after=("sentence",)),
++                )
++            ),
++        ),
++    )
++    path = tmp_path / "preview.utterplan.toml"
++    path.write_text(plan.to_toml(), encoding="utf-8")
++    saved = path.read_bytes()
++    plan_id = plan.plan_id
++
++    defaults = build_parser().parse_args(["preview", str(path)])
++    assert defaults.chunk_by == "sentence"
++    assert defaults.pause_policy == "native"
++    assert defaults.segments is None
++
++    assert (
++        main(
++            [
++                "preview",
++                str(path),
++                "--segments",
++                "1",
++                "--chunk-by",
++                "sentence",
++                "--pause-policy",
++                "automatic",
++            ]
++        )
++        == 0
++    )
++    assert capsys.readouterr().out == '[0] "ABC."  pause=sentence\n'
++
++    assert (
++        main(["preview", str(path), "--segments", "1", "--chunk-by", "sentence", "--details"]) == 0
++    )
++    detail_text = capsys.readouterr().out
++    assert 'segment[1] unit=0 local=1: "B"' in detail_text
++    assert '"start": 0' in detail_text
++    assert '"end": 1' in detail_text
++
++    assert (
++        main(
++            [
++                "preview",
++                str(path),
++                "--segments",
++                "1",
++                "--chunk-by",
++                "sentence",
++                "--pause-policy",
++                "manual",
++                "--details",
++                "--json",
++            ]
++        )
++        == 0
++    )
++    payload = json.loads(capsys.readouterr().out)
++    assert payload["format"] == "utterplan-preview"
++    assert payload["version"] == 1
++    assert payload["plan_id"] == plan_id
++    assert payload["chunks"][0]["text"] == "ABC."
++    constituent = payload["chunks"][0]["constituents"][1]
++    assert constituent["tokens"][0]["start"] == 0
++    assert constituent["replacements"][0]["start"] == 0
++
++    assert path.read_bytes() == saved
++    assert FlowPlan.load(path).plan_id == plan_id
++    assert main(["preview", str(path), "--segments", "3-1"]) == 1
++    assert "segment range is reversed" in capsys.readouterr().err
+diff --git a/tests/test_cli_batch.py b/tests/test_cli_batch.py
+index 30383cd..f802b2a 100644
+--- a/tests/test_cli_batch.py
++++ b/tests/test_cli_batch.py
+@@ -310,3 +310,4 @@ def test_compile_many_parser_defaults_to_repair_and_continue() -> None:
+     assert args.renderability == "repair"
+     assert args.fail_fast is False
+     assert args.spacy == "auto"
++    assert args.diagnostics == "warnings"
+diff --git a/tests/test_cli_ssmdbook.py b/tests/test_cli_ssmdbook.py
+index 9133b36..6fd549e 100644
+--- a/tests/test_cli_ssmdbook.py
++++ b/tests/test_cli_ssmdbook.py
+@@ -8,8 +8,10 @@ from types import SimpleNamespace
+ import pytest
+ import tomlkit
+
+-from utterplan import FlowPlan
++import utterplan.batch as batch_module
++from utterplan import Diagnostic, FlowPlan, FlowSegment, FlowUnit
+ from utterplan.cli import build_parser, main
++from utterplan.compiler import CompileResult
+
+
+ def _ssmd(text: str) -> str:
+@@ -62,6 +64,66 @@ def _plan_text(path: Path) -> str:
+     return " ".join(segment.text for unit in plan.flow for segment in unit.segments)
+
+
++@pytest.mark.parametrize(
++    ("verbosity", "show_info", "show_warning"),
++    [("warnings", False, True), ("all", True, True), ("none", False, False)],
++)
++def test_compile_book_diagnostic_verbosity_keeps_full_report(
++    tmp_path: Path,
++    capsys: pytest.CaptureFixture[str],
++    monkeypatch: pytest.MonkeyPatch,
++    verbosity: str,
++    show_info: bool,
++    show_warning: bool,
++) -> None:
++    root = tmp_path / f"diagnostics-{verbosity}.ssmdbook"
++    _write_book(root, (5,), contents={5: _ssmd("A sentence.")})
++    plan = FlowPlan(
++        language="en-US",
++        flow=(FlowUnit((FlowSegment("A sentence.", "en-US"),)),),
++    )
++    diagnostics = (
++        Diagnostic("segmentation.token_reanalyzed", "token reanalyzed", severity="info"),
++        Diagnostic(
++            "segmentation.token_metadata_degraded",
++            "token metadata degraded",
++            severity="warning",
++            source_start=2,
++            source_end=5,
++        ),
++    )
++    monkeypatch.setattr(
++        batch_module,
++        "compile_document",
++        lambda *_args, **_kwargs: CompileResult(
++            plan=plan, diagnostics=diagnostics, preparation_mode="ssmd"
++        ),
++    )
++
++    result = main(["compile-book", str(root), "--chapters", "5", "--diagnostics", verbosity])
++    captured = capsys.readouterr()
++    assert result == 0
++    assert ("segmentation.token_reanalyzed" in captured.err) is show_info
++    assert ("segmentation.token_metadata_degraded" in captured.err) is show_warning
++    if verbosity == "all":
++        assert "info: 1" in captured.err
++        assert "warnings: 1" in captured.err
++    elif verbosity == "warnings":
++        assert "warnings: 1" in captured.err
++    else:
++        assert "warnings: 1" not in captured.err
++
++    item = _report(root / "utterplan/compile-report.toml")["item"][0]
++    assert item["diagnostic_count"] == 2
++    assert item["info_count"] == 1
++    assert item["warning_count"] == 1
++    assert item["renderability_repair_count"] == 0
++    assert {diagnostic["code"] for diagnostic in item["diagnostics"]} == {
++        "segmentation.token_reanalyzed",
++        "segmentation.token_metadata_degraded",
++    }
++
++
+ def test_compile_book_root_range_defaults_to_utterplan_and_writes_v6_plans(
+     tmp_path: Path, capsys: pytest.CaptureFixture[str]
+ ) -> None:
+@@ -124,11 +186,15 @@ def test_compile_book_report_records_ssmd_mode_and_repaired_cut_details(
+     captured = capsys.readouterr()
+
+     assert result == 0
+-    assert "preparation mode: ssmd; repairs:" in captured.err
+-    assert "segmentation.lexical_boundary_merged at source:" in captured.err
++    assert "preparation: ssmd; linguistics: full" in captured.err
++    assert "segmentation.lexical_boundary_merged" not in captured.err
+     item = _report(root / "utterplan/compile-report.toml")["item"][0]
+     assert item["preparation_mode"] == "ssmd"
+     assert item["repair_count"] >= 1
++    assert any(
++        diagnostic["code"] == "segmentation.lexical_boundary_merged"
++        for diagnostic in item["diagnostics"]
++    )
+     assert any(
+         repair["code"] == "segmentation.lexical_boundary_merged" for repair in item["repairs"]
+     )
+diff --git a/tests/test_consumer_contract.py b/tests/test_consumer_contract.py
+index 0229c77..96c342f 100644
+--- a/tests/test_consumer_contract.py
++++ b/tests/test_consumer_contract.py
+@@ -9,6 +9,7 @@ from utterplan import (
+     PlannerConfig,
+     UtterancePlanner,
+     compile_document,
++    preview_plan,
+ )
+ from utterplan.model import LegacyPauseKind
+
+@@ -298,3 +299,52 @@ def test_trace_does_not_change_public_consumer_plan() -> None:
+     assert traced.plan.to_toml() == plain.plan.to_toml()
+     assert traced.plan.plan_id == plain.plan.plan_id
+     assert_public_consumer_contract(traced.plan)
++
++
++def test_exact_substitution_sentence_previews_three_comma_clauses() -> None:
++    source = (
++        'Three said, *Target [Null+1]{sub="Null plus one"} on approach*, '
++        "and included the direction vectors."
++    )
++    result = compile_document(
++        source,
++        input_format="ssmd",
++        config=PlannerConfig(
++            language="en-us",
++            document_format="ssmd",
++            text_preparation="auto",
++            linguistics=LinguisticsConfig(use_spacy=False),
++        ),
++    )
++    plan = result.plan
++    original_toml = plan.to_toml()
++    original_id = plan.plan_id
++    segments = [segment for unit in plan.flow for segment in unit.segments]
++
++    assert "".join(segment.text for segment in segments) == (
++        "Three said, Target Null plus one on approach, and included the direction vectors."
++    )
++    emphasis = next(segment for segment in segments if segment.directives.emphasis is not None)
++    assert emphasis.text == "Target Null plus one on approach, "
++    assert len(emphasis.replacements) == 1
++    replacement = emphasis.replacements[0]
++    assert emphasis.text[replacement.start : replacement.end] == "Null plus one"
++
++    sentence = preview_plan(plan, chunk_by="sentence", pause_policy="automatic")
++    clauses = preview_plan(plan, chunk_by="clause", pause_policy="automatic")
++    assert len(sentence) == 1
++    assert (
++        sentence[0].text
++        == "Three said, Target Null plus one on approach, and included the direction vectors."
++    )
++    assert [chunk.text for chunk in clauses] == [
++        "Three said, ",
++        "Target Null plus one on approach, ",
++        "and included the direction vectors.",
++    ]
++    assert [chunk.automatic_pause for chunk in clauses] == ["clause", "clause", "sentence"]
++    assert [chunk.boundary_after for chunk in clauses] == [("clause",), ("clause",), ()]
++
++    assert plan.to_toml() == original_toml
++    assert plan.plan_id == original_id
++    assert_public_consumer_contract(plan)
+diff --git a/tests/test_golden.py b/tests/test_golden.py
+index d9a55c8..392411f 100644
+--- a/tests/test_golden.py
++++ b/tests/test_golden.py
+@@ -38,7 +38,7 @@ def test_canonical_ssmd_09_compiles_to_deterministic_v7_flow() -> None:
+
+     assert plan == repeated
+     assert plan.schema_version == 7
+-    assert plan.plan_id == "sha256:620d293bb2b638b6a6ace0857ed8017259a0558e3660835f607791b9b4c67e47"
++    assert plan.plan_id == "sha256:e69c94cb70f67c51d94428d5a00563d2eed9cba03d1687366eaabe654df03df1"
+     assert plan.document.format == "ssmd"
+     assert plan.document.ssmd_version == "0.9"
+     assert plan.document.title == "Renderer-neutral SSMD 0.9 contract"
+diff --git a/tests/test_linguistics.py b/tests/test_linguistics.py
+index 75e25ed..5e2cd71 100644
+--- a/tests/test_linguistics.py
++++ b/tests/test_linguistics.py
+@@ -325,7 +325,7 @@ def test_semantic_clause_is_a_boundary_opportunity_not_a_pause_intent(monkeypatc
+     )
+
+
+-def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):
++def test_fallback_adds_comma_opportunity_without_syntactic_clause_detection(monkeypatch):
+     import phrasplit
+
+     def fail_if_called(*args, **kwargs):
+@@ -340,8 +340,13 @@ def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):
+         )
+     ).plan("I wanted to go, but it was raining.")
+
+-    assert not any(item.kind == "clausal_comma" for item in plan.boundaries)
+-    assert not any(item.kind == "clause" for item in plan.semantic_boundaries)
++    assert any(
++        item.kind == "clausal_comma" and item.origin == "planner" for item in plan.boundaries
++    )
++    assert any(
++        item.kind == "clause" and item.attrs.get("separator_kind") == "comma"
++        for item in plan.semantic_boundaries
++    )
+
+
+ def _fake_spacy_plan(
+diff --git a/tests/test_preview.py b/tests/test_preview.py
+new file mode 100644
+index 0000000..eb443fc
+--- /dev/null
++++ b/tests/test_preview.py
+@@ -0,0 +1,161 @@
++from __future__ import annotations
++
++import pytest
++
++from utterplan import (
++    FlowPlan,
++    FlowSegment,
++    FlowUnit,
++    PauseIntent,
++    ReplacementView,
++    TokenView,
++    preview_plan,
++    resolve_segment_selector,
++)
++
++
++def _plan(*units: tuple[FlowSegment, ...]) -> FlowPlan:
++    return FlowPlan(
++        language="en-US",
++        flow=tuple(FlowUnit(unit) for unit in units),
++    )
++
++
++@pytest.mark.parametrize(
++    ("selector", "expected"),
++    [
++        ("12", {12}),
++        ("23-26", {23, 24, 25, 26}),
++        ("1,3-5", {1, 3, 4, 5}),
++        ("all", None),
++    ],
++)
++def test_segment_selector_resolves_zero_based_indexes(
++    selector: str, expected: frozenset[int] | set[int] | None
++) -> None:
++    actual = resolve_segment_selector(selector, 40)
++    assert actual == (frozenset(expected) if expected is not None else None)
++
++
++@pytest.mark.parametrize("selector", ["0-", "3-1", "foo", "1,,2", "4"])
++def test_segment_selector_rejects_malformed_and_out_of_range_values(selector: str) -> None:
++    with pytest.raises(ValueError):
++        resolve_segment_selector(selector, 4)
++
++
++def test_sentence_selection_expands_to_complete_containing_chunk() -> None:
++    plan = _plan(
++        (
++            FlowSegment("A", "en-US"),
++            FlowSegment("B", "en-US"),
++            FlowSegment("C.", "en-US", boundary_after=("sentence",)),
++        )
++    )
++
++    chunks = preview_plan(plan, segments="1", chunk_by="sentence")
++
++    assert len(chunks) == 1
++    assert chunks[0].text == "ABC."
++    assert [item.global_index for item in chunks[0].segments] == [0, 1, 2]
++
++
++def test_chunk_modes_respect_saved_edges_and_paragraph_flow_units() -> None:
++    plan = _plan(
++        (
++            FlowSegment("A", "en-US", boundary_after=("clause",)),
++            FlowSegment("B", "en-US", boundary_after=("sentence",)),
++            FlowSegment("C", "en-US"),
++        ),
++        (FlowSegment("D", "en-US"),),
++    )
++
++    assert [chunk.text for chunk in preview_plan(plan, chunk_by="segment")] == [
++        "A",
++        "B",
++        "C",
++        "D",
++    ]
++    assert [chunk.text for chunk in preview_plan(plan, chunk_by="clause")] == [
++        "A",
++        "B",
++        "C",
++        "D",
++    ]
++    assert [chunk.text for chunk in preview_plan(plan, chunk_by="sentence")] == [
++        "AB",
++        "C",
++        "D",
++    ]
++    assert [chunk.text for chunk in preview_plan(plan, chunk_by="paragraph")] == [
++        "ABC",
++        "D",
++    ]
++    assert preview_plan(plan, segments="0", chunk_by="sentence")[0].text == "AB"
++
++
++def test_pause_policies_only_change_pause_projection_and_never_mutate_plan() -> None:
++    plan = _plan(
++        (
++            FlowSegment(
++                "A",
++                "en-US",
++                boundary_after=("clause",),
++                tokens=(TokenView(0, 1, lemma="a"),),
++                replacements=(ReplacementView(0, 1, "A", kind="ssmd-sub"),),
++            ),
++            FlowSegment(
++                "B",
++                "en-US",
++                pause_after=PauseIntent("timed", "500ms"),
++                boundary_after=("sentence",),
++            ),
++            FlowSegment("C", "en-US", pause_after=PauseIntent("none"), boundary_after=("clause",)),
++            FlowSegment("D", "en-US"),
++        )
++    )
++    before = plan.to_toml()
++    plan_id = plan.plan_id
++
++    native = preview_plan(plan, chunk_by="clause", pause_policy="native")
++    automatic = preview_plan(plan, chunk_by="clause", pause_policy="automatic")
++    manual = preview_plan(plan, chunk_by="clause", pause_policy="manual")
++
++    assert [chunk.text for chunk in native] == ["A", "B", "C", "D"]
++    assert [chunk.text for chunk in automatic] == [chunk.text for chunk in native]
++    assert [chunk.text for chunk in manual] == [chunk.text for chunk in native]
++    assert [chunk.automatic_pause for chunk in native] == [None, None, None, None]
++    assert [chunk.automatic_pause for chunk in automatic] == ["clause", None, None, "sentence"]
++    assert [chunk.automatic_pause for chunk in manual] == ["clause", "sentence", None, "sentence"]
++    assert manual[1].authored_pause_after == PauseIntent("timed", "500ms")
++    assert manual[2].authored_pause_after == PauseIntent("none")
++    assert native[0].segments == automatic[0].segments == manual[0].segments
++    assert plan.to_toml() == before
++    assert plan.plan_id == plan_id
++    assert plan.flow[0].segments[0].tokens[0].start == 0
++    assert plan.flow[0].segments[0].replacements[0].start == 0
++
++
++def test_preview_json_data_is_stable_and_preserves_authored_pause_shape() -> None:
++    plan = _plan((FlowSegment("Ready.", "en-US", pause_after=PauseIntent("timed", "500ms")),))
++
++    chunk = preview_plan(plan, pause_policy="manual")[0]
++    value = chunk.to_dict()
++
++    assert value == {
++        "index": 0,
++        "text": "Ready.",
++        "segments": [{"global_index": 0, "unit_index": 0, "local_index": 0}],
++        "boundary_before": [],
++        "boundary_after": [],
++        "authored_pause_before": None,
++        "authored_pause_after": {"type": "timed", "time": "500ms"},
++        "automatic_pause": "sentence",
++    }
++
++
++def test_preview_rejects_unknown_modes_and_pause_policies() -> None:
++    plan = _plan((FlowSegment("Hello.", "en-US"),))
++    with pytest.raises(ValueError, match="chunk mode"):
++        preview_plan(plan, chunk_by="comma")  # type: ignore[arg-type]
++    with pytest.raises(ValueError, match="pause policy"):
++        preview_plan(plan, pause_policy="tts")  # type: ignore[arg-type]
+diff --git a/tests/test_renderability_repair.py b/tests/test_renderability_repair.py
+index 653f2a5..73f3d64 100644
+--- a/tests/test_renderability_repair.py
++++ b/tests/test_renderability_repair.py
+@@ -107,10 +107,10 @@ def test_default_repairs_exact_comma_space_with_isolated_planner_topology(
+     plan = UtterancePlanner(config).plan(source)
+
+     assert plan.document_metadata["planning"]["renderability"]["guaranteed"] is True
+-    assert plan.segments[1].text == ", after"
++    assert [segment.text for segment in plan.segments] == ["Before, ", "after"]
+     repaired = [item for item in plan.diagnostics if item.code == "planning.renderability.repaired"]
+     assert len(repaired) == 1
+-    assert "', '" in repaired[0].message
++    assert "into the previous spoken segment" in repaired[0].message
+
+     strict = UtterancePlanner(replace(config, renderability_mode="strict"))
+     with pytest.raises(PlanRenderabilityError) as error:
+@@ -119,8 +119,8 @@ def test_default_repairs_exact_comma_space_with_isolated_planner_topology(
+     assert issue.text == ", "
+     assert issue.repair_assessment is not None
+     assert issue.repair_assessment.safe is True
+-    assert issue.repair_assessment.action == "merge_next"
+-    assert "Automatic repair: safe; merge with the following spoken segment." in str(error.value)
++    assert issue.repair_assessment.action == "merge_previous"
++    assert "Automatic repair: safe; merge with the previous spoken segment." in str(error.value)
+     assert "Spoken context:" in str(error.value)
+
+
+diff --git a/tests/test_ssmd_substitution_preparation.py b/tests/test_ssmd_substitution_preparation.py
+index 4658994..c798514 100644
+--- a/tests/test_ssmd_substitution_preparation.py
++++ b/tests/test_ssmd_substitution_preparation.py
+@@ -8,6 +8,7 @@ import ttsready
+ from tests.compiler_helpers import CompilerTestPlanner
+ from utterplan import PlannerConfig
+ from utterplan.exceptions import ConfigurationError, PlanFormatError
++from utterplan.flow_projection import project_compiler_plan
+ from utterplan.language import LanguageRun
+ from utterplan.model import AnnotationSpan, BoundaryEvent
+ from utterplan.preparation import SSMDSubstitutionPreparer
+@@ -153,3 +154,62 @@ def test_substitution_conflicting_with_pronunciation_is_rejected() -> None:
+         SSMDSubstitutionPreparer().prepare(
+             "ART", "en-us", (LanguageRun("lang-0", 0, 3, "en-us"),), (substitution, pronunciation)
+         )
++
++
++def test_nested_emphasis_substitution_preserves_whitespace_and_local_provenance() -> None:
++    source = (
++        'Three said, *Target [Null+1]{sub="Null plus one"} on approach*, '
++        "and included the direction vectors."
++    )
++    plan = _planner().plan(source)
++    expected = "Three said, Target Null plus one on approach, and included the direction vectors."
++
++    assert plan.texts.spoken == expected
++    assert "TargetNull" not in plan.texts.spoken
++    emphasized = [
++        segment
++        for segment in plan.segments
++        if segment.text.startswith("Target Null plus one on approach")
++    ]
++    assert len(emphasized) == 1
++    assert emphasized[0].text == "Target Null plus one on approach, "
++    assert emphasized[0].directives.emphasis is not None
++
++    flow = project_compiler_plan(plan)
++    replacement_segments = [
++        (segment, replacement)
++        for unit in flow.flow
++        for segment in unit.segments
++        for replacement in segment.replacements
++    ]
++    assert len(replacement_segments) == 1
++    segment, replacement = replacement_segments[0]
++    assert replacement.source == "Null+1"
++    assert replacement.surface(segment.text) == "Null plus one"
++    assert 0 < replacement.start < replacement.end < len(segment.text)
++    assert not any(
++        diagnostic.code == "segmentation.token_reanalyzed" for diagnostic in plan.diagnostics
++    )
++
++
++def test_substitution_span_with_unproven_edge_whitespace_fails_safely() -> None:
++    annotation = AnnotationSpan("sub-1", "sub", {"sub": "spoken"}, 0, 4)
++
++    with pytest.raises(PlanFormatError) as error:
++        SSMDSubstitutionPreparer().prepare(
++            " ART", "en-us", (LanguageRun("lang-0", 0, 4, "en-us"),), (annotation,)
++        )
++
++    assert error.value.code == "preparation.ssmd_sub_span_ambiguous"
++
++
++def test_segmentation_diagnostic_offsets_slice_raw_ssmd_source() -> None:
++    source = "Tar*get* is here."
++    plan = _planner().plan(source)
++    diagnostic = next(
++        item for item in plan.diagnostics if item.code == "segmentation.token_reanalyzed"
++    )
++
++    assert diagnostic.source_start is not None
++    assert diagnostic.source_end is not None
++    assert source[diagnostic.source_start : diagnostic.source_end] == "Tar*get"
+diff --git a/utterplan/__init__.py b/utterplan/__init__.py
+index 26e1b0c..df6ee61 100644
+--- a/utterplan/__init__.py
++++ b/utterplan/__init__.py
+@@ -66,6 +66,14 @@ from .model import (
+     VoiceDirective,
+ )
+ from .planner import UtterancePlanner
++from .preview import (
++    ChunkMode,
++    PausePolicy,
++    PreviewChunk,
++    SegmentRef,
++    preview_plan,
++    resolve_segment_selector,
++)
+ from .progress import PlannerProgressEvent, ProgressCallback, ProgressKind, ProgressPhase
+ from .renderability import (
+     RenderabilityAction,
+@@ -111,6 +119,12 @@ __all__ = [
+     "LinguisticsConfig",
+     "SSMDConfig",
+     "UtterancePlanner",
++    "ChunkMode",
++    "PausePolicy",
++    "PreviewChunk",
++    "SegmentRef",
++    "preview_plan",
++    "resolve_segment_selector",
+     "PlannerProgressEvent",
+     "RenderabilityAction",
+     "RenderabilityIssue",
+diff --git a/utterplan/batch.py b/utterplan/batch.py
+index 7573052..5f1f050 100644
+--- a/utterplan/batch.py
++++ b/utterplan/batch.py
+@@ -56,6 +56,7 @@ class CompileOutcome:
+     plan_id: str | None = None
+     preparation_mode: str | None = None
+     repair_details: tuple[Diagnostic, ...] = ()
++    diagnostics: tuple[Diagnostic, ...] = ()
+     degraded_linguistics: bool | None = None
+     segments: int | None = None
+     repairs: int = 0
+@@ -250,6 +251,7 @@ def _compile_one(
+         repairs=len(repair_details),
+         repair_diagnostics=repair_diagnostics,
+         repair_details=repair_details,
++        diagnostics=tuple(result.diagnostics),
+         preparation_mode=result.preparation_mode,
+         degraded_linguistics=any(
+             diagnostic.code == "segmentation.token_metadata_degraded"
+@@ -406,6 +408,25 @@ def _write_report(
+         optional: dict[str, object | None] = {
+             "plan_id": outcome.plan_id,
+             "repair_count": outcome.repairs if outcome.status == "written" else None,
++            "diagnostic_count": len(outcome.diagnostics) if outcome.status == "written" else None,
++            "info_count": sum(item.severity == "info" for item in outcome.diagnostics)
++            if outcome.status == "written"
++            else None,
++            "warning_count": sum(item.severity == "warning" for item in outcome.diagnostics)
++            if outcome.status == "written"
++            else None,
++            "error_count": sum(item.severity == "error" for item in outcome.diagnostics)
++            if outcome.status == "written"
++            else None,
++            "renderability_repair_count": len(outcome.repair_diagnostics)
++            if outcome.status == "written"
++            else None,
++            "diagnostics": [
++                {key: value for key, value in diagnostic.to_dict().items() if value is not None}
++                for diagnostic in outcome.diagnostics
++            ]
++            if outcome.status == "written"
++            else None,
+             "repairs": [
+                 {key: value for key, value in diagnostic.to_dict().items() if value is not None}
+                 for diagnostic in outcome.repair_details
+diff --git a/utterplan/cli.py b/utterplan/cli.py
+index 79fc97b..c0bbd93 100644
+--- a/utterplan/cli.py
++++ b/utterplan/cli.py
+@@ -20,6 +20,7 @@ from .exceptions import PlanFormatError, PlanRenderabilityError, UtterPlanError
+ from .explain import format_explanation
+ from .migration import MigrationResult, migrate_plan_data
+ from .model import FlowPlan, PauseIntent
++from .preview import PreviewChunk, preview_plan
+ from .renderability import format_renderability_error
+ from .ssmdbook import (
+     SSMDBookError,
+@@ -37,6 +38,7 @@ _EXAMPLES = """examples:
+   utterplan compile-many chapters/*.ssmd --output-dir build/plans
+   utterplan compile-book chapters --chapters 5-17
+   utterplan validate chapter.utterplan.toml
++  utterplan preview chapter.utterplan.toml --chunk-by sentence --pause-policy native
+   utterplan inspect chapter.utterplan.toml --segment 0
+   utterplan inspect-attempt attempt.toml --issues
+   utterplan explain chapter.utterplan.toml
+@@ -149,6 +151,12 @@ def build_parser() -> argparse.ArgumentParser:
+     )
+     batch_parser.add_argument("--report", type=Path, help="TOML operational report path")
+
++    batch_parser.add_argument(
++        "--diagnostics",
++        choices=("warnings", "all", "none"),
++        default="warnings",
++        help="diagnostic detail verbosity (default: warnings)",
++    )
+     book_parser = commands.add_parser(
+         "compile-book",
+         help="compile selected chapters from an ssmdbook workspace",
+@@ -195,6 +203,12 @@ def build_parser() -> argparse.ArgumentParser:
+         "--fail-fast", action="store_true", help="skip remaining chapters after the first failure"
+     )
+     book_parser.add_argument("--report", type=Path, help="TOML operational report path")
++    book_parser.add_argument(
++        "--diagnostics",
++        choices=("warnings", "all", "none"),
++        default="warnings",
++        help="diagnostic detail verbosity (default: warnings)",
++    )
+     validate_parser = commands.add_parser(
+         "validate", help="validate a source document or saved semantic plan"
+     )
+@@ -231,6 +245,33 @@ def build_parser() -> argparse.ArgumentParser:
+         help="include IDs, offsets, provenance, and plan identity details",
+     )
+     explain_parser.add_argument("--trace", type=Path, help="optional compiler trace sidecar")
++    preview_parser = commands.add_parser(
++        "preview", help="project a saved plan into renderer-neutral downstream chunks"
++    )
++    preview_parser.add_argument("input", type=Path, help="saved schema-v7 .utterplan.toml plan")
++    preview_parser.add_argument(
++        "--segments",
++        metavar="SELECTOR",
++        help="global zero-based segment indexes: N, N-M, comma lists, or all",
++    )
++    preview_parser.add_argument(
++        "--chunk-by",
++        choices=("segment", "clause", "sentence", "paragraph"),
++        default="sentence",
++        help="downstream chunk grouping (default: sentence)",
++    )
++    preview_parser.add_argument(
++        "--pause-policy",
++        choices=("native", "automatic", "manual"),
++        default="native",
++        help="pause projection policy (default: native)",
++    )
++    preview_parser.add_argument(
++        "--details", action="store_true", help="show stored constituent segments and local facts"
++    )
++    preview_parser.add_argument(
++        "--json", action="store_true", help="emit stable machine-readable preview data"
++    )
+     inspect_parser = commands.add_parser("inspect", help="inspect a saved TTS plan")
+     inspect_parser.add_argument("input", type=Path)
+     inspect_parser.add_argument("--unit", type=int)
+@@ -398,6 +439,7 @@ def _run_compile_requests(
+     force: bool,
+     report_path: Path,
+     include_ids: bool = False,
++    diagnostics: Literal["warnings", "all", "none"] = "warnings",
+ ) -> int:
+     outcomes: list[CompileOutcome] = []
+     iterator = iter(
+@@ -419,33 +461,14 @@ def _run_compile_requests(
+         outcomes.append(outcome)
+         if outcome.status == "written":
+             written += 1
+-            for diagnostic in outcome.repair_diagnostics:
+-                location = (
+-                    f"{diagnostic.line}:{diagnostic.column}"
+-                    if diagnostic.line is not None and diagnostic.column is not None
+-                    else "source"
+-                )
+-                print(f"       repaired at {location}: {diagnostic.message}", file=sys.stderr)
+             if include_ids:
+                 mode = outcome.preparation_mode or "unknown"
+-                degraded = "yes" if outcome.degraded_linguistics else "no"
++                linguistics = "degraded" if outcome.degraded_linguistics else "full"
+                 print(
+-                    f"       preparation mode: {mode}; repairs: {outcome.repairs}; "
+-                    f"degraded linguistics: {degraded}",
++                    f"       preparation: {mode}; linguistics: {linguistics}",
+                     file=sys.stderr,
+                 )
+-                for diagnostic in outcome.repair_details:
+-                    if diagnostic.code == "planning.renderability.repaired":
+-                        continue
+-                    source_range = (
+-                        f"source[{diagnostic.source_start}:{diagnostic.source_end}]"
+-                        if diagnostic.source_start is not None and diagnostic.source_end is not None
+-                        else "source"
+-                    )
+-                    print(
+-                        f"       {diagnostic.code} at {source_range}: {diagnostic.message}",
+-                        file=sys.stderr,
+-                    )
++            _print_batch_diagnostics(outcome, verbosity=diagnostics)
+             print(f"       wrote {outcome.output}", file=sys.stderr)
+         elif outcome.status == "failed":
+             print("       FAILED", file=sys.stderr)
+@@ -491,6 +514,45 @@ def _run_compile_requests(
+     return 1 if failed else 0
+
+
++def _print_batch_diagnostics(
++    outcome: CompileOutcome,
++    *,
++    verbosity: Literal["warnings", "all", "none"],
++) -> None:
++    if verbosity == "all":
++        selected = outcome.diagnostics
++        labels = (("info", "info"), ("warning", "warnings"), ("error", "errors"))
++    elif verbosity == "warnings":
++        selected = tuple(
++            diagnostic
++            for diagnostic in outcome.diagnostics
++            if diagnostic.severity in {"warning", "error"}
++        )
++        labels = (("warning", "warnings"), ("error", "errors"))
++    else:
++        selected = tuple(
++            diagnostic for diagnostic in outcome.diagnostics if diagnostic.severity == "error"
++        )
++        labels = (("error", "errors"),)
++
++    for severity, label in labels:
++        count = sum(diagnostic.severity == severity for diagnostic in selected)
++        if count:
++            print(f"       {label}: {count}", file=sys.stderr)
++    for diagnostic in selected:
++        location = (
++            f"source[{diagnostic.source_start}:{diagnostic.source_end}]"
++            if diagnostic.source_start is not None and diagnostic.source_end is not None
++            else f"{diagnostic.line}:{diagnostic.column}"
++            if diagnostic.line is not None and diagnostic.column is not None
++            else "source"
++        )
++        print(
++            f"       {diagnostic.code} at {location}: {diagnostic.message}",
++            file=sys.stderr,
++        )
++
++
+ def _compile_many(args: argparse.Namespace) -> int:
+     sources: list[Path] = args.inputs
+     outputs = [args.output_dir / _batch_output_name(source) for source in sources]
+@@ -525,6 +587,7 @@ def _compile_many(args: argparse.Namespace) -> int:
+         fail_fast=args.fail_fast,
+         force=args.force,
+         report_path=report_path,
++        diagnostics=args.diagnostics,
+     )
+
+
+@@ -601,6 +664,7 @@ def _compile_book(args: argparse.Namespace) -> int:
+         force=args.force,
+         report_path=report_path,
+         include_ids=True,
++        diagnostics=args.diagnostics,
+     )
+
+
+@@ -825,6 +889,9 @@ def main(argv: list[str] | None = None) -> int:
+             _inspect_trace(loads_trace(args.input.read_text(encoding="utf-8")), args)
+             return 0
+         plan = _load_plan_file(args.input)
++        if args.command == "preview":
++            _preview(plan, args)
++            return 0
+         if args.command == "explain":
+             trace = loads_trace(args.trace.read_text(encoding="utf-8")) if args.trace else None
+             print(format_explanation(plan, details=args.details, trace=trace), end="")
+@@ -842,6 +909,128 @@ def main(argv: list[str] | None = None) -> int:
+         return 1
+
+
++def _preview(plan: FlowPlan, args: argparse.Namespace) -> None:
++    chunks = preview_plan(
++        plan,
++        segments=args.segments,
++        chunk_by=args.chunk_by,
++        pause_policy=args.pause_policy,
++    )
++    values: list[dict[str, object]] = []
++    for chunk in chunks:
++        value = chunk.to_dict()
++        if args.details:
++            value["constituents"] = _preview_constituents(plan, chunk)
++        values.append(value)
++
++    if args.json:
++        print(
++            json.dumps(
++                {
++                    "format": "utterplan-preview",
++                    "version": 1,
++                    "plan_id": plan.plan_id,
++                    "chunk_by": args.chunk_by,
++                    "pause_policy": args.pause_policy,
++                    "chunks": values,
++                },
++                ensure_ascii=False,
++                indent=2,
++                sort_keys=True,
++            )
++        )
++        return
++
++    for chunk in chunks:
++        suffix = _preview_pause_label(chunk, args.pause_policy)
++        line = f"[{chunk.index}] {json.dumps(chunk.text, ensure_ascii=False)}"
++        if suffix:
++            line += f"  {suffix}"
++        print(line)
++        if args.details:
++            print(f"    boundary.before: {', '.join(chunk.boundary_before) or '-'}")
++            print(f"    boundary.after:  {', '.join(chunk.boundary_after) or '-'}")
++            constituents = _preview_constituents(plan, chunk)
++            for ref, facts in zip(chunk.segments, constituents, strict=True):
++                segment = plan.flow[ref.unit_index].segments[ref.local_index]
++                print(
++                    f"    segment[{ref.global_index}] unit={ref.unit_index} local={ref.local_index}: "
++                    f"{json.dumps(segment.text, ensure_ascii=False)}"
++                )
++                for key in (
++                    "language",
++                    "pause_before",
++                    "pause_after",
++                    "directives",
++                    "tokens",
++                    "replacements",
++                    "markers",
++                    "heading",
++                ):
++                    value = facts.get(key)
++                    if value not in (None, [], {}):
++                        print(
++                            f"      {key}: {json.dumps(value, ensure_ascii=False, sort_keys=True)}"
++                        )
++
++
++def _preview_constituents(plan: FlowPlan, chunk: PreviewChunk) -> list[dict[str, object]]:
++    result: list[dict[str, object]] = []
++    for ref in chunk.segments:
++        segment = plan.flow[ref.unit_index].segments[ref.local_index]
++        result.append(
++            {
++                "ref": ref.to_dict(),
++                "text": segment.text,
++                "language": segment.language,
++                "boundary_before": list(segment.boundary_before),
++                "boundary_after": list(segment.boundary_after),
++                "pause_before": (
++                    segment.pause_before.to_dict() if segment.pause_before is not None else None
++                ),
++                "pause_after": (
++                    segment.pause_after.to_dict() if segment.pause_after is not None else None
++                ),
++                "directives": segment.directives.to_dict(),
++                "tokens": [token.to_dict() for token in segment.tokens],
++                "replacements": [replacement.to_dict() for replacement in segment.replacements],
++                "markers": list(segment.markers),
++                "heading": segment.heading,
++            }
++        )
++    return result
++
++
++def _preview_pause_label(chunk: PreviewChunk, policy: str) -> str:
++    labels: list[str] = []
++    before = chunk.authored_pause_before
++    after = chunk.authored_pause_after
++    if before is not None:
++        labels.append(f"pause.before.authored={_pause_label(before)}")
++    if after is not None:
++        labels.append(f"pause.authored={_pause_label(after)}")
++
++    automatic = chunk.automatic_pause
++    if automatic is not None:
++        boundary = automatic
++        if automatic == "clause" and chunk.text.rstrip().endswith(","):
++            boundary += " (comma)"
++        if policy == "manual":
++            if after is not None and after.type != "none":
++                labels.append(f"boundary={boundary}")
++            else:
++                labels.append(f"pause={boundary}")
++        elif policy == "automatic":
++            labels.append(f"pause={boundary}")
++    return " ".join(labels)
++
++
++def _pause_label(pause: PauseIntent) -> str:
++    if pause.type == "timed":
++        return pause.time if pause.time is not None else "timed"
++    return pause.type
++
++
+ def _inspect(plan: FlowPlan, args: argparse.Namespace) -> None:
+     segments = [
+         (unit_index, segment_index, segment)
+diff --git a/utterplan/parsers.py b/utterplan/parsers.py
+index 242fe28..98c35ce 100644
+--- a/utterplan/parsers.py
++++ b/utterplan/parsers.py
+@@ -2,7 +2,7 @@ from __future__ import annotations
+
+ import re
+ from collections.abc import Mapping
+-from dataclasses import dataclass, field
++from dataclasses import dataclass, field, replace
+ from types import SimpleNamespace
+ from typing import Any, Literal
+
+@@ -190,6 +190,12 @@ class SSMDDocumentParser:
+             )
+             for i, (position, kind, attrs, source_start, source_end) in enumerate(recovered_audio)
+         )
++        parsed_source = ParsedDocument(
++            source_text=text,
++            structural_text=structural,
++            text_spans=text_spans,
++        )
++        annotations = normalize_ssmd_substitution_spans(parsed_source, annotations)
+         boundaries: list[BoundaryEvent] = []
+         markers: list[Marker] = []
+         warnings = [str(value) for value in parsed.warnings]
+@@ -353,6 +359,104 @@ def map_structural_span_to_source(
+     )
+
+
++def normalize_ssmd_substitution_spans(
++    parsed: ParsedDocument,
++    annotations: tuple[AnnotationSpan, ...],
++) -> tuple[AnnotationSpan, ...]:
++    """Exclude parser-inserted edge whitespace only when source mapping proves ownership."""
++    normalized: list[AnnotationSpan] = []
++    for annotation in annotations:
++        if "sub" not in annotation.attrs:
++            normalized.append(annotation)
++            continue
++        start, end = annotation.structural_start, annotation.structural_end
++        if (
++            type(start) is not int
++            or type(end) is not int
++            or not 0 <= start < end <= len(parsed.structural_text)
++            or not _has_complete_structural_mapping(parsed, start, end)
++        ):
++            raise _ssmd_sub_span_ambiguous(annotation, "parser source mapping is incomplete")
++        source_start, source_end = map_structural_span_to_source(parsed, start, end)
++        if source_start is None or source_end is None:
++            raise _ssmd_sub_span_ambiguous(annotation, "parser source mapping is unavailable")
++        if (
++            type(annotation.source_start) is not int
++            or type(annotation.source_end) is not int
++            or not annotation.source_start <= source_start < source_end <= annotation.source_end
++        ):
++            raise _ssmd_sub_span_ambiguous(
++                annotation, "mapped target is outside the authored sub annotation"
++            )
++
++        structural_surface = parsed.structural_text[start:end]
++        source_surface = parsed.source_text[source_start:source_end]
++        if structural_surface == source_surface:
++            normalized.append(annotation)
++            continue
++
++        candidates: list[AnnotationSpan] = []
++        leading = 0
++        while leading < len(structural_surface) and structural_surface[leading].isspace():
++            leading += 1
++            if leading < len(structural_surface) and structural_surface[leading:] == source_surface:
++                candidates.append(replace(annotation, structural_start=start + leading))
++
++        trailing = 0
++        while (
++            trailing < len(structural_surface)
++            and structural_surface[len(structural_surface) - trailing - 1].isspace()
++        ):
++            trailing += 1
++            if (
++                trailing < len(structural_surface)
++                and structural_surface[:-trailing] == source_surface
++            ):
++                candidates.append(replace(annotation, structural_end=end - trailing))
++
++        if len(candidates) != 1:
++            raise _ssmd_sub_span_ambiguous(
++                annotation,
++                "edge whitespace cannot be distinguished safely from authored replacement text",
++            )
++        normalized.append(candidates[0])
++    return tuple(normalized)
++
++
++def _has_complete_structural_mapping(parsed: ParsedDocument, start: int, end: int) -> bool:
++    spans = sorted(
++        (
++            span
++            for span in parsed.text_spans
++            if 0 <= span.structural_start < span.structural_end <= len(parsed.structural_text)
++            and 0 <= span.source_start <= span.source_end <= len(parsed.source_text)
++        ),
++        key=lambda span: (span.structural_start, span.structural_end),
++    )
++    cursor = start
++    for span in spans:
++        if span.structural_end <= cursor:
++            continue
++        if span.structural_start > cursor:
++            return False
++        cursor = min(end, span.structural_end)
++        if cursor == end:
++            return True
++    return False
++
++
++def _ssmd_sub_span_ambiguous(annotation: AnnotationSpan, reason: str) -> PlanFormatError:
++    source_range = ""
++    if annotation.source_start is not None and annotation.source_end is not None:
++        source_range = f"; SSMD source range [{annotation.source_start}:{annotation.source_end})"
++    return PlanFormatError(
++        "SSMD sub annotation includes adjacent text that cannot be proven to belong "
++        f"to the replacement target ({reason}){source_range}",
++        code="preparation.ssmd_sub_span_ambiguous",
++        path=f"$.annotations.{annotation.id}",
++    )
++
++
+ _LEGACY_SCENE_BREAK = re.compile(r"(?m)^[ \t]*---[ \t]*(?:\r?\n(?:[ \t]*\r?\n)?)?")
+
+
+diff --git a/utterplan/planner.py b/utterplan/planner.py
+index 5666c10..7d15a2c 100644
+--- a/utterplan/planner.py
++++ b/utterplan/planner.py
+@@ -36,9 +36,11 @@ from .model import (
+     validate_plan_structure,
+ )
+ from .parsers import (
++    ParsedDocument,
+     PlainDocumentParser,
+     SSMDDocumentParser,
+     effective_sequence_fallback_mode,
++    map_structural_span_to_source,
+ )
+ from .pauses import boundary_is_materializable, resolve_edge_semantics
+ from .preparation import (
+@@ -229,14 +231,17 @@ class UtterancePlanner:
+             if ssmd_mode
+             else TTSReadyTextPreparer(sequence_fallback_mode=fallback_mode)
+         )
+-        prepared = preparer.prepare(
++        preparation_args = (
+             parsed.structural_text,
+             document_language,
+             source_runs,
+             parsed.annotations,
+             parsed.boundaries,
+-            analyses=pass_a,
+         )
++        if ssmd_mode:
++            prepared = preparer.prepare(*preparation_args, analyses=pass_a, parsed_document=parsed)
++        else:
++            prepared = preparer.prepare(*preparation_args, analyses=pass_a)
+         _notify_progress(
+             on_progress,
+             PlannerProgressEvent(kind="phase.completed", phase="preparation"),
+@@ -359,6 +364,13 @@ class UtterancePlanner:
+             and start < end
+         )
+         protected_ranges = tuple(sorted((*protected_audio_spans, *atomic_sub_spans)))
++        consumed_substitutions = frozenset(prepared.consumed_substitutions)
++        semantic_boundaries = _align_comma_clause_boundaries(spoken, semantic_boundaries)
++        comma_boundaries = _comma_clause_boundaries(spoken, protected_ranges, prepared.annotations)
++        if comma_boundaries:
++            semantic_boundaries, _ = _canonicalize_semantic_boundaries(
++                [*semantic_boundaries, *comma_boundaries]
++            )
+         topology = build_sentence_topology(
+             spoken,
+             runs,
+@@ -388,7 +400,10 @@ class UtterancePlanner:
+             )
+         boundaries.extend(_semantic_pause_events(semantic_boundaries, start_id=len(boundaries)))
+         hard_cut_positions, hard_cut_origins = _author_owned_cut_positions(
+-            runs, prepared.annotations, boundaries
++            runs,
++            prepared.annotations,
++            boundaries,
++            consumed_substitutions=consumed_substitutions,
+         )
+         segmentation_repairs: list[SegmentationRepair] = []
+         segments = _segment(
+@@ -404,6 +419,7 @@ class UtterancePlanner:
+             repairs=segmentation_repairs,
+             hard_cut_positions=hard_cut_positions,
+             hard_cut_origins=hard_cut_origins,
++            consumed_substitutions=consumed_substitutions,
+         )
+         tokens, linguistic_runs, token_repairs = _reconcile_hard_cut_token_evidence(
+             spoken,
+@@ -433,7 +449,7 @@ class UtterancePlanner:
+                 segment,
+                 prepared.annotations,
+                 voice_defaults=parsed.metadata.get("voice_defaults"),
+-                consumed_substitutions=frozenset(prepared.consumed_substitutions),
++                consumed_substitutions=consumed_substitutions,
+             )
+             for segment in segments
+         ]
+@@ -483,7 +499,7 @@ class UtterancePlanner:
+                         segment,
+                         prepared.annotations,
+                         voice_defaults=parsed.metadata.get("voice_defaults"),
+-                        consumed_substitutions=frozenset(prepared.consumed_substitutions),
++                        consumed_substitutions=consumed_substitutions,
+                     )
+                     for segment in segments
+                 ]
+@@ -557,7 +573,7 @@ class UtterancePlanner:
+         )
+         diagnostics = list(parsed.diagnostics)
+         diagnostics.extend(
+-            _segmentation_repair_diagnostic(repair, prepared.source_map)
++            _segmentation_repair_diagnostic(repair, prepared.source_map, parsed)
+             for repair in (*topology.repairs, *segmentation_repairs)
+         )
+         diagnostics.extend(
+@@ -804,6 +820,8 @@ def _author_owned_cut_positions(
+     runs: tuple[LanguageRun, ...],
+     annotations: tuple[AnnotationSpan, ...],
+     boundaries: list[BoundaryEvent],
++    *,
++    consumed_substitutions: frozenset[str],
+ ) -> tuple[set[int], dict[int, str]]:
+     positions: set[int] = set()
+     origins: dict[int, str] = {}
+@@ -827,7 +845,9 @@ def _author_owned_cut_positions(
+         elif boundary.kind == "paragraph":
+             add(boundary.position, "paragraph")
+     for annotation in annotations:
+-        if not (_semantic_annotation(annotation) or _audio_annotation(annotation)):
++        if not _annotation_requires_segment_edges(
++            annotation, consumed_substitutions=consumed_substitutions
++        ):
+             continue
+         origin = (
+             "audio"
+@@ -1028,6 +1048,7 @@ def _segment(
+     repairs: list[SegmentationRepair],
+     hard_cut_positions: set[int],
+     hard_cut_origins: dict[int, str],
++    consumed_substitutions: frozenset[str],
+ ) -> list[PlanSegment]:
+     base_segments = _segment_sentence_parts(
+         text,
+@@ -1041,6 +1062,7 @@ def _segment(
+         repairs=repairs,
+         hard_cut_positions=hard_cut_positions,
+         hard_cut_origins=hard_cut_origins,
++        consumed_substitutions=consumed_substitutions,
+     )
+     base_segments = _reconcile_non_speech_gaps(
+         text, base_segments, topology, runs, boundaries, default_language
+@@ -1072,6 +1094,7 @@ def _segment_sentence_parts(
+     repairs: list[SegmentationRepair],
+     hard_cut_positions: set[int],
+     hard_cut_origins: dict[int, str],
++    consumed_substitutions: frozenset[str],
+ ) -> list[PlanSegment]:
+     result: list[PlanSegment] = []
+     for part in topology.parts:
+@@ -1141,7 +1164,9 @@ def _segment_sentence_parts(
+                         )
+                     )
+         for annotation in annotations:
+-            if not _semantic_annotation(annotation):
++            if not _annotation_requires_segment_edges(
++                annotation, consumed_substitutions=consumed_substitutions
++            ):
+                 continue
+             for annotation_position in (annotation.spoken_start, annotation.spoken_end):
+                 if annotation_position is None or not start < annotation_position < end:
+@@ -1238,6 +1263,7 @@ def _segment_sentence_parts(
+         result,
+         boundaries=boundaries,
+         annotations=annotations,
++        consumed_substitutions=consumed_substitutions,
+     )
+
+
+@@ -1329,6 +1355,16 @@ def _normalize_semantic_cuts(
+         ordered = sorted(cuts)
+         changed = False
+         for left, right in zip(ordered, ordered[1:], strict=False):
++            if not text[left:right].strip():
++                if left in semantic_cuts and left not in hard_cuts:
++                    cuts.remove(left)
++                    changed = True
++                    break
++                if right in semantic_cuts and right not in hard_cuts:
++                    cuts.remove(right)
++                    changed = True
++                    break
++                continue
+             if not _is_neutral_punctuation_text(text[left:right]):
+                 continue
+             if left in semantic_cuts and left not in hard_cuts:
+@@ -1349,6 +1385,7 @@ def _coalesce_neutral_punctuation_segments(
+     *,
+     boundaries: list[BoundaryEvent],
+     annotations: tuple[AnnotationSpan, ...],
++    consumed_substitutions: frozenset[str],
+ ) -> list[PlanSegment]:
+     active_pause_positions = {
+         boundary.position for boundary in boundaries if boundary_is_materializable(boundary)
+@@ -1368,7 +1405,9 @@ def _coalesce_neutral_punctuation_segments(
+     semantic_positions = {
+         position
+         for annotation in annotations
+-        if _semantic_annotation(annotation)
++        if _annotation_requires_segment_edges(
++            annotation, consumed_substitutions=consumed_substitutions
++        )
+         and not _language_annotation(annotation)
+         and not _audio_annotation(annotation)
+         for position in (annotation.spoken_start, annotation.spoken_end)
+@@ -1871,6 +1910,97 @@ def _normalize_clause_split_position(text: str, start: int, end: int) -> int:
+     return position
+
+
++def _align_comma_clause_boundaries(
++    text: str, boundaries: list[SemanticBoundary]
++) -> list[SemanticBoundary]:
++    aligned: list[SemanticBoundary] = []
++    for boundary in boundaries:
++        position = boundary.position
++        if boundary.kind != "clause" or not 0 < position <= len(text) or text[position - 1] != ",":
++            aligned.append(boundary)
++            continue
++        cut = position
++        while cut < len(text) and text[cut] in " \t":
++            cut += 1
++        attrs = dict(boundary.attrs)
++        attrs.setdefault("automatic_pause_candidate", True)
++        attrs.setdefault("separator_kind", "comma")
++        aligned.append(replace(boundary, position=cut, attrs=attrs))
++    return aligned
++
++
++def _comma_clause_boundaries(
++    text: str,
++    protected_ranges: tuple[tuple[int, int], ...],
++    annotations: tuple[AnnotationSpan, ...],
++) -> list[SemanticBoundary]:
++    """Add safe, soft clause opportunities after commas between lexical content."""
++    result: list[SemanticBoundary] = []
++    for comma, character in enumerate(text):
++        if character != ",":
++            continue
++        left = _nearest_lexical_character(text, comma - 1, step=-1)
++        right_index = _nearest_lexical_index(text, comma + 1, step=1)
++        if (
++            left is None
++            or right_index is None
++            or "\n" in text[comma + 1 : right_index]
++            or "\r" in text[comma + 1 : right_index]
++        ):
++            continue
++        right = text[right_index]
++        if not right.isalnum() or (left.isdigit() and right.isdigit()):
++            continue
++        if any(
++            annotation.spoken_end == comma
++            and (annotation.kind == "sub" or str(annotation.attrs.get("tag", "")).lower() == "sub")
++            for annotation in annotations
++        ):
++            continue
++        cut = comma + 1
++        while cut < len(text) and text[cut] in " \t":
++            cut += 1
++        if any(
++            start <= comma < end or start < cut < end or end == comma
++            for start, end in protected_ranges
++        ):
++            continue
++        result.append(
++            SemanticBoundary(
++                "",
++                cut,
++                "clause",
++                origin="planner",
++                attrs={"automatic_pause_candidate": True, "separator_kind": "comma"},
++            )
++        )
++    return result
++
++
++def _nearest_lexical_character(text: str, index: int, *, step: int) -> str | None:
++    while 0 <= index < len(text):
++        character = text[index]
++        if character.isalnum():
++            return character
++        if character.isspace() or character in ")]}»”’\"'":
++            index += step
++            continue
++        return None
++    return None
++
++
++def _nearest_lexical_index(text: str, index: int, *, step: int) -> int | None:
++    while 0 <= index < len(text):
++        character = text[index]
++        if character.isalnum():
++            return index
++        if character.isspace() or character in "([{«“‘\"'":
++            index += step
++            continue
++        return None
++    return None
++
++
+ def _canonicalize_semantic_boundaries(
+     boundaries: list[SemanticBoundary] | tuple[SemanticBoundary, ...],
+ ) -> tuple[list[SemanticBoundary], dict[str, str]]:
+@@ -2142,12 +2272,16 @@ def _repair_renderer_segments(
+ def _segmentation_repair_diagnostic(
+     repair: SegmentationRepair,
+     source_map: SourceToSpokenMap,
++    parsed: ParsedDocument,
+ ) -> Diagnostic:
+     source_start = source_end = None
+     if repair.spoken_start is not None and repair.spoken_end is not None:
+-        source_start, source_end = source_map.map_output_span(
++        structural_start, structural_end = source_map.map_output_span(
+             repair.spoken_start, repair.spoken_end
+         )
++        source_start, source_end = map_structural_span_to_source(
++            parsed, structural_start, structural_end
++        )
+     severity = (
+         "warning"
+         if repair.code.startswith("segmentation.phrasplit_")
+@@ -2188,6 +2322,22 @@ def _language_annotation(annotation: AnnotationSpan) -> bool:
+     )
+
+
++def _annotation_requires_segment_edges(
++    annotation: AnnotationSpan,
++    *,
++    consumed_substitutions: frozenset[str],
++) -> bool:
++    tag = str(annotation.attrs.get("tag") or annotation.kind).lower().replace("_", "-")
++    is_substitution = (
++        annotation.kind.lower().replace("_", "-") == "sub"
++        or tag == "sub"
++        or "sub" in annotation.attrs
++    )
++    if annotation.id in consumed_substitutions and is_substitution:
++        return False
++    return _semantic_annotation(annotation) or _audio_annotation(annotation)
++
++
+ def _semantic_annotation(annotation: AnnotationSpan) -> bool:
+     tag = str(annotation.attrs.get("tag") or annotation.kind).lower().replace("_", "-")
+     if tag in {
+diff --git a/utterplan/preparation.py b/utterplan/preparation.py
+index a6c6fde..8d7cef7 100644
+--- a/utterplan/preparation.py
++++ b/utterplan/preparation.py
+@@ -10,6 +10,7 @@ if TYPE_CHECKING:
+ from .exceptions import PlanFormatError, TextPreparationError
+ from .language import LanguageRun, language_lookup_key
+ from .model import AnnotationSpan, BoundaryEvent, TextPreparationInfo
++from .parsers import ParsedDocument, normalize_ssmd_substitution_spans
+
+
+ class SourceToSpokenMap(Protocol):
+@@ -42,8 +43,27 @@ class SSMDSubstitutionPreparer:
+         annotations: tuple[AnnotationSpan, ...] = (),
+         boundaries: tuple[BoundaryEvent, ...] = (),
+         analyses: tuple[Any, ...] = (),
++        parsed_document: ParsedDocument | None = None,
+     ) -> PreparedText:
+         del analyses  # SSMD substitutions do not need source linguistic analysis.
++        if parsed_document is not None:
++            if parsed_document.structural_text != text:
++                raise TextPreparationError("SSMD source mapping does not match structural text")
++            annotations = normalize_ssmd_substitution_spans(parsed_document, annotations)
++        else:
++            for annotation in annotations:
++                if "sub" not in annotation.attrs:
++                    continue
++                start, end = annotation.structural_start, annotation.structural_end
++                if type(start) is int and type(end) is int and 0 <= start < end <= len(text):
++                    target = text[start:end]
++                    if target[0].isspace() or target[-1].isspace():
++                        raise PlanFormatError(
++                            "SSMD sub annotation includes adjacent text that cannot be proven "
++                            "to belong to the replacement target without a parser source mapping",
++                            code="preparation.ssmd_sub_span_ambiguous",
++                            path=f"$.annotations.{annotation.id}",
++                        )
+         active_runs = runs or (LanguageRun("lang-0", 0, len(text), language),)
+         _validate_run_coverage(text, active_runs)
+
+diff --git a/utterplan/preview.py b/utterplan/preview.py
+new file mode 100644
+index 0000000..b163837
+--- /dev/null
++++ b/utterplan/preview.py
+@@ -0,0 +1,255 @@
++"""Pure, renderer-neutral projections of saved FlowPlans into downstream chunks."""
++
++from __future__ import annotations
++
++import re
++from dataclasses import dataclass
++from typing import Literal
++
++from .boundaries import BoundaryKind, canonicalize_boundary_kinds
++from .model import FlowPlan, FlowSegment, PauseIntent
++
++ChunkMode = Literal["segment", "clause", "sentence", "paragraph"]
++PausePolicy = Literal["native", "automatic", "manual"]
++
++_SELECTOR_ITEM = re.compile(r"(?:\d+|\d+-\d+)\Z")
++
++
++@dataclass(frozen=True, slots=True)
++class SegmentRef:
++    """A stable zero-based location for one saved segment in flow order."""
++
++    global_index: int
++    unit_index: int
++    local_index: int
++
++    def to_dict(self) -> dict[str, int]:
++        return {
++            "global_index": self.global_index,
++            "unit_index": self.unit_index,
++            "local_index": self.local_index,
++        }
++
++
++@dataclass(frozen=True, slots=True)
++class PreviewChunk:
++    """A read-only projection of one or more stored segments."""
++
++    index: int
++    text: str
++    segments: tuple[SegmentRef, ...]
++    boundary_before: tuple[BoundaryKind, ...]
++    boundary_after: tuple[BoundaryKind, ...]
++    authored_pause_before: PauseIntent | None
++    authored_pause_after: PauseIntent | None
++    automatic_pause: str | None
++
++    def to_dict(self) -> dict[str, object]:
++        """Return stable JSON-compatible data without rewriting local plan spans."""
++        return {
++            "index": self.index,
++            "text": self.text,
++            "segments": [item.to_dict() for item in self.segments],
++            "boundary_before": list(self.boundary_before),
++            "boundary_after": list(self.boundary_after),
++            "authored_pause_before": (
++                self.authored_pause_before.to_dict()
++                if self.authored_pause_before is not None
++                else None
++            ),
++            "authored_pause_after": (
++                self.authored_pause_after.to_dict()
++                if self.authored_pause_after is not None
++                else None
++            ),
++            "automatic_pause": self.automatic_pause,
++        }
++
++
++@dataclass(frozen=True, slots=True)
++class _IndexedSegment:
++    ref: SegmentRef
++    segment: FlowSegment
++
++
++def resolve_segment_selector(selector: str | None, segment_count: int) -> frozenset[int] | None:
++    """Resolve a zero-based ``N,N-M,...`` selector; ``None`` means all segments."""
++    if type(segment_count) is not int or segment_count < 0:
++        raise ValueError("segment_count must be a non-negative integer")
++    if selector is None or selector == "all":
++        return None
++    if not isinstance(selector, str) or not selector.strip():
++        raise ValueError("segment selector must be a non-empty selector or 'all'")
++
++    selected: set[int] = set()
++    for raw_item in selector.split(","):
++        item = raw_item.strip()
++        if not item or _SELECTOR_ITEM.fullmatch(item) is None:
++            raise ValueError(f"invalid segment selector item: {raw_item!r}")
++        if "-" in item:
++            first_text, last_text = item.split("-", 1)
++            first, last = int(first_text), int(last_text)
++            if first > last:
++                raise ValueError(f"segment range is reversed: {item!r}")
++            indexes = range(first, last + 1)
++        else:
++            indexes = (int(item),)
++        for index in indexes:
++            if index >= segment_count:
++                raise ValueError(
++                    f"segment index {index} is out of range for {segment_count} stored segments"
++                )
++            selected.add(index)
++    return frozenset(selected)
++
++
++def preview_plan(
++    plan: FlowPlan,
++    *,
++    segments: str | None = None,
++    chunk_by: ChunkMode = "sentence",
++    pause_policy: PausePolicy = "native",
++) -> tuple[PreviewChunk, ...]:
++    """Project a saved plan into chunks without changing its stored content or identity.
++
++    Chunk grouping and pause realization are independent. Selection indexes refer to
++    the global zero-based flow-order segment list, and selected segments retain their
++    complete containing chunks.
++    """
++    if chunk_by not in {"segment", "clause", "sentence", "paragraph"}:
++        raise ValueError(f"unsupported chunk mode: {chunk_by!r}")
++    if pause_policy not in {"native", "automatic", "manual"}:
++        raise ValueError(f"unsupported pause policy: {pause_policy!r}")
++
++    indexed = tuple(
++        _IndexedSegment(SegmentRef(global_index, unit_index, local_index), segment)
++        for global_index, (unit_index, local_index, segment) in enumerate(
++            (unit_index, local_index, segment)
++            for unit_index, unit in enumerate(plan.flow)
++            for local_index, segment in enumerate(unit.segments)
++        )
++    )
++    focus = resolve_segment_selector(segments, len(indexed))
++    groups = _group_segments(indexed, chunk_by)
++    result: list[PreviewChunk] = []
++    for group in groups:
++        first_index = group[0].ref.global_index
++        last_index = group[-1].ref.global_index
++        before = (
++            _edge_boundaries(indexed[first_index - 1], group[0])
++            if first_index
++            else canonicalize_boundary_kinds(group[0].segment.boundary_before)
++        )
++        after = (
++            _edge_boundaries(group[-1], indexed[last_index + 1])
++            if last_index + 1 < len(indexed)
++            else canonicalize_boundary_kinds(group[-1].segment.boundary_after)
++        )
++        authored_before = _authored_pause_at_edge(
++            indexed[first_index - 1] if first_index else None, group[0]
++        )
++        authored_after = _authored_pause_at_edge(
++            group[-1], indexed[last_index + 1] if last_index + 1 < len(indexed) else None
++        )
++        automatic_pause = _automatic_pause(
++            after,
++            pause_policy=pause_policy,
++            authored_pause=authored_after,
++            at_plan_end=last_index == len(indexed) - 1,
++        )
++        chunk = PreviewChunk(
++            index=len(result),
++            text="".join(item.segment.text for item in group),
++            segments=tuple(item.ref for item in group),
++            boundary_before=before,
++            boundary_after=after,
++            authored_pause_before=authored_before,
++            authored_pause_after=authored_after,
++            automatic_pause=automatic_pause,
++        )
++        if focus is None or any(item.global_index in focus for item in chunk.segments):
++            result.append(chunk)
++    return tuple(result)
++
++
++def _group_segments(
++    indexed: tuple[_IndexedSegment, ...], chunk_by: ChunkMode
++) -> tuple[tuple[_IndexedSegment, ...], ...]:
++    if chunk_by == "segment":
++        return tuple((item,) for item in indexed)
++    if chunk_by == "paragraph":
++        by_unit: dict[int, list[_IndexedSegment]] = {}
++        for item in indexed:
++            by_unit.setdefault(item.ref.unit_index, []).append(item)
++        return tuple(tuple(by_unit[index]) for index in sorted(by_unit))
++
++    groups: list[tuple[_IndexedSegment, ...]] = []
++    current: list[_IndexedSegment] = []
++    closing_kinds = (
++        {"clause", "sentence", "paragraph"} if chunk_by == "clause" else {"sentence", "paragraph"}
++    )
++    for index, item in enumerate(indexed):
++        current.append(item)
++        if index + 1 < len(indexed) and closing_kinds.intersection(
++            _edge_boundaries(item, indexed[index + 1])
++        ):
++            groups.append(tuple(current))
++            current = []
++    if current:
++        groups.append(tuple(current))
++    return tuple(groups)
++
++
++def _edge_boundaries(
++    previous: _IndexedSegment, following: _IndexedSegment
++) -> tuple[BoundaryKind, ...]:
++    values = (*previous.segment.boundary_after, *following.segment.boundary_before)
++    if previous.ref.unit_index != following.ref.unit_index:
++        values = (*values, "paragraph")
++    return canonicalize_boundary_kinds(values)
++
++
++def _authored_pause_at_edge(
++    previous: _IndexedSegment | None, following: _IndexedSegment | None
++) -> PauseIntent | None:
++    after = previous.segment.pause_after if previous is not None else None
++    before = following.segment.pause_before if following is not None else None
++    if isinstance(before, PauseIntent):
++        return before
++    if isinstance(after, PauseIntent):
++        return after
++    return None
++
++
++def _automatic_pause(
++    boundary_after: tuple[BoundaryKind, ...],
++    *,
++    pause_policy: PausePolicy,
++    authored_pause: PauseIntent | None,
++    at_plan_end: bool,
++) -> str | None:
++    if pause_policy == "native":
++        return None
++    if authored_pause is not None and authored_pause.type == "none":
++        return None
++    if pause_policy == "automatic" and authored_pause is not None:
++        return None
++
++    available = set(boundary_after)
++    if at_plan_end:
++        # End-of-flow is an implicit sentence-completion edge; no punctuation scan is needed.
++        available.add("sentence")
++    for kind in ("paragraph", "sentence", "clause"):
++        if kind in available:
++            return kind
++    return None
++
++
++__all__ = [
++    "ChunkMode",
++    "PausePolicy",
++    "PreviewChunk",
++    "SegmentRef",
++    "preview_plan",
++    "resolve_segment_selector",
++]

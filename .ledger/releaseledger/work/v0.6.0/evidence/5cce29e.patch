@@ -1,0 +1,459 @@
+ README.md                      |  1 +
+ docs/architecture.md           |  1 -
+ docs/ssmdbook.md               |  1 -
+ tests/test_cli_render_book.py  | 78 +++++++++++++++++++++++++++---------------
+ tests/test_renderplan_batch.py | 27 +++++++--------
+ utterplan/cli.py               | 57 +++++++++++++++++++++++-------
+ utterplan/renderplan_batch.py  | 24 ++++++++++---
+ 7 files changed, 128 insertions(+), 61 deletions(-)
+
+diff --git a/README.md b/README.md
+index 8e5774a..ab7dc2b 100644
+--- a/README.md
++++ b/README.md
+@@ -61,6 +61,7 @@ utterplan/
+ ```
+
+ Omit `--chapters` to compile all manifest chapters. Use comma-separated source-number selections for non-contiguous ranges, for example `utterplan compile-book chapters --chapters 1,3-5`. `--diagnostics warnings|all|none` defaults to warnings; failures are always shown and reports retain complete diagnostics. The book root itself is also accepted as input; see the [SSMDBook guide](docs/ssmdbook.md).
++
+ ## From an SSMDBook to RenderPlans
+
+ UtterPlan keeps one canonical semantic plan per chapter. A RenderProfile is a
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 44f5114..b2c8e89 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -89,7 +89,6 @@ Migration is not planning. Registered data-only steps cover the sequential v1 ->
+
+ `compile-many` orchestrates independent source documents in order. Each successful FlowPlan is validated and atomically saved before the next source is processed; ordinary failures are reported and later inputs continue unless fail-fast is requested. Its TOML report is operational data, not a FlowPlan.
+
+-
+ ## Book-level RenderPlan projection boundary
+
+ The SSMDBook workflow composes per-file operations without creating a combined
+diff --git a/docs/ssmdbook.md b/docs/ssmdbook.md
+index f7556fb..3e7ec82 100644
+--- a/docs/ssmdbook.md
++++ b/docs/ssmdbook.md
+@@ -75,7 +75,6 @@ Compilation always uses paragraph-local flow units; `compile-book` has no render
+
+ Chapter input is SSMD by contract, so `compile-book` deliberately has no `--input-format` option. When no `--language` is supplied, a selected chapter must declare its language in SSMD metadata.
+
+-
+ ## From semantic chapter plans to RenderPlan variants
+
+ The complete file-based workflow keeps UtterPlans renderer-neutral while allowing
+diff --git a/tests/test_cli_render_book.py b/tests/test_cli_render_book.py
+index c85f426..d6b78b9 100644
+--- a/tests/test_cli_render_book.py
++++ b/tests/test_cli_render_book.py
+@@ -80,9 +80,7 @@ def _write_book(
+ def _profile(path: Path, voice: str = "amy") -> RenderProfile:
+     profile = RenderProfile(
+         roles={
+-            "narrator": RoleProfile(
+-                language="en-US", binding={"engine": "fixture", "voice": voice}
+-            )
++            "narrator": RoleProfile(language="en-US", binding={"engine": "fixture", "voice": voice})
+         },
+         default_role="narrator",
+         planning=PlanningPolicy(split="sentence", capacity_fallback=("token",)),
+@@ -169,7 +167,10 @@ def test_render_book_success_matches_single_file_projection(tmp_path: Path, caps
+         plan_path = variant / chapter.renderplan
+         plan = renderplan_codec.load_plan(plan_path)
+         assert plan.render_profile_id == loaded_set.profile_id
+-        assert chapter.source_plan_id == FlowPlan.load(root / "utterplan" / f"{chapter.id}.utterplan.toml").plan_id
++        assert (
++            chapter.source_plan_id
++            == FlowPlan.load(root / "utterplan" / f"{chapter.id}.utterplan.toml").plan_id
++        )
+         assert chapter.render_plan_id == plan.plan_id
+
+     report = _report(report_path)
+@@ -183,9 +184,19 @@ def test_render_book_success_matches_single_file_projection(tmp_path: Path, caps
+
+     source_plan = root / "utterplan/chapter-0005.utterplan.toml"
+     single_output = tmp_path / "chapter-0005.single.renderplan.toml"
+-    assert main(
+-        ["render-plan", str(source_plan), "--profile", str(profile_path), "-o", str(single_output)]
+-    ) == 0
++    assert (
++        main(
++            [
++                "render-plan",
++                str(source_plan),
++                "--profile",
++                str(profile_path),
++                "-o",
++                str(single_output),
++            ]
++        )
++        == 0
++    )
+     batch_plan = renderplan_codec.load_plan(variant / "chapter-0005.renderplan.toml")
+     single_plan = renderplan_codec.load_plan(single_output)
+     assert batch_plan == single_plan
+@@ -233,7 +244,10 @@ def test_different_profile_id_creates_independent_variant(tmp_path: Path, capsys
+     assert amy_variant != joe_variant
+     assert (amy_variant / "chapter-0005.renderplan.toml").read_bytes() == amy_plan_bytes
+     assert load_renderplan_set(joe_variant / "renderplan-set.toml").profile_id == joe.profile_id
+-    assert renderplan_codec.load_profile(joe_variant / "renderprofile.toml").profile_id == joe.profile_id
++    assert (
++        renderplan_codec.load_profile(joe_variant / "renderprofile.toml").profile_id
++        == joe.profile_id
++    )
+
+
+ @pytest.mark.parametrize(
+@@ -261,11 +275,15 @@ def test_render_book_missing_plan_continues_or_skips(
+     variant = _variant(root, profile, "failfast" if fail_fast else "narration")
+
+     assert result == 1
+-    assert [item["status"] for item in _report(variant / "render-report.toml")["item"]] == expected_statuses
++    assert [
++        item["status"] for item in _report(variant / "render-report.toml")["item"]
++    ] == expected_statuses
+     report = _report(variant / "render-report.toml")
+     assert report["item"][1]["code"] == "input.missing"
+     assert report["item"][1]["stage"] == "load"
+-    assert [chapter.id for chapter in load_renderplan_set(variant / "renderplan-set.toml").chapters] == expected_set
++    assert [
++        chapter.id for chapter in load_renderplan_set(variant / "renderplan-set.toml").chapters
++    ] == expected_set
+     if not fail_fast:
+         assert "RenderPlans are already saved" in captured.err
+
+@@ -301,7 +319,9 @@ def test_render_book_force_replaces_only_after_success(tmp_path: Path, capsys) -
+     assert renderplan_codec.load_plan(output).speech[0].text == changed_text
+
+
+-def test_render_book_supports_custom_roots_and_sanitizes_variant_label(tmp_path: Path, capsys) -> None:
++def test_render_book_supports_custom_roots_and_sanitizes_variant_label(
++    tmp_path: Path, capsys
++) -> None:
+     root = _write_book(tmp_path / "custom.ssmdbook", (5,))
+     custom_plans = tmp_path / "generated-plans"
+     _write_book(root, (5,), utterplan_dir=custom_plans)
+@@ -329,7 +349,10 @@ def test_render_book_supports_custom_roots_and_sanitizes_variant_label(tmp_path:
+     expected_utterplan = Path(
+         os.path.relpath(custom_plans / "chapter-0005.utterplan.toml", start=variant)
+     ).as_posix()
+-    assert load_renderplan_set(variant / "renderplan-set.toml").chapters[0].utterplan == expected_utterplan
++    assert (
++        load_renderplan_set(variant / "renderplan-set.toml").chapters[0].utterplan
++        == expected_utterplan
++    )
+     assert not (tmp_path / "Book Audio").exists()
+
+
+@@ -343,18 +366,23 @@ def test_invalid_profile_and_unsafe_paths_do_not_create_outputs(tmp_path: Path,
+
+     profile_path = root / "narration.renderprofile.toml"
+     _profile(profile_path)
+-    assert _render(
+-        root,
+-        profile_path,
+-        "--chapters",
+-        "5",
+-        "--output-root",
+-        str(root / "chapters" / "generated"),
+-    ) == 2
++    assert (
++        _render(
++            root,
++            profile_path,
++            "--chapters",
++            "5",
++            "--output-root",
++            str(root / "chapters" / "generated"),
++        )
++        == 2
++    )
+     capsys.readouterr()
+     assert not (root / "chapters/generated").exists()
+
+-    assert _render(root, profile_path, "--chapters", "5", "--report", str(root / "manifest.json")) == 2
++    assert (
++        _render(root, profile_path, "--chapters", "5", "--report", str(root / "manifest.json")) == 2
++    )
+     capsys.readouterr()
+     assert not (root / "renderplan").exists()
+
+@@ -431,15 +459,11 @@ def test_existing_set_and_snapshot_mismatches_are_not_bypassed_by_force(
+     variant_b = _variant(root, profile_b, "shared")
+     shutil.copytree(variant_a, variant_b)
+
+-    assert _render(
+-        root, profile_b_path, "--chapters", "6", "--variant", "shared", "--force"
+-    ) == 2
++    assert _render(root, profile_b_path, "--chapters", "6", "--variant", "shared", "--force") == 2
+     assert "does not match the active RenderProfile" in capsys.readouterr().err
+     assert not (variant_b / "chapter-0006.renderplan.toml").exists()
+
+     renderplan_codec.save_profile(profile_b, variant_a / "renderprofile.toml")
+-    assert _render(
+-        root, profile_a_path, "--chapters", "6", "--variant", "shared", "--force"
+-    ) == 2
++    assert _render(root, profile_a_path, "--chapters", "6", "--variant", "shared", "--force") == 2
+     assert "snapshot identity" in capsys.readouterr().err
+     assert not (variant_a / "chapter-0006.renderplan.toml").exists()
+diff --git a/tests/test_renderplan_batch.py b/tests/test_renderplan_batch.py
+index 6c8b52a..86e6315 100644
+--- a/tests/test_renderplan_batch.py
++++ b/tests/test_renderplan_batch.py
+@@ -117,22 +117,19 @@ def test_renderplan_set_profile_and_snapshot_identity_are_verified(tmp_path: Pat
+     value = _set(original_profile)
+     identity = original_profile.profile_id or original_profile.computed_id()
+
+-    assert validate_renderplan_set_profile(
+-        value, snapshot, expected_profile_id=identity
+-    ) == original_profile
++    assert (
++        validate_renderplan_set_profile(value, snapshot, expected_profile_id=identity)
++        == original_profile
++    )
+
+     other_profile = _profile("other")
+     other_identity = other_profile.profile_id or other_profile.computed_id()
+     with pytest.raises(RenderPlanSetError, match="does not match the active"):
+-        validate_renderplan_set_profile(
+-            value, snapshot, expected_profile_id=other_identity
+-        )
++        validate_renderplan_set_profile(value, snapshot, expected_profile_id=other_identity)
+
+     other_set = _set(other_profile)
+     with pytest.raises(RenderPlanSetError, match="snapshot identity"):
+-        validate_renderplan_set_profile(
+-            other_set, snapshot, expected_profile_id=other_identity
+-        )
++        validate_renderplan_set_profile(other_set, snapshot, expected_profile_id=other_identity)
+
+
+ def test_load_renderplan_set_fails_closed_on_malformed_toml(tmp_path: Path) -> None:
+@@ -143,7 +140,6 @@ def test_load_renderplan_set_fails_closed_on_malformed_toml(tmp_path: Path) -> N
+         load_renderplan_set(path)
+
+
+-
+ def _request(root: Path, number: int, *, missing: bool = False) -> RenderRequest:
+     source_plan_path = root / "utterplan" / f"chapter-{number:04d}.utterplan.toml"
+     source_chapter_path = root / "chapters" / f"chapter-{number:04d}.ssmd.md"
+@@ -257,10 +253,9 @@ def test_render_batch_continues_or_skips_and_records_report(
+     assert report["skipped"] == expected.count("skipped")
+     assert report["item"][1]["stage"] == "load"
+     assert report["item"][1]["code"] == "input.missing"
+-    assert [chapter.id for chapter in load_renderplan_set(set_path).chapters] == ["chapter-0005"] + (
+-        ["chapter-0007"] if not fail_fast else []
+-    )
+-
++    assert [chapter.id for chapter in load_renderplan_set(set_path).chapters] == [
++        "chapter-0005"
++    ] + (["chapter-0007"] if not fail_fast else [])
+
+
+ def test_render_batch_protects_existing_output_unless_force_is_enabled(tmp_path: Path) -> None:
+@@ -322,7 +317,9 @@ def test_render_batch_reports_invalid_utterplan_input(tmp_path: Path) -> None:
+     assert load_renderplan_set(set_path).chapters == ()
+
+
+-@pytest.mark.parametrize("unsafe_path", ["../manifest.json", "/tmp/plan.toml", "a/../b.toml", "a\\b.toml"])
++@pytest.mark.parametrize(
++    "unsafe_path", ["../manifest.json", "/tmp/plan.toml", "a/../b.toml", "a\\b.toml"]
++)
+ def test_renderplan_set_rejects_renderplan_paths_outside_variant(unsafe_path: str) -> None:
+     original = _set()
+     chapter = replace(_chapter(), renderplan=unsafe_path)
+diff --git a/utterplan/cli.py b/utterplan/cli.py
+index c4c2310..79a7c00 100644
+--- a/utterplan/cli.py
++++ b/utterplan/cli.py
+@@ -343,10 +343,13 @@ def build_parser() -> argparse.ArgumentParser:
+         "--utterplan-dir", type=Path, help="directory of existing .utterplan.toml files"
+     )
+     render_book_parser.add_argument(
+-        "--output-root", type=Path, help="RenderPlan collection root (default: <ssmdbook>/renderplan)"
++        "--output-root",
++        type=Path,
++        help="RenderPlan collection root (default: <ssmdbook>/renderplan)",
+     )
+     render_book_parser.add_argument(
+-        "--variant", help="safe human-readable variant label (profile fingerprint is always appended)"
++        "--variant",
++        help="safe human-readable variant label (profile fingerprint is always appended)",
+     )
+     render_book_parser.add_argument(
+         "--force", action="store_true", help="replace only selected existing RenderPlan files"
+@@ -511,6 +514,7 @@ def _utterplan_output_name(source: Path) -> str:
+ def _renderplan_output_name(source: Path) -> str:
+     return _source_output_stem(source) + ".renderplan.toml"
+
++
+ def _planner_config_from_batch_args(args: argparse.Namespace) -> PlannerConfig:
+     return PlannerConfig(
+         language=args.language or "en-US",
+@@ -771,9 +775,13 @@ def _render_book(args: argparse.Namespace) -> int:
+     try:
+         utterplan_dir = utterplan_dir_arg.expanduser().resolve(strict=True)
+     except (OSError, RuntimeError) as exc:
+-        raise _CliUsageError(f"cannot resolve UtterPlan directory {utterplan_dir_arg}: {exc}") from exc
++        raise _CliUsageError(
++            f"cannot resolve UtterPlan directory {utterplan_dir_arg}: {exc}"
++        ) from exc
+     if not utterplan_dir.is_dir():
+-        raise _CliUsageError(f"UtterPlan directory does not exist or is not a directory: {utterplan_dir}")
++        raise _CliUsageError(
++            f"UtterPlan directory does not exist or is not a directory: {utterplan_dir}"
++        )
+
+     profile_input = args.profile.expanduser()
+     try:
+@@ -816,7 +824,9 @@ def _render_book(args: argparse.Namespace) -> int:
+     if variant_dir.exists() and not variant_dir.is_dir():
+         raise _CliUsageError(f"RenderPlan variant path is not a directory: {variant_dir}")
+     if _path_is_within(output_root, chapters_dir) or _path_is_within(variant_dir, chapters_dir):
+-        raise _CliUsageError("RenderPlan output root and variant must not be inside source chapters/")
++        raise _CliUsageError(
++            "RenderPlan output root and variant must not be inside source chapters/"
++        )
+     if _path_is_within(variant_dir, utterplan_dir):
+         raise _CliUsageError("RenderPlan variant must not be inside the active UtterPlan directory")
+
+@@ -849,9 +859,13 @@ def _render_book(args: argparse.Namespace) -> int:
+             except RenderPlanSetError as exc:
+                 raise _CliUsageError(f"invalid existing renderplan-set.toml: {exc}") from exc
+             if renderplan_set.variant != label:
+-                raise _CliUsageError("existing renderplan-set.toml variant does not match its directory")
++                raise _CliUsageError(
++                    "existing renderplan-set.toml variant does not match its directory"
++                )
+             if renderplan_set.snapshot != "renderprofile.toml":
+-                raise _CliUsageError("existing renderplan-set.toml does not use the canonical profile snapshot")
++                raise _CliUsageError(
++                    "existing renderplan-set.toml does not use the canonical profile snapshot"
++                )
+             try:
+                 validate_renderplan_set_profile(
+                     renderplan_set,
+@@ -874,13 +888,21 @@ def _render_book(args: argparse.Namespace) -> int:
+             try:
+                 nonempty = next(variant_dir.iterdir(), None) is not None
+             except OSError as exc:
+-                raise _CliUsageError(f"cannot inspect RenderPlan variant {variant_dir}: {exc}") from exc
++                raise _CliUsageError(
++                    f"cannot inspect RenderPlan variant {variant_dir}: {exc}"
++                ) from exc
+             if nonempty:
+                 raise _CliUsageError(
+                     f"refusing to adopt non-empty RenderPlan variant without a valid set index: {variant_dir}"
+                 )
+             renderplan_set = _new_renderplan_set(
+-                label, profile_id, profile_path, book.root, utterplan_dir, variant_dir, manifest_path
++                label,
++                profile_id,
++                profile_path,
++                book.root,
++                utterplan_dir,
++                variant_dir,
++                manifest_path,
+             )
+     else:
+         renderplan_set = _new_renderplan_set(
+@@ -891,13 +913,17 @@ def _render_book(args: argparse.Namespace) -> int:
+         try:
+             variant_dir.mkdir(parents=True)
+         except OSError as exc:
+-            raise _CliUsageError(f"cannot create RenderPlan variant directory {variant_dir}: {exc}") from exc
++            raise _CliUsageError(
++                f"cannot create RenderPlan variant directory {variant_dir}: {exc}"
++            ) from exc
+     if not set_path.exists():
+         try:
+             renderplan_codec.save_profile(profile, snapshot_path)
+             save_renderplan_set(set_path, renderplan_set)
+         except (OSError, ValueError, TypeError) as exc:
+-            raise _CliUsageError(f"cannot initialize RenderPlan variant {variant_dir}: {exc}") from exc
++            raise _CliUsageError(
++                f"cannot initialize RenderPlan variant {variant_dir}: {exc}"
++            ) from exc
+
+     print("UtterPlan book render", file=sys.stderr)
+     print(f"  workspace:  {book.root}", file=sys.stderr)
+@@ -913,7 +939,10 @@ def _render_book(args: argparse.Namespace) -> int:
+
+     def report_progress(outcome: RenderOutcome) -> None:
+         nonlocal written
+-        print(f"[{outcome.index}/{len(requests)}] {outcome.id}  {outcome.source_plan}", file=sys.stderr)
++        print(
++            f"[{outcome.index}/{len(requests)}] {outcome.id}  {outcome.source_plan}",
++            file=sys.stderr,
++        )
+         if outcome.status == "written":
+             written += 1
+             print(f"       wrote {outcome.output}", file=sys.stderr)
+@@ -985,7 +1014,9 @@ def _new_renderplan_set(
+
+
+ def _relative_path_reference(path: Path, base: Path) -> str:
+-    return Path(os.path.relpath(path.resolve(strict=False), start=base.resolve(strict=False))).as_posix()
++    return Path(
++        os.path.relpath(path.resolve(strict=False), start=base.resolve(strict=False))
++    ).as_posix()
+
+
+ def _render_variant_label(profile_path: Path, override: str | None) -> str:
+diff --git a/utterplan/renderplan_batch.py b/utterplan/renderplan_batch.py
+index cb6ccbf..53e18ed 100644
+--- a/utterplan/renderplan_batch.py
++++ b/utterplan/renderplan_batch.py
+@@ -161,7 +161,16 @@ def renderplan_set_from_dict(raw: Mapping[str, Any]) -> RenderPlanSet:
+     """Parse plain TOML data and strictly validate every supported set field."""
+     _check_keys(
+         raw,
+-        {"format", "version", "variant", "profile_fingerprint", "producer", "book", "profile", "chapter"},
++        {
++            "format",
++            "version",
++            "variant",
++            "profile_fingerprint",
++            "producer",
++            "book",
++            "profile",
++            "chapter",
++        },
+         "renderplan-set",
+     )
+     if raw.get("format") != RENDERPLAN_SET_FORMAT:
+@@ -227,7 +236,9 @@ def load_renderplan_set(path: str | Path) -> RenderPlanSet:
+     try:
+         raw = tomlkit.parse(source.read_text(encoding="utf-8")).unwrap()
+     except (OSError, UnicodeError, ParseError) as exc:
+-        raise RenderPlanSetError(f"cannot read renderplan set {source}: {exc}", code="index.read_failed") from exc
++        raise RenderPlanSetError(
++            f"cannot read renderplan set {source}: {exc}", code="index.read_failed"
++        ) from exc
+     if not isinstance(raw, Mapping):
+         raise RenderPlanSetError("renderplan-set root must be a table")
+     return renderplan_set_from_dict(raw)
+@@ -300,7 +311,9 @@ def _check_keys(raw: Mapping[str, Any], allowed: set[str], label: str) -> None:
+     if unknown:
+         raise RenderPlanSetError(f"{label} contains unknown field(s): {', '.join(sorted(unknown))}")
+     if missing:
+-        raise RenderPlanSetError(f"{label} is missing required field(s): {', '.join(sorted(missing))}")
++        raise RenderPlanSetError(
++            f"{label} is missing required field(s): {', '.join(sorted(missing))}"
++        )
+
+
+ def _table(value: Any, label: str) -> Mapping[str, Any]:
+@@ -690,7 +703,10 @@ def _write_render_report(
+         if outcome.error_message is not None:
+             item["message"] = outcome.error_message
+         items.append(item)
+-    counts = {status: sum(outcome.status == status for outcome in outcomes) for status in ("written", "failed", "skipped")}
++    counts = {
++        status: sum(outcome.status == status for outcome in outcomes)
++        for status in ("written", "failed", "skipped")
++    }
+     report = {
+         "format": "utterplan-render-report",
+         "version": 1,

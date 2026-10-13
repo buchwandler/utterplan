@@ -1,0 +1,983 @@
+ .github/workflows/tests.yml                  | 82 +++++++++++++++++++++++++++-
+ docs/architecture.md                         |  2 +-
+ docs/cli.md                                  |  2 +
+ docs/consumer-guide.md                       |  2 +-
+ docs/format.md                               |  2 +-
+ docs/index.md                                |  2 +-
+ docs/python-api.md                           | 22 +++++++-
+ pyproject.toml                               |  2 +-
+ tests/test_cli.py                            | 10 ++++
+ tests/test_cli_render_book.py                | 24 +++++++-
+ tests/test_golden.py                         |  8 +--
+ tests/test_renderplan_batch.py               | 17 +++---
+ tests/test_renderplan_dependency_contract.py | 22 ++++++++
+ tests/test_renderplan_export.py              | 52 ++++++++++++++++++
+ tests/test_renderplan_replan.py              | 40 ++++++++++++++
+ tests/test_schema_history.py                 |  9 ++-
+ tests/test_schema_registry.py                |  4 +-
+ tests/test_schema_v6_source.py               | 14 ++++-
+ tests/test_schema_v7.py                      | 20 ++++++-
+ tests/test_toml_format.py                    | 30 +++++++---
+ utterplan/__init__.py                        |  4 --
+ utterplan/cli.py                             | 16 ++++--
+ utterplan/exceptions.py                      |  7 +--
+ utterplan/model.py                           | 11 +++-
+ utterplan/serialization.py                   | 12 +---
+ utterplan/toml_codec.py                      | 33 +++--------
+ utterplan/versioning.py                      |  3 +-
+ 27 files changed, 365 insertions(+), 87 deletions(-)
+
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index 8ac1013..8e828fa 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -51,7 +51,7 @@ jobs:
+             "ssmd==0.9.3" \
+             "ttsready==0.2.3" \
+             "spokenform==0.4.5" \
+-            "renderplan==0.1.0" \
++            "renderplan==0.1.1" \
+             "typing_extensions==4.0.0" \
+             "tomlkit==0.13.0"
+           python -m pip install --no-deps -e .
+@@ -60,6 +60,26 @@ jobs:
+       - name: Run lower-bound tests
+         run: python -m pytest -q
+
++  latest-renderplan:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - name: Set up Python
++        uses: actions/setup-python@v5
++        with:
++          python-version: "3.13"
++      - name: Install latest supported dependencies
++        run: |
++          python -m pip install --upgrade pip
++          python -m pip install -e ".[dev]"
++      - name: Run RenderPlan integration tests
++        run: >-
++          python -m pytest -q
++          tests/test_renderplan_batch.py
++          tests/test_renderplan_export.py
++          tests/test_renderplan_replan.py
++          tests/test_cli_render_book.py
++          tests/test_renderplan_dependency_contract.py
+   package-smoke:
+     runs-on: ubuntu-latest
+     steps:
+@@ -100,7 +120,7 @@ jobs:
+               "phrasplit": ("0.3.9", "0.4"),
+               "ssmd": ("0.9.3", "0.10"),
+               "ttsready": ("0.2.3", "0.3"),
+-              "renderplan": ("0.1", "0.2"),
++              "renderplan": ("0.1.1", "0.2"),
+           }
+
+           def check_metadata(contents):
+@@ -149,8 +169,11 @@ jobs:
+             "$RUNNER_TEMP"/dist/utterplan-*.whl
+       - name: Run installed smoke checks
+         run: |
++          cd "$RUNNER_TEMP"
+           "$RUNNER_TEMP/utterplan-wheel-venv/bin/python" -c \
+             "import importlib.metadata as m; import utterplan; assert m.version('utterplan') == utterplan.__version__"
++          "$RUNNER_TEMP/utterplan-wheel-venv/bin/python" -c \
++            "import utterplan.renderplan_batch; from renderplan import RenderPlanSet"
+           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" --version
+           cat > "$RUNNER_TEMP/test.ssmd.md" <<'EOF'
+           ---
+@@ -166,6 +189,61 @@ jobs:
+             > "$RUNNER_TEMP/test.utterplan.toml"
+           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" validate \
+             "$RUNNER_TEMP/test.utterplan.toml"
++          BOOK="$RUNNER_TEMP/render-book.smoke.ssmdbook"
++          mkdir -p "$BOOK/chapters" "$BOOK/utterplan"
++          cat > "$BOOK/chapters/chapter-0001.ssmd.md" <<'EOF'
++          ---
++          ssmd_version: "0.9"
++          language: en-US
++          ---
++          Installed wheel render-book smoke.
++          EOF
++          cat > "$BOOK/manifest.json" <<'EOF'
++          {
++            "format": "ssmdconvert.book",
++            "schema_version": 1,
++            "ssmd_version": "0.9",
++            "chapters": [
++              {
++                "id": "chapter-0001",
++                "source_number": 1,
++                "path": "chapters/chapter-0001.ssmd.md",
++                "title": "Chapter 1"
++              }
++            ]
++          }
++          EOF
++          "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" compile \
++            "$BOOK/chapters/chapter-0001.ssmd.md" --lang en-us --text-preparation identity \
++            -o "$BOOK/utterplan/chapter-0001.utterplan.toml"
++          "$RUNNER_TEMP/utterplan-wheel-venv/bin/python" - "$BOOK/narration.renderprofile.toml" <<'PY'
++          import sys
++          from pathlib import Path
++
++          from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
++          from renderplan import codec
++
++          profile = RenderProfile(
++              roles={"narrator": RoleProfile(language="en-US", binding={"engine": "smoke"})},
++              default_role="narrator",
++              planning=PlanningPolicy(split="sentence"),
++              pauses=PausePolicy(mode="manual"),
++          )
++          codec.save_profile(profile, Path(sys.argv[1]))
++          PY
++          "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" render-book \
++            "$BOOK" --profile "$BOOK/narration.renderprofile.toml" --chapters 1
++          "$RUNNER_TEMP/utterplan-wheel-venv/bin/python" - "$BOOK" <<'PY'
++          import sys
++          from pathlib import Path
++
++          from renderplan import load_renderplan_set
++
++          book = Path(sys.argv[1])
++          set_path = next((book / "renderplan").glob("*/renderplan-set.toml"))
++          renderplan_set = load_renderplan_set(set_path)
++          assert [chapter.id for chapter in renderplan_set.chapters] == ["chapter-0001"]
++          PY
+           cat > "$RUNNER_TEMP/test-0.8.ssmd.md" <<'EOF'
+           ---
+           ssmd_version: "0.8"
+diff --git a/docs/architecture.md b/docs/architecture.md
+index b2c8e89..a3005f3 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -75,7 +75,7 @@ Plan identity is deterministic and renderer-independent. The v7 `plan_id` includ
+
+ ## Persistence compatibility boundary
+
+-Current plans persist as deterministic `.utterplan.toml` files with schema v7; `FlowPlan.load()` accepts TOML only. The v7 TOML codec validates and constructs `FlowPlan`; v5/v6 codecs remain historical readers, while v6-to-v7 promotion requires recompiling source because legacy data cannot prove a complete boundary inventory. Schemas v5, v6, and v7 have no JSON Schema resources or JSON plan format. Frozen JSON Schema definitions for historical schemas v1–v4 remain under versioned resources.
++Current plans persist as deterministic `.utterplan.toml` files with schema v7; `FlowPlan.load()` accepts TOML only. The v7 TOML codec validates and constructs `FlowPlan`; v5/v6 codecs are migration-only and are never selected by normal loading. Normal load/decode and execution paths reject non-v7 schemas with `schema.version_unsupported` and direct users to recompile. Historical migration remains an explicit serialized-data operation; v6-to-v7 promotion requires recompiling source because legacy data cannot prove a complete boundary inventory. Schemas v5, v6, and v7 have no JSON Schema resources or JSON plan format. Frozen JSON Schema definitions for historical schemas v1–v4 remain under versioned resources.
+
+ ```text
+ current plan:
+diff --git a/docs/cli.md b/docs/cli.md
+index fe2bdc0..c154ea2 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -158,6 +158,8 @@ For the full editable-workspace behavior and examples, see the [SSMDBook guide](
+ UtterPlans for selected manifest chapters and writes one RenderPlan per chapter
+ for a shared RenderProfile.
+
++All ordinary load, validation, inspection, explanation, preview, and RenderPlan commands accept schema v7 only. Older plans fail with `schema.version_unsupported` and the guidance `This build accepts UtterPlan schema 7 only. Recompile the source with the current UtterPlan.` Use `utterplan migrate` only for the explicit serialized-data migration path; it is not invoked implicitly by normal loading.
++
+ ```text
+ utterplan render-book INPUT --profile PROFILE [--chapters SELECTOR]
+   [--utterplan-dir PATH] [--output-root PATH] [--variant LABEL]
+diff --git a/docs/consumer-guide.md b/docs/consumer-guide.md
+index db60c2b..6f537d5 100644
+--- a/docs/consumer-guide.md
++++ b/docs/consumer-guide.md
+@@ -10,7 +10,7 @@ UtterPlan accepts SSMD source syntax at version 0.9 only. Convert older source w
+
+ ## Importing legacy plans
+
+-Historical schemas retain their sequential data-only path through v6; v6-to-v7 migration refuses because it cannot reconstruct the complete boundary inventory, so recompile the original source. Import explicitly:
++Normal loading and execution accept schema v7 only. Historical schemas retain an explicit sequential, serialized-data migration path through v6; v6-to-v7 migration refuses because it cannot reconstruct the complete boundary inventory, so recompile the original source. Normal APIs reject older plans with `schema.version_unsupported`. Import explicitly:
+
+ ```bash
+ utterplan migrate old.utterplan.json --check
+diff --git a/docs/format.md b/docs/format.md
+index d4b56ec..3ebac2e 100644
+--- a/docs/format.md
++++ b/docs/format.md
+@@ -67,7 +67,7 @@ The v7 TOML codec is a deterministic human-oriented projection of `FlowPlan`, no
+
+ Frozen JSON Schema resources for v1, v2, v3, and v4 remain under `spec/schemas/` and their versioned package copies. They describe historical serialized semantic mappings, not current TOML syntax. Schemas v5, v6, and v7 deliberately have no JSON Schema resources or JSON plan-file format: validity is defined by their versioned `FlowPlan` models and TOML codecs. Historical files and fixtures remain versioned and immutable.
+
+-Historical plans retain sequential data-only migration steps from v1 through v6. The registered v6-to-v7 step refuses with `migration.recompile_required`, because v6 may omit renderer-dependent automatic boundaries. Earlier steps operate on serialized plain data only and never parse SSMD, invoke preparation or NLP, plan, call G2P, render, or process audio. The v4-to-v5 step verifies token ownership/coordinates and authored pause meaning rather than guessing; v5-to-v6 preserves compiled semantics without inventing source provenance. Recompile the original source to obtain a complete v7 boundary inventory.
++Historical plans retain sequential data-only migration steps from v1 through v6, available only through the explicit migration API/CLI. Normal decoding and execution do not invoke this chain: they reject non-v7 plans with `schema.version_unsupported`. The registered v6-to-v7 step refuses with `migration.recompile_required`, because v6 may omit renderer-dependent automatic boundaries. Earlier steps operate on serialized plain data only and never parse SSMD, invoke preparation or NLP, plan, call G2P, render, or process audio. The v4-to-v5 step verifies token ownership/coordinates and authored pause meaning rather than guessing; v5-to-v6 preserves compiled semantics without inventing source provenance. Recompile the original source to obtain a complete v7 boundary inventory.
+
+ Package version and plan schema version are independent. Historical schema files are never rewritten to match the package. Downgrades from v7 are not supported.
+
+diff --git a/docs/index.md b/docs/index.md
+index ab22cf1..41779e1 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -27,4 +27,4 @@ changelog
+ ```
+
+ The [SSMDBook guide](ssmdbook.md) covers workspace compilation and the profile-specific `render-book` workflow, including how RenderPlan and VoiceRender fit after semantic planning.
+-The package version and the UtterPlan schema version are independent. The current interchange schema is version `6`; schema-v5 TOML and schemas v1–v4 remain available as immutable historical inputs with sequential migration paths.
++The package version and the UtterPlan schema version are independent. Schema v7 is the only version accepted by normal loading and execution. Schema-v5/v6 TOML and schemas v1–v4 remain immutable historical migration inputs; the sequential path reaches v6, while v6-to-v7 requires recompiling the original source.
+diff --git a/docs/python-api.md b/docs/python-api.md
+index 2421608..19196a4 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -122,7 +122,7 @@ topology, and `--json` emits the complete attempt as JSON for inspection.
+
+ ## TOML persistence
+
+-Schema v7 is the current semantic contract, while `.utterplan.toml` is the canonical persisted format. `FlowPlan.to_toml()` and `FlowPlan.from_toml()` round-trip the current executable plan; `save()` writes atomically, and `load()` accepts TOML only. Historical inputs retain their sequential data-only migration steps through v6, but v6-to-v7 refuses with `migration.recompile_required` because omitted boundary opportunities cannot be recovered; recompile the original source.
++Schema v7 is the current semantic contract, while `.utterplan.toml` is the canonical persisted format. `FlowPlan.to_toml()` and `FlowPlan.from_toml()` round-trip the current executable plan; `save()` writes atomically, and `load()` accepts TOML only. All normal decode/load and execution paths reject non-v7 plans with `schema.version_unsupported`; they never migrate implicitly. Historical inputs retain a separate sequential data-only migration path through v6, but v6-to-v7 refuses with `migration.recompile_required` because omitted boundary opportunities cannot be recovered; recompile the original source.
+
+ ```python
+ from utterplan import FlowPlan
+@@ -134,7 +134,7 @@ plan.save("chapter.utterplan.toml")
+ assert FlowPlan.load("chapter.utterplan.toml") == plan
+ ```
+
+-`FlowPlan.to_dict()` and `FlowPlan.from_dict()` expose the current v7 executable mapping. Versioned v5/v6 codecs retain historical reads, but promotion to v7 requires source recompilation and does not invent boundaries. `utterplan migrate` reports that requirement; SSMD source migration remains a separate operation.
++`FlowPlan.to_dict()` and `FlowPlan.from_dict()` expose the current v7 executable mapping. Normal decoding accepts v7 only; versioned v5/v6 codecs are reachable solely through explicit serialized-data migration. Promotion to v7 requires source recompilation and does not invent boundaries. `utterplan migrate` reports that requirement; SSMD source migration remains a separate operation.
+
+ ## Incremental batch compilation
+
+@@ -169,6 +169,24 @@ for outcome in compile_to_files(
+
+ The report is operational data, not a semantic plan, and must not be passed to `FlowPlan.load()`. Unexpected programming and progress-callback errors propagate rather than being converted to document failures.
+
++## RenderPlan batch projection
++
++The shared RenderPlan set contract is owned by `renderplan`. Import its types and codecs from that package; use UtterPlan's batch module only for UtterPlan-specific request, outcome, set-construction, and projection orchestration APIs. Although `utterplan.renderplan_batch` retains compatibility re-exports, new consumers should not depend on them.
++
++```python
++from renderplan import (
++    RenderPlanSet,
++    RenderPlanSetChapter,
++    RenderPlanSetError,
++    RenderProfile,
++    load_renderplan_set,
++    save_renderplan_set,
++)
++from utterplan.renderplan_batch import RenderRequest, new_renderplan_set, render_to_files
++```
++
++`render_to_files()` projects schema-v7 `FlowPlan` inputs; grouping, source mapping, export, and replan logic remain UtterPlan-owned.
++
+ ## Planner progress callbacks
+
+ `UtterancePlanner.plan`, `UtterancePlanner.compile`, and `compile_document` accept an optional keyword-only `on_progress` callback. It receives typed `PlannerProgressEvent` objects synchronously in the planner thread. Progress is operational only: it is not added to `PlannerConfig` or the plan, and enabling a callback does not change plan identity or serialization.
+diff --git a/pyproject.toml b/pyproject.toml
+index 564ef00..f58f254 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -17,7 +17,7 @@ dependencies = [
+   "ttsready>=0.2.3,<0.3",
+   "typing_extensions>=4.0",
+   "tomlkit>=0.13,<1",
+-  "renderplan>=0.1,<0.2",
++  "renderplan>=0.1.1,<0.2",
+  ]
+ classifiers = [
+   "Development Status :: 3 - Alpha",
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index df6d115..599d208 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -699,3 +699,13 @@ def test_preview_cli_selects_whole_chunks_and_emits_details_json(
+     assert FlowPlan.load(path).plan_id == plan_id
+     assert main(["preview", str(path), "--segments", "3-1"]) == 1
+     assert "segment range is reversed" in capsys.readouterr().err
++
++
++def test_validate_and_inspect_reject_legacy_flow_plans(tmp_path: Path, capsys) -> None:
++    fixture = Path(__file__).parent / "schema_history/v5/canonical_consumer_contract.toml"
++    legacy_plan = tmp_path / "legacy.utterplan.toml"
++    legacy_plan.write_bytes(fixture.read_bytes())
++
++    for command in ("validate", "inspect"):
++        assert main([command, str(legacy_plan)]) == 1
++        assert "schema.version_unsupported" in capsys.readouterr().err
+diff --git a/tests/test_cli_render_book.py b/tests/test_cli_render_book.py
+index d6b78b9..14ab465 100644
+--- a/tests/test_cli_render_book.py
++++ b/tests/test_cli_render_book.py
+@@ -7,12 +7,17 @@ from pathlib import Path
+
+ import pytest
+ import tomlkit
+-from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
++from renderplan import (
++    PausePolicy,
++    PlanningPolicy,
++    RenderProfile,
++    RoleProfile,
++    load_renderplan_set,
++)
+ from renderplan import codec as renderplan_codec
+
+ from utterplan import FlowPlan, FlowSegment, FlowUnit, TokenView
+ from utterplan.cli import build_parser, main
+-from utterplan.renderplan_batch import load_renderplan_set
+
+
+ def _ssmd(text: str) -> str:
+@@ -387,6 +392,21 @@ def test_invalid_profile_and_unsafe_paths_do_not_create_outputs(tmp_path: Path,
+     assert not (root / "renderplan").exists()
+
+
++def test_render_book_rejects_legacy_plan_before_collection_state_is_written(
++    tmp_path: Path, capsys
++) -> None:
++    root = _write_book(tmp_path / "legacy.ssmdbook", (5,))
++    profile_path = root / "narration.renderprofile.toml"
++    _profile(profile_path)
++    source_plan = root / "utterplan" / "chapter-0005.utterplan.toml"
++    legacy_fixture = Path(__file__).parent / "schema_history/v5/canonical_consumer_contract.toml"
++    shutil.copyfile(legacy_fixture, source_plan)
++
++    assert _render(root, profile_path, "--chapters", "5") == 1
++    assert "schema.version_unsupported" in capsys.readouterr().err
++    assert not (root / "renderplan").exists()
++
++
+ def test_duplicate_source_basenames_are_rejected_before_output_creation(
+     tmp_path: Path, capsys
+ ) -> None:
+diff --git a/tests/test_golden.py b/tests/test_golden.py
+index 392411f..0de36a9 100644
+--- a/tests/test_golden.py
++++ b/tests/test_golden.py
+@@ -5,7 +5,7 @@ from pathlib import Path
+ import pytest
+
+ from utterplan import FlowPlan, PauseIntent, PlannerConfig, UtterancePlanner
+-from utterplan.exceptions import PlanMigrationError
++from utterplan.exceptions import UnsupportedSchemaError
+
+ ROOT = Path(__file__).resolve().parent
+ HISTORICAL_TOML = sorted(
+@@ -16,12 +16,12 @@ HISTORICAL_TOML = sorted(
+ COMPREHENSIVE_SOURCE = ROOT / "fixtures" / "ssmd_09_comprehensive.ssmd"
+
+
+-def test_historical_toml_goldens_require_source_recompilation_for_v7() -> None:
++def test_historical_toml_goldens_are_rejected_by_normal_loaders() -> None:
+     assert HISTORICAL_TOML
+     for path in HISTORICAL_TOML:
+-        with pytest.raises(PlanMigrationError) as error:
++        with pytest.raises(UnsupportedSchemaError) as error:
+             FlowPlan.load(path)
+-        assert error.value.code == "migration.recompile_required"
++        assert error.value.code == "schema.version_unsupported"
+
+
+ def test_canonical_ssmd_09_compiles_to_deterministic_v7_flow() -> None:
+diff --git a/tests/test_renderplan_batch.py b/tests/test_renderplan_batch.py
+index 86e6315..1322a28 100644
+--- a/tests/test_renderplan_batch.py
++++ b/tests/test_renderplan_batch.py
+@@ -5,23 +5,24 @@ from pathlib import Path
+
+ import pytest
+ import tomlkit
+-from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
+-from renderplan import codec as renderplan_codec
+-
+-from utterplan import FlowPlan, FlowSegment, FlowUnit, TokenView
+-from utterplan.renderplan_batch import (
++from renderplan import (
++    PausePolicy,
++    PlanningPolicy,
+     RenderPlanSet,
+     RenderPlanSetChapter,
+     RenderPlanSetError,
+-    RenderRequest,
++    RenderProfile,
++    RoleProfile,
+     load_renderplan_set,
+-    new_renderplan_set,
+-    render_to_files,
+     renderplan_set_from_dict,
+     renderplan_set_to_dict,
+     save_renderplan_set,
+     validate_renderplan_set_profile,
+ )
++from renderplan import codec as renderplan_codec
++
++from utterplan import FlowPlan, FlowSegment, FlowUnit, TokenView
++from utterplan.renderplan_batch import RenderRequest, new_renderplan_set, render_to_files
+
+
+ def _profile(binding: str = "fixture") -> RenderProfile:
+diff --git a/tests/test_renderplan_dependency_contract.py b/tests/test_renderplan_dependency_contract.py
+new file mode 100644
+index 0000000..363bcf2
+--- /dev/null
++++ b/tests/test_renderplan_dependency_contract.py
+@@ -0,0 +1,22 @@
++from __future__ import annotations
++
++from renderplan import (
++    RENDERPLAN_SET_FORMAT,
++    RENDERPLAN_SET_VERSION,
++    RenderPlan,
++    RenderPlanSet,
++    RenderPlanSetChapter,
++    RenderProfile,
++    load_renderplan_set,
++    save_renderplan_set,
++)
++
++_PUBLIC_TYPES = (RenderPlan, RenderPlanSet, RenderPlanSetChapter, RenderProfile)
++_PUBLIC_CODECS = (load_renderplan_set, save_renderplan_set)
++
++
++def test_renderplan_minimum_public_api_is_available() -> None:
++    assert RENDERPLAN_SET_FORMAT == "renderplan-set"
++    assert RENDERPLAN_SET_VERSION == 1
++    assert all(isinstance(value, type) for value in _PUBLIC_TYPES)
++    assert all(callable(value) for value in _PUBLIC_CODECS)
+diff --git a/tests/test_renderplan_export.py b/tests/test_renderplan_export.py
+index 5f2efd8..225bd5a 100644
+--- a/tests/test_renderplan_export.py
++++ b/tests/test_renderplan_export.py
+@@ -168,6 +168,58 @@ def test_render_plan_cli_initial_json_replan_and_explain(tmp_path: Path, capsys)
+     assert "pause-after: 0ms capacity" in explanation
+
+
++def test_render_plan_cli_rejects_mutated_source_before_writing_output(
++    tmp_path: Path, capsys
++) -> None:
++    original = _source()
++    profile = _profile()
++    previous = build_render_plan(original, profile)
++    report = _preflight(previous, profile)
++    source_path = tmp_path / "chapter.utterplan.toml"
++    profile_path = tmp_path / "voice.renderprofile.toml"
++    previous_path = tmp_path / "previous.renderplan.toml"
++    preflight_path = tmp_path / "preflight.toml"
++    output_path = tmp_path / "should-not-exist.renderplan.toml"
++    mutated = FlowPlan(
++        language="en-US",
++        flow=(
++            FlowUnit(
++                (
++                    FlowSegment(
++                        "one two four.",
++                        "en-US",
++                        tokens=(TokenView(0, 3), TokenView(4, 7), TokenView(8, 12)),
++                        boundary_after=("sentence",),
++                    ),
++                )
++            ),
++        ),
++    )
++    mutated.save(source_path)
++    renderplan_codec.save_profile(profile, profile_path)
++    renderplan_codec.save_plan(previous, previous_path)
++    renderplan_codec.save_preflight(report, preflight_path)
++
++    result = main(
++        [
++            "render-plan",
++            str(source_path),
++            "--profile",
++            str(profile_path),
++            "--previous",
++            str(previous_path),
++            "--preflight",
++            str(preflight_path),
++            "--output",
++            str(output_path),
++        ]
++    )
++
++    assert result == 1
++    assert "renderplan.replan.source_plan_id" in capsys.readouterr().err
++    assert not output_path.exists()
++
++
+ def test_repository_ssmd_fixture_compiles_and_projects() -> None:
+     fixture = Path(__file__).parent / "fixtures" / "canonical_consumer_contract.ssmd"
+     compiled = compile_document(
+diff --git a/tests/test_renderplan_replan.py b/tests/test_renderplan_replan.py
+index 8c0b20a..e01e192 100644
+--- a/tests/test_renderplan_replan.py
++++ b/tests/test_renderplan_replan.py
+@@ -26,6 +26,7 @@ from utterplan import (
+     SegmentDirectives,
+     TokenView,
+ )
++from utterplan.renderplan_export import build_render_plan
+ from utterplan.renderplan_grouping import group_initial_plan
+ from utterplan.renderplan_projection import (
+     RenderPlanProjectionError,
+@@ -107,6 +108,45 @@ def _speech_text(flow: tuple[object, ...] | list[object]) -> list[SpeechItem]:
+     return [item for item in flow if isinstance(item, SpeechItem)]
+
+
++def test_public_replan_loop_preserves_unchanged_requests_and_refines_only_failed_source() -> None:
++    text = "one two three four"
++    plan = _plan(
++        FlowSegment(
++            text,
++            "en-US",
++            tokens=(TokenView(0, 3), TokenView(4, 7), TokenView(8, 13), TokenView(14, 18)),
++            boundary_after=("sentence",),
++        ),
++        FlowSegment("Unchanged later.", "en-US", boundary_after=("sentence",)),
++    )
++    profile = _profile()
++    previous = build_render_plan(plan, profile)
++    failed = previous.speech[0]
++    unchanged = previous.speech[-1]
++    report = _preflight(previous, profile, (failed,))
++
++    replanned = build_render_plan(plan, profile, previous_plan=previous, preflight=report)
++    replanned.validate_against_profile(profile)
++    children = [
++        speech
++        for speech in replanned.speech
++        if speech.source
++        and all(
++            span.locator == failed.source[0].locator
++            and failed.source[0].start <= span.start < span.end <= failed.source[0].end
++            for span in speech.source
++        )
++    ]
++
++    assert replanned.plan_id != previous.plan_id
++    assert replanned.speech[-1].text == unchanged.text
++    assert replanned.speech[-1].segment_id == unchanged.segment_id
++    assert len(children) == 2
++    assert "".join(speech.text for speech in children) == failed.text
++    assert all(len(speech.text) < len(failed.text) for speech in children)
++    assert all(speech.segment_id != failed.segment_id for speech in children)
++
++
+ def test_replan_replaces_only_failed_occurrence_and_preserves_later_id() -> None:
+     plan = _plan(
+         FlowSegment("One ", "en-US", boundary_after=("clause",)),
+diff --git a/tests/test_schema_history.py b/tests/test_schema_history.py
+index e2027c4..8544578 100644
+--- a/tests/test_schema_history.py
++++ b/tests/test_schema_history.py
+@@ -111,10 +111,15 @@ def test_v3_fixtures_validate_and_migrate_immutably() -> None:
+
+ def test_historical_json_schema_registry_is_distinct_from_supported_plan_versions() -> None:
+     from utterplan.schema_registry import has_schema
+-    from utterplan.versioning import JSON_SCHEMA_VERSIONS, SUPPORTED_SCHEMA_VERSIONS
++    from utterplan.versioning import (
++        JSON_SCHEMA_VERSIONS,
++        MIGRATION_SOURCE_SCHEMA_VERSIONS,
++        SUPPORTED_SCHEMA_VERSIONS,
++    )
+
+     assert JSON_SCHEMA_VERSIONS == (1, 2, 3, 4)
+-    assert SUPPORTED_SCHEMA_VERSIONS == (1, 2, 3, 4, 5, 6, 7)
++    assert SUPPORTED_SCHEMA_VERSIONS == (7,)
++    assert MIGRATION_SOURCE_SCHEMA_VERSIONS == (1, 2, 3, 4, 5, 6)
+     assert all(has_schema(version) for version in JSON_SCHEMA_VERSIONS)
+     assert not has_schema(5)
+     assert not has_schema(6)
+diff --git a/tests/test_schema_registry.py b/tests/test_schema_registry.py
+index 0ce87c1..5f3de97 100644
+--- a/tests/test_schema_registry.py
++++ b/tests/test_schema_registry.py
+@@ -11,6 +11,7 @@ from utterplan.versioning import (
+     CURRENT_SCHEMA_VERSION,
+     FORMAT,
+     JSON_SCHEMA_VERSIONS,
++    MIGRATION_SOURCE_SCHEMA_VERSIONS,
+     OLDEST_SUPPORTED_SCHEMA_VERSION,
+     SCHEMA_VERSION,
+     SUPPORTED_SCHEMA_VERSIONS,
+@@ -22,7 +23,8 @@ def test_schema_registry_separates_supported_plans_from_historical_json_schemas(
+     assert CURRENT_SCHEMA_VERSION == 7
+     assert SCHEMA_VERSION == CURRENT_SCHEMA_VERSION
+     assert OLDEST_SUPPORTED_SCHEMA_VERSION == 1
+-    assert SUPPORTED_SCHEMA_VERSIONS == (1, 2, 3, 4, 5, 6, 7)
++    assert SUPPORTED_SCHEMA_VERSIONS == (7,)
++    assert MIGRATION_SOURCE_SCHEMA_VERSIONS == (1, 2, 3, 4, 5, 6)
+     assert JSON_SCHEMA_VERSIONS == (1, 2, 3, 4)
+     assert schema_versions() == JSON_SCHEMA_VERSIONS
+     assert all(has_schema(version) for version in JSON_SCHEMA_VERSIONS)
+diff --git a/tests/test_schema_v6_source.py b/tests/test_schema_v6_source.py
+index c74b002..1ad8d3c 100644
+--- a/tests/test_schema_v6_source.py
++++ b/tests/test_schema_v6_source.py
+@@ -7,7 +7,7 @@ import pytest
+
+ from utterplan import PlannerConfig, PlanValidationError, compile_document
+ from utterplan.codecs.v5_toml import loads_v5_toml
+-from utterplan.exceptions import PlanFormatError, PlanMigrationError
++from utterplan.exceptions import PlanFormatError, PlanMigrationError, UnsupportedSchemaError
+ from utterplan.flow_projection import _validate_replacement_ownership
+ from utterplan.hashing import V5_FLOW_HASH_SCHEMA
+ from utterplan.migration import migrate_plan_data
+@@ -60,7 +60,7 @@ def test_source_digest_changes_plan_identity_but_not_renderer_unit_hashes() -> N
+     assert first.flow == second.flow
+
+
+-def test_frozen_v5_toml_remains_readable_but_migration_requires_recompilation() -> None:
++def test_frozen_v5_toml_is_explicit_migration_only(tmp_path: Path) -> None:
+     raw = V5_FIXTURE.read_text(encoding="utf-8")
+     frozen = loads_v5_toml(raw)
+     before = frozen.to_dict()
+@@ -75,8 +75,16 @@ def test_frozen_v5_toml_remains_readable_but_migration_requires_recompilation()
+     with pytest.raises(PlanMigrationError) as error:
+         migrate_plan_data(before)
+     assert error.value.code == "migration.recompile_required"
+-    with pytest.raises(PlanMigrationError, match="Recompile"):
++    with pytest.raises(UnsupportedSchemaError) as error:
+         FlowPlan.from_toml(raw)
++    legacy_path = tmp_path / "legacy.utterplan.toml"
++    legacy_path.write_text(raw, encoding="utf-8")
++    with pytest.raises(UnsupportedSchemaError):
++        FlowPlan.load(legacy_path)
++    assert error.value.code == "schema.version_unsupported"
++    assert str(error.value).endswith(
++        "This build accepts UtterPlan schema 7 only. Recompile the source with the current UtterPlan."
++    )
+     assert before == frozen.to_dict()
+     assert V5_FIXTURE.read_text(encoding="utf-8") == raw
+
+diff --git a/tests/test_schema_v7.py b/tests/test_schema_v7.py
+index cffa1b2..b73e271 100644
+--- a/tests/test_schema_v7.py
++++ b/tests/test_schema_v7.py
+@@ -5,8 +5,9 @@ import pytest
+ from utterplan import FlowPlan, FlowSegment, FlowUnit, PauseIntent, PlanSource
+ from utterplan.boundaries import BoundaryKind
+ from utterplan.codecs.v7_toml import to_v7_toml_data
+-from utterplan.exceptions import PlanFormatError
++from utterplan.exceptions import PlanFormatError, UnsupportedSchemaError
+ from utterplan.hashing import FLOW_HASH_SCHEMA
++from utterplan.serialization import from_dict as load_flow_plan
+ from utterplan.toml_codec import from_toml_data
+
+
+@@ -26,6 +27,23 @@ def _plan(
+     )
+
+
++@pytest.mark.parametrize("schema_version", [5, 6])
++def test_normal_flow_plan_decoders_reject_legacy_schemas(schema_version: int) -> None:
++    semantic = _plan().to_dict()
++    semantic["schema_version"] = schema_version
++    with pytest.raises(UnsupportedSchemaError) as error:
++        FlowPlan.from_dict(semantic)
++    assert error.value.code == "schema.version_unsupported"
++    with pytest.raises(UnsupportedSchemaError):
++        load_flow_plan(semantic)
++
++    wire = to_v7_toml_data(_plan())
++    wire["schema_version"] = schema_version
++    with pytest.raises(UnsupportedSchemaError) as error:
++        from_toml_data(wire)
++    assert error.value.code == "schema.version_unsupported"
++
++
+ def test_v7_flow_has_no_root_unit_and_roundtrips_coexisting_boundary_and_authored_pause() -> None:
+     plan = _plan(boundary_after=("sentence",), pause_after=PauseIntent("none"))
+
+diff --git a/tests/test_toml_format.py b/tests/test_toml_format.py
+index 5dcd262..ed7d5fe 100644
+--- a/tests/test_toml_format.py
++++ b/tests/test_toml_format.py
+@@ -160,21 +160,28 @@ def test_v6_model_rejects_identity_and_content_hash_mismatches() -> None:
+     assert error.value.code == "flow.hash"
+
+
+-def test_version_router_requires_recompilation_for_frozen_v4_toml() -> None:
++def test_normal_loader_rejects_frozen_v4_toml_and_explicit_migration_requires_recompile() -> None:
+     raw = V4_TOML.read_text(encoding="utf-8")
+     frozen = decode_v4_toml_data(tomlkit.parse(raw).unwrap())
+     before = copy.deepcopy(frozen)
+
+-    with pytest.raises(PlanMigrationError) as error:
++    with pytest.raises(UnsupportedSchemaError) as error:
+         loads_toml(raw)
+-
+-    assert error.value.code == "migration.recompile_required"
++    assert error.value.code == "schema.version_unsupported"
+     assert frozen == before
+
++    from utterplan.migration import migrate_plan_data
++
++    with pytest.raises(PlanMigrationError) as migration_error:
++        migrate_plan_data(migrate_v4_to_v5(frozen))
++    assert migration_error.value.code == "migration.recompile_required"
++
+
+ def test_v4_toml_with_ambiguous_token_coordinates_fails_safely() -> None:
++    wire = tomlkit.parse(V4_AMBIGUOUS_TOML.read_text(encoding="utf-8")).unwrap()
++    legacy = decode_v4_toml_data(wire)
+     with pytest.raises(PlanMigrationError) as error:
+-        loads_toml(V4_AMBIGUOUS_TOML.read_text(encoding="utf-8"))
++        migrate_v4_to_v5(legacy)
+     assert error.value.code == "migration.token-coordinate-ambiguous"
+
+
+@@ -182,17 +189,24 @@ def test_v5_historical_codec_remains_readable_but_current_migration_requires_sou
+     import json
+
+     from utterplan.codecs.v5_toml import dumps_v5_toml, loads_v5_toml
++    from utterplan.model import LegacyFlowPlan
+
+     legacy = json.loads(V4_JSON.read_text(encoding="utf-8"))
+-    historical = FlowPlan.from_dict(migrate_v4_to_v5(legacy))
++    historical = LegacyFlowPlan.from_dict(migrate_v4_to_v5(legacy))
+     serialized = dumps_v5_toml(historical)
+     restored = loads_v5_toml(serialized)
+
+     assert historical.schema_version == 5
+     assert restored.to_dict() == historical.to_dict()
+-    with pytest.raises(PlanMigrationError, match="Recompile") as error:
++    with pytest.raises(UnsupportedSchemaError) as error:
+         from_toml_data(tomlkit.parse(serialized).unwrap())
+-    assert error.value.code == "migration.recompile_required"
++    assert error.value.code == "schema.version_unsupported"
++
++    from utterplan.migration import migrate_plan_data
++
++    with pytest.raises(PlanMigrationError, match="Recompile") as migration_error:
++        migrate_plan_data(restored.to_dict())
++    assert migration_error.value.code == "migration.recompile_required"
+
+
+ @pytest.mark.parametrize(
+diff --git a/utterplan/__init__.py b/utterplan/__init__.py
+index 1b21894..8007a30 100644
+--- a/utterplan/__init__.py
++++ b/utterplan/__init__.py
+@@ -96,8 +96,6 @@ from .versioning import (
+     SCHEMA_VERSION,
+     SUPPORTED_SCHEMA_VERSIONS,
+     V4_SCHEMA_VERSION,
+-    V5_SCHEMA_VERSION,
+-    V6_SCHEMA_VERSION,
+ )
+
+ __all__ = [
+@@ -193,8 +191,6 @@ __all__ = [
+     "SCHEMA_VERSION",
+     "JSON_SCHEMA_VERSIONS",
+     "V4_SCHEMA_VERSION",
+-    "V5_SCHEMA_VERSION",
+-    "V6_SCHEMA_VERSION",
+     "CURRENT_SCHEMA_VERSION",
+     "SUPPORTED_SCHEMA_VERSIONS",
+     "MigrationResult",
+diff --git a/utterplan/cli.py b/utterplan/cli.py
+index bd3a51c..9116f58 100644
+--- a/utterplan/cli.py
++++ b/utterplan/cli.py
+@@ -10,6 +10,13 @@ from pathlib import Path
+ from typing import Any, Literal, cast
+
+ import tomlkit
++from renderplan import (
++    RenderPlanSet,
++    RenderPlanSetError,
++    load_renderplan_set,
++    save_renderplan_set,
++    validate_renderplan_set_profile,
++)
+ from renderplan import codec as renderplan_codec
+ from tomlkit.exceptions import ParseError
+
+@@ -27,14 +34,9 @@ from .preview import PreviewChunk, preview_plan
+ from .renderability import format_renderability_error
+ from .renderplan_batch import (
+     RenderOutcome,
+-    RenderPlanSet,
+-    RenderPlanSetError,
+     RenderRequest,
+-    load_renderplan_set,
+     new_renderplan_set,
+     render_to_files,
+-    save_renderplan_set,
+-    validate_renderplan_set_profile,
+ )
+ from .renderplan_export import build_render_plan, format_render_plan_explanation
+ from .ssmdbook import (
+@@ -909,6 +911,10 @@ def _render_book(args: argparse.Namespace) -> int:
+             label, profile_id, profile_path, book.root, utterplan_dir, variant_dir, manifest_path
+         )
+
++    # Validate every selected source plan before creating collection state.
++    for source_plan_path in source_plans:
++        if source_plan_path.is_file():
++            FlowPlan.load(source_plan_path)
+     if not variant_dir.exists():
+         try:
+             variant_dir.mkdir(parents=True)
+diff --git a/utterplan/exceptions.py b/utterplan/exceptions.py
+index 0397947..5d036a6 100644
+--- a/utterplan/exceptions.py
++++ b/utterplan/exceptions.py
+@@ -38,12 +38,11 @@ class MigrationPathError(PlanMigrationError):
+
+ class UnsupportedSchemaError(PlanFormatError):
+     def __init__(self, version: object) -> None:
+-        from .versioning import CURRENT_SCHEMA_VERSION
+
+         super().__init__(
+-            f"Unsupported UtterPlan schema version {version}. "
+-            f"This version of utterplan supports schema version {CURRENT_SCHEMA_VERSION}.",
+-            code="schema.unsupported_version",
++            "This build accepts UtterPlan schema 7 only. "
++            "Recompile the source with the current UtterPlan.",
++            code="schema.version_unsupported",
+             path="$.schema_version",
+         )
+
+diff --git a/utterplan/model.py b/utterplan/model.py
+index 9e95e68..2ee909d 100644
+--- a/utterplan/model.py
++++ b/utterplan/model.py
+@@ -1963,6 +1963,15 @@ class FlowPlan:
+
+     @classmethod
+     def from_dict(cls, data: Mapping[str, Any]) -> FlowPlan:
++        if not isinstance(data, Mapping):
++            raise PlanFormatError("flow plan must be an object", code="plan.type")
++        schema_version = data.get("schema_version")
++        if type(schema_version) is not int or schema_version != CURRENT_SCHEMA_VERSION:
++            raise UnsupportedSchemaError(schema_version)
++        return cls._from_dict(data)
++
++    @classmethod
++    def _from_dict(cls, data: Mapping[str, Any]) -> FlowPlan:
+         if not isinstance(data, Mapping):
+             raise PlanFormatError("flow plan must be an object", code="plan.type")
+         schema_version = data.get("schema_version")
+@@ -2366,7 +2375,7 @@ class LegacyFlowPlan(FlowPlan):
+
+     @classmethod
+     def from_dict(cls, data: Mapping[str, Any]) -> LegacyFlowPlan:
+-        plan = FlowPlan.from_dict(data)
++        plan = FlowPlan._from_dict(data)
+         if not isinstance(plan, cls):
+             raise PlanFormatError(
+                 "expected a schema-v5 or schema-v6 flow plan", code="schema.version"
+diff --git a/utterplan/serialization.py b/utterplan/serialization.py
+index e83bbb8..11acf6c 100644
+--- a/utterplan/serialization.py
++++ b/utterplan/serialization.py
+@@ -5,10 +5,8 @@ from __future__ import annotations
+ from collections.abc import Mapping
+ from typing import Any
+
+-from .migration import migrate_plan_data
+ from .model import FlowPlan, UtterancePlan
+ from .toml_codec import dumps_toml, loads_toml
+-from .versioning import CURRENT_SCHEMA_VERSION
+
+
+ def to_dict(plan: UtterancePlan | FlowPlan) -> dict[str, Any]:
+@@ -17,12 +15,8 @@ def to_dict(plan: UtterancePlan | FlowPlan) -> dict[str, Any]:
+
+
+ def from_dict(data: Mapping[str, Any]) -> FlowPlan:
+-    """Load current v7 semantics, migrating supported historical plain mappings."""
+-    if data.get("schema_version") == CURRENT_SCHEMA_VERSION:
+-        plan = FlowPlan.from_dict(data)
+-    else:
+-        migrated = migrate_plan_data(data)
+-        plan = FlowPlan.from_dict(migrated.data)
++    """Load a schema-v7 plan without implicitly migrating historical mappings."""
++    plan = FlowPlan.from_dict(data)
+     plan.validate()
+     return plan
+
+@@ -33,7 +27,7 @@ def to_toml(plan: UtterancePlan | FlowPlan) -> str:
+
+
+ def from_toml(value: str) -> FlowPlan:
+-    """Deserialize and migrate a supported TOML plan to the current v7 model."""
++    """Deserialize and validate a schema-v7 TOML plan."""
+     result = loads_toml(value)
+     if not isinstance(result, FlowPlan):
+         raise ValueError("TOML did not decode to a current FlowPlan")
+diff --git a/utterplan/toml_codec.py b/utterplan/toml_codec.py
+index b3c7a81..b64d864 100644
+--- a/utterplan/toml_codec.py
++++ b/utterplan/toml_codec.py
+@@ -9,12 +9,10 @@ from typing import Any
+ import tomlkit
+ from tomlkit.exceptions import ParseError
+
+-from .codecs import v4_toml
+ from .codecs.v7_toml import dumps_v7_toml, from_v7_toml_data, to_v7_toml_data
+ from .exceptions import PlanFormatError, UnsupportedSchemaError
+-from .migration import migrate_plan_data
+ from .model import FlowPlan, UtterancePlan
+-from .versioning import CURRENT_SCHEMA_VERSION, V4_SCHEMA_VERSION
++from .versioning import CURRENT_SCHEMA_VERSION
+
+
+ def _plain(value: Any) -> Any:
+@@ -31,7 +29,7 @@ def _current_flow_plan(plan: UtterancePlan | FlowPlan) -> FlowPlan:
+     if isinstance(plan, FlowPlan):
+         if plan.schema_version == CURRENT_SCHEMA_VERSION:
+             return plan
+-        return FlowPlan.from_dict(migrate_plan_data(plan.to_dict()).data)
++        raise UnsupportedSchemaError(plan.schema_version)
+     if not isinstance(plan, UtterancePlan):
+         raise PlanFormatError("unsupported plan object for TOML serialization", code="plan.type")
+     from .flow_projection import project_compiler_plan
+@@ -45,31 +43,16 @@ def to_toml_data(plan: UtterancePlan | FlowPlan) -> dict[str, Any]:
+
+
+ def from_toml_data(data: Mapping[str, object]) -> FlowPlan:
+-    """Decode v7 TOML or sequentially migrate frozen historical TOML into the current model."""
++    """Decode and validate only schema-v7 TOML data."""
+     plain = _plain(data)
+     if not isinstance(plain, Mapping):
+         raise PlanFormatError("TOML root must be a table", code="toml.root")
+     version = plain.get("schema_version")
+-    if type(version) is not int:
++    if type(version) is not int or version != CURRENT_SCHEMA_VERSION:
+         raise UnsupportedSchemaError(version)
+-    if version == CURRENT_SCHEMA_VERSION:
+-        current_plan = from_v7_toml_data(plain)
+-        current_plan.validate()
+-        return current_plan
+-    if version in {5, 6}:
+-        migrated = migrate_plan_data(plain)
+-        current_plan = FlowPlan.from_dict(migrated.data)
+-        current_plan.validate()
+-        return current_plan
+-    if version == V4_SCHEMA_VERSION:
+-        from .migrations.v4_to_v5 import migrate_v4_to_v5
+-
+-        legacy_v4 = v4_toml.decode_v4_toml_data(plain)
+-        migrated_v4 = migrate_plan_data(migrate_v4_to_v5(legacy_v4))
+-        current_plan = FlowPlan.from_dict(migrated_v4.data)
+-        current_plan.validate()
+-        return current_plan
+-    raise UnsupportedSchemaError(version)
++    current_plan = from_v7_toml_data(plain)
++    current_plan.validate()
++    return current_plan
+
+
+ def dumps_toml(plan: UtterancePlan | FlowPlan) -> str:
+@@ -99,7 +82,7 @@ def dump(plan: UtterancePlan | FlowPlan, path: str | Path) -> None:
+
+
+ def load(path: str | Path) -> FlowPlan:
+-    """Read and decode a schema-v7 or sequentially migratable schema-v4/v5 TOML plan."""
++    """Read and decode a schema-v7 TOML plan."""
+     return loads_toml(Path(path).read_text(encoding="utf-8"))
+
+
+diff --git a/utterplan/versioning.py b/utterplan/versioning.py
+index 2184924..818391b 100644
+--- a/utterplan/versioning.py
++++ b/utterplan/versioning.py
+@@ -3,7 +3,8 @@ from __future__ import annotations
+ FORMAT = "utterplan"
+ CURRENT_SCHEMA_VERSION = 7
+ OLDEST_SUPPORTED_SCHEMA_VERSION = 1
+-SUPPORTED_SCHEMA_VERSIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7)
++SUPPORTED_SCHEMA_VERSIONS: tuple[int, ...] = (7,)
++MIGRATION_SOURCE_SCHEMA_VERSIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6)
+ JSON_SCHEMA_VERSIONS: tuple[int, ...] = (1, 2, 3, 4)
+ V4_SCHEMA_VERSION = 4
+ V5_SCHEMA_VERSION = 5

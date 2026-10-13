@@ -1,0 +1,2347 @@
+ README.md                        |  53 ++-
+ docs/architecture.md             |  42 ++-
+ docs/cli.md                      |  52 +++
+ docs/getting-started.md          |  20 ++
+ docs/index.md                    |   3 +-
+ docs/ssmdbook.md                 |  64 ++++
+ tests/test_cli_render_book.py    | 445 ++++++++++++++++++++++++
+ tests/test_renderplan_batch.py   | 336 ++++++++++++++++++
+ utterplan/cli.py                 | 316 ++++++++++++++++-
+ utterplan/planner.py             |   2 +-
+ utterplan/preview.py             |   2 +
+ utterplan/renderplan_batch.py    | 733 +++++++++++++++++++++++++++++++++++++++
+ utterplan/renderplan_grouping.py |   6 +-
+ utterplan/renderplan_replan.py   |   3 +-
+ 14 files changed, 2061 insertions(+), 16 deletions(-)
+
+diff --git a/README.md b/README.md
+index c05023a..8e5774a 100644
+--- a/README.md
++++ b/README.md
+@@ -9,7 +9,7 @@ UtterPlan is the canonical, engine-independent semantic compiler from one SSMD
+ document (or explicitly selected plain-text document) to an executable speech
+ plan. It produces deterministic prepared text, paragraph-local flow units, safe boundary opportunities, authored pause intents, and segment-local
+ semantics, portable document metadata, and typed directives for
+-independent downstream consumers such as Readio, VoiceRender, and other FlowPlan users. It does not manage or modify book workspaces; `compile-book` reads an SSMDBook manifest only to discover selected source chapters. It uses TTSReady for written-to-spoken preparation and stops before G2P, synthesis, and audio.
++independent downstream consumers such as Readio, VoiceRender, and other FlowPlan users. Its book commands read the SSMDBook manifest only for chapter discovery, never modify the manifest or source chapters, and write derived plans to separate directories. It uses TTSReady for written-to-spoken preparation and stops before G2P, synthesis, and audio.
+
+ ## CLI
+
+@@ -61,6 +61,57 @@ utterplan/
+ ```
+
+ Omit `--chapters` to compile all manifest chapters. Use comma-separated source-number selections for non-contiguous ranges, for example `utterplan compile-book chapters --chapters 1,3-5`. `--diagnostics warnings|all|none` defaults to warnings; failures are always shown and reports retain complete diagnostics. The book root itself is also accepted as input; see the [SSMDBook guide](docs/ssmdbook.md).
++## From an SSMDBook to RenderPlans
++
++UtterPlan keeps one canonical semantic plan per chapter. A RenderProfile is a
++separate renderer configuration; create and validate it with VoiceRender, then
++project the selected saved plans into a profile-specific RenderPlan collection:
++
++```bash
++voicerender profile create \
++  --engine piper \
++  --target en_US-amy-medium \
++  --language en-US \
++  --offline \
++  --output narration.renderprofile.toml
++voicerender profile validate narration.renderprofile.toml
++
++utterplan compile-book . --chapters 5-17
++utterplan render-book . --chapters 5-17 --profile narration.renderprofile.toml
++```
++
++The book's `utterplan/` directory remains the shared semantic source. The new
++command writes independent renderer-specific plans into a deterministic variant:
++
++```text
++renderplan/
++└── narration--<profile-fingerprint>/
++    ├── renderprofile.toml
++    ├── renderplan-set.toml
++    ├── render-report.toml
++    ├── chapter-0005.renderplan.toml
++    └── ...
++```
++
++The variant label comes from the profile filename by default; its suffix is the
++first 12 hexadecimal characters of the canonical RenderProfile `profile_id`.
++Changing identity-bearing profile semantics selects a different directory, so
++multiple voices or planning policies can coexist without replacing one another.
++Each variant snapshots the canonical profile; `renderplan-set.toml` records its
++full identity, source profile reference, and chapter plan IDs. `--variant` changes
++the human label without removing the fingerprint, and `--output-root` changes the
++collection root while retaining the automatic variant directory.
++
++`render-book` consumes only the existing schema-v7 UtterPlans and shared
++RenderProfile/RenderPlan contract. VoiceRender is not required to run it: VoiceRender
++creates or refreshes engine-backed profiles, then preflights and renders the
++resulting RenderPlans. The single-file `utterplan render-plan` command remains the
++low-level projection and deterministic replan primitive.
++
++Related packages: [RenderPlan](https://pypi.org/project/renderplan/) defines the
++shared profile and plan contracts; [VoiceRender](https://pypi.org/project/voicerender/)
++creates engine-backed profiles and performs preflight and synthesis.
++
+ The CLI also provides:
+
+ ```bash
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 5bfa9ea..44f5114 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -1,6 +1,6 @@
+ # Architecture
+
+-UtterPlan is an engine-independent compiler from one SSMD document (or explicitly selected plain-text document) to an executable speech plan. It owns document parsing, language runs, source linguistic analysis, SSMD annotation meanings, coordinate mapping, spoken-text analysis, segmentation, canonical boundary opportunities, authored pause intent, directives, and FlowPlan construction. It uses TTSReady for reusable written-to-spoken preparation and stops before G2P, synthesis, and audio. Consumers compile documents independently; UtterPlan does not load books or manage workspaces.
++UtterPlan is an engine-independent compiler from one SSMD document (or explicitly selected plain-text document) to an executable speech plan. It owns document parsing, language runs, source linguistic analysis, SSMD annotation meanings, coordinate mapping, spoken-text analysis, segmentation, canonical boundary opportunities, authored pause intent, directives, and FlowPlan construction. It uses TTSReady for reusable written-to-spoken preparation and stops before G2P, synthesis, and audio. The compiler still handles one document at a time; the CLI's explicit SSMDBook commands discover chapters and orchestrate per-file workspaces without changing book content.
+
+ ```text
+ SSMD / plain text
+@@ -39,7 +39,7 @@ UtterPlan
+ Readio / VoiceRender / other FlowPlan consumers
+ ```
+
+-UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady. TTSReady owns the direct Spokenform integration; production UtterPlan code does not import Spokenform. Readio, VoiceRender, and other consumers consume FlowPlan and may perform downstream G2P, synthesis, and audio work. UtterPlan must not depend on those consumer or engine packages, model runtimes, or audio libraries. Book iteration belongs to consumers and conversion tools.
++UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady. TTSReady owns the direct Spokenform integration; production UtterPlan code does not import Spokenform. Readio, VoiceRender, and other consumers consume FlowPlan and may perform downstream G2P, synthesis, and audio work. UtterPlan must not depend on those consumer or engine packages, model runtimes, or audio libraries. UtterPlan's `compile-book` and `render-book` CLI commands provide safe SSMDBook chapter discovery and per-file orchestration; they do not introduce a book-level semantic plan or modify source chapters.
+
+ ## Compiler and public plan boundary
+
+@@ -88,3 +88,41 @@ schema-v1–v6 saved plan -- historical reader / data-only chain --> v6; v6-to-v
+ Migration is not planning. Registered data-only steps cover the sequential v1 -> v2 -> v3 -> v4 -> v5 -> v6 chain; the v6-to-v7 step intentionally returns `migration.recompile_required`: serialized v6 semantics cannot prove the complete boundary inventory. Every step operates on serialized plain data and does not rerun source parsing, preparation, NLP, planning, G2P, rendering, or audio processing. The v4-to-v5 projection verifies token spans and pause evidence and fails rather than guessing; v5-to-v6 preserves executable semantics and never invents unavailable source text. Downgrades are not supported.
+
+ `compile-many` orchestrates independent source documents in order. Each successful FlowPlan is validated and atomically saved before the next source is processed; ordinary failures are reported and later inputs continue unless fail-fast is requested. Its TOML report is operational data, not a FlowPlan.
++
++
++## Book-level RenderPlan projection boundary
++
++The SSMDBook workflow composes per-file operations without creating a combined
++book plan or crossing UtterPlan's engine-independent boundary:
++
++```text
++SSMDBook manifest + chapter source
++    -> utterplan compile-book
++    -> independent FlowPlans in utterplan/
++
++saved FlowPlans + one RenderProfile
++    -> utterplan render-book (existing RenderPlan projection)
++    -> profile-specific RenderPlans in renderplan/<label>--<profile-id-prefix>/
++       + UtterPlan-owned renderplan-set.toml and render-report.toml
++
++RenderProfile + RenderPlan set
++    -> VoiceRender profile validation / preflight / G2P / synthesis / audio
++```
++
++`compile-book` reads the manifest and selected chapter source to produce each
++canonical semantic FlowPlan. `render-book` does not re-read chapter content: it
++loads already saved plans, projects each independently through the existing
++`build_render_plan()` path, and records successful chapter identities in the
++variant-local `renderplan-set.toml`. The index and operational report are not
++RenderPlan schema objects and do not change shared RenderPlan contracts. Variant
++directories include a readable label and a prefix of the canonical profile ID;
++the profile snapshot and strict set validation prevent mixing profiles or adopting
++unindexed output. Existing `render-plan` remains the low-level one-file projection
++and deterministic refinement interface.
++
++The profile and RenderPlan data contract belongs to [RenderPlan](https://pypi.org/project/renderplan/).
++[VoiceRender](https://pypi.org/project/voicerender/) creates engine-backed profiles
++and owns runtime validation, preflight, and speech execution. UtterPlan loads shared
++RenderPlan data without importing VoiceRender, checking engine availability, or
++invoking G2P, model runtimes, synthesis, or audio packages. Neither book command
++modifies the manifest or source chapter files.
+diff --git a/docs/cli.md b/docs/cli.md
+index 1d1795f..fe2bdc0 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -151,6 +151,58 @@ The version-2 compile report identifies each successful chapter's resolved prepa
+
+ For the full editable-workspace behavior and examples, see the [SSMDBook guide](ssmdbook.md).
+
++## Produce RenderPlans for selected SSMDBook chapters
++
++`render-plan` remains the low-level one-file projection and replan command.
++`render-book` is the batch convenience workflow: it loads existing schema-v7
++UtterPlans for selected manifest chapters and writes one RenderPlan per chapter
++for a shared RenderProfile.
++
++```text
++utterplan render-book INPUT --profile PROFILE [--chapters SELECTOR]
++  [--utterplan-dir PATH] [--output-root PATH] [--variant LABEL]
++  [--force] [--fail-fast] [--report PATH]
++```
++
++`INPUT` is an SSMDBook root containing `manifest.json` or its canonical
++`chapters/` directory. `--chapters` uses the same manifest `source_number`
++selector as `compile-book`: `all` (default), one number, an inclusive range, or
++comma-separated selections such as `1,3-5,9`. Chapters remain in manifest order.
++`--profile` is required and is loaded once through the shared RenderPlan codec;
++UtterPlan does not call VoiceRender or probe engines.
++
++Defaults and behavior:
++
++- `--utterplan-dir`: `<book-root>/utterplan`; it must already exist. A missing
++  selected plan is an item failure, not a shared configuration error.
++- `--output-root`: `<book-root>/renderplan`. The command appends a profile
++  variant directory named `<label>--<profile-id-prefix>`; it is not an output
++  directory override for individual files.
++- `--variant`: optional safe human-readable label. By default, the label comes
++  from the profile filename (`narration.renderprofile.toml` becomes `narration`);
++  the 12-hex-character fingerprint is always appended.
++- `--force`: replace selected existing RenderPlan files only. It does not bypass
++  profile-ID mismatches, invalid set metadata, unsafe paths, or collisions.
++- `--fail-fast`: after the first item failure, later selected chapters are
++  recorded as skipped. Otherwise, processing continues.
++- `--report`: override the per-invocation `render-report.toml` location.
++
++Each variant contains a canonical `renderprofile.toml` snapshot,
++`renderplan-set.toml` collection index, latest-invocation `render-report.toml`,
++and one `.renderplan.toml` file per successful chapter. The set index stores the
++full canonical `profile_id`, source profile location, and source/render plan IDs.
++Repeated invocations with the same profile reuse the variant and upsert entries
++without removing other successful chapters; a different profile identity selects
++a different default variant. UtterPlan refuses to adopt a non-empty directory
++without a valid set or to reuse a missing/mismatched snapshot.
++
++The command does not read chapter content or modify the source manifest, chapter
++files, or UtterPlans. Unsafe output roots inside `chapters/`, input/output or
++metadata collisions, duplicate basenames, and invalid shared profile/set state
++are rejected before chapter processing. Exit status is 0 when all selected
++chapters succeed, 1 when any chapter fails, and 2 for usage or shared-configuration
++errors. See the [SSMDBook workflow guide](ssmdbook.md) for end-to-end and multi-voice examples.
++
+ ## Explain a plan
+
+ Explain an existing compiled plan as a human-readable speech narrative:
+diff --git a/docs/getting-started.md b/docs/getting-started.md
+index b54efbd..007ec58 100644
+--- a/docs/getting-started.md
++++ b/docs/getting-started.md
+@@ -97,6 +97,26 @@ utterplan/
+ Omit `--chapters` to compile all manifest chapters. Select non-contiguous chapters with a comma-separated selector, for example `utterplan compile-book chapters --chapters 1,3-5`. You can also pass the `.ssmdbook` root instead of `chapters/`, and override the destination with `--output-dir build/plans`. UtterPlan reads the manifest and current selected chapter content but does not modify the book or refresh stale chapter hashes. See the [SSMDBook guide](ssmdbook.md) for selection rules and safety details.
+ Safe punctuation repair is enabled by default for both `compile` and `compile-many`. Use `--renderability strict` to reject repair opportunities and inspect their explanation without modifying the plan.
+
++## Render a book for a profile
++
++After compiling the selected source chapters, project their saved UtterPlans into
++a profile-specific RenderPlan collection:
++
++```bash
++voicerender profile create \
++  --engine piper --target en_US-amy-medium --language en-US \
++  --offline --output narration.renderprofile.toml
++utterplan render-book . --chapters 5-17 --profile narration.renderprofile.toml
++```
++
++This writes under `renderplan/<label>--<profile-fingerprint>/` and leaves the
++canonical `utterplan/` plans and source book untouched. VoiceRender is needed to
++create/refresh the engine profile and later preflight/render the result, but it is
++not required to run `render-book`; UtterPlan reads the shared RenderPlan profile
++contract. See the [SSMDBook workflow](ssmdbook.md#from-semantic-chapter-plans-to-renderplan-variants),
++[VoiceRender](https://pypi.org/project/voicerender/), and
++[RenderPlan](https://pypi.org/project/renderplan/).
++
+ ## Inspect and validate
+
+ ```bash
+diff --git a/docs/index.md b/docs/index.md
+index d67a6c6..ab22cf1 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -9,7 +9,7 @@ speech plans. It stops before G2P and synthesis.
+
+ getting-started
+ cli
+-ssmdbook
++SSMDBook and RenderPlan workflow <ssmdbook>
+ consumer-guide
+ format
+ coordinate-spaces
+@@ -26,4 +26,5 @@ python-api
+ changelog
+ ```
+
++The [SSMDBook guide](ssmdbook.md) covers workspace compilation and the profile-specific `render-book` workflow, including how RenderPlan and VoiceRender fit after semantic planning.
+ The package version and the UtterPlan schema version are independent. The current interchange schema is version `6`; schema-v5 TOML and schemas v1–v4 remain available as immutable historical inputs with sequential migration paths.
+diff --git a/docs/ssmdbook.md b/docs/ssmdbook.md
+index 4a3f8d5..f7556fb 100644
+--- a/docs/ssmdbook.md
++++ b/docs/ssmdbook.md
+@@ -74,3 +74,67 @@ Compilation always uses paragraph-local flow units; `compile-book` has no render
+ `compile-book` uses the same best-effort spaCy `auto` default as `compile`: installed models are preferred in `sm`, `md`, `lg`, `trf` order and missing resources fall back safely. `--spacy off` forces fallback; explicit tier flags require that local model.
+
+ Chapter input is SSMD by contract, so `compile-book` deliberately has no `--input-format` option. When no `--language` is supplied, a selected chapter must declare its language in SSMD metadata.
++
++
++## From semantic chapter plans to RenderPlan variants
++
++The complete file-based workflow keeps UtterPlans renderer-neutral while allowing
++several independent RenderPlan collections for one book:
++
++```text
++SSMD chapters
++    -> utterplan/*.utterplan.toml
++    -> renderplan/<profile-label>--<profile-id-prefix>/*.renderplan.toml
++```
++
++Create engine-backed RenderProfiles with VoiceRender, compile chapters once, then
++project them using `utterplan render-book`:
++
++```bash
++voicerender profile create \
++  --engine piper --target en_US-amy-medium --language en-US \
++  --offline --output amy.renderprofile.toml
++voicerender profile create \
++  --engine piper --target en_US-joe-medium --language en-US \
++  --offline --output joe.renderprofile.toml
++
++utterplan compile-book . --chapters 5-17
++utterplan render-book . --profile amy.renderprofile.toml --chapters 5-17
++utterplan render-book . --profile joe.renderprofile.toml --chapters 5-17
++```
++
++The result has one shared semantic collection and distinct renderer-specific
++variants, for example:
++
++```text
++utterplan/
++├── chapter-0005.utterplan.toml
++└── ...
++renderplan/
++├── amy--<profile-id-prefix>/
++│   ├── renderprofile.toml
++│   ├── renderplan-set.toml
++│   ├── render-report.toml
++│   └── chapter-0005.renderplan.toml
++└── joe--<profile-id-prefix>/
++    └── ...
++```
++
++A variant is keyed by the canonical full RenderProfile `profile_id`; its directory
++uses a readable label plus a short fingerprint. A semantic profile change selects
++a new default directory instead of overwriting an earlier voice or policy. The
++snapshot is the profile authority for that collection; the UtterPlan-owned
++`renderplan-set.toml` records the full identity, original profile reference, and
++per-chapter source/render plan identities. `render-report.toml` describes only the
++latest invocation, while the set index accumulates successful chapters across
++ranges.
++
++UtterPlan structurally loads the shared profile through RenderPlan and does not
++import VoiceRender, inspect engine availability, preflight requests, or synthesize.
++VoiceRender is responsible for profile creation/refresh and downstream preflight
++and synthesis; it is not required merely to run `render-book`. A later
++`render-book` invocation still needs the profile passed on its command line, while
++the collection's snapshot remains available for inspection and reproducible
++replanning. See the [CLI reference](cli.md#produce-renderplans-for-selected-ssmdbook-chapters),
++[RenderPlan](https://pypi.org/project/renderplan/), and
++[VoiceRender](https://pypi.org/project/voicerender/).
+diff --git a/tests/test_cli_render_book.py b/tests/test_cli_render_book.py
+new file mode 100644
+index 0000000..c85f426
+--- /dev/null
++++ b/tests/test_cli_render_book.py
+@@ -0,0 +1,445 @@
++from __future__ import annotations
++
++import json
++import os
++import shutil
++from pathlib import Path
++
++import pytest
++import tomlkit
++from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
++from renderplan import codec as renderplan_codec
++
++from utterplan import FlowPlan, FlowSegment, FlowUnit, TokenView
++from utterplan.cli import build_parser, main
++from utterplan.renderplan_batch import load_renderplan_set
++
++
++def _ssmd(text: str) -> str:
++    return f'---\nssmd_version: "0.9"\nlanguage: en-US\n---\n{text}\n'
++
++
++def _write_book(
++    root: Path,
++    numbers: tuple[int, ...],
++    *,
++    names: dict[int, str] | None = None,
++    plans: tuple[int, ...] | None = None,
++    utterplan_dir: Path | None = None,
++) -> Path:
++    entries: list[dict[str, object]] = []
++    for number in numbers:
++        relative = (names or {}).get(number, f"chapters/chapter-{number:04d}.ssmd.md")
++        source = root / relative
++        source.parent.mkdir(parents=True, exist_ok=True)
++        source.write_text(_ssmd(f"Book chapter {number}."), encoding="utf-8")
++        entries.append(
++            {
++                "id": f"chapter-{number:04d}",
++                "source_number": number,
++                "path": relative,
++                "title": f"Chapter {number}",
++            }
++        )
++    root.mkdir(parents=True, exist_ok=True)
++    (root / "manifest.json").write_text(
++        json.dumps(
++            {
++                "format": "ssmdconvert.book",
++                "schema_version": 1,
++                "ssmd_version": "0.9",
++                "chapters": entries,
++            },
++            indent=2,
++        ),
++        encoding="utf-8",
++    )
++    selected_plan_dir = utterplan_dir or root / "utterplan"
++    selected_plan_dir.mkdir(parents=True, exist_ok=True)
++    for number in plans if plans is not None else numbers:
++        text = f"Semantic chapter {number}."
++        flowplan = FlowPlan(
++            language="en-US",
++            flow=(
++                FlowUnit(
++                    (
++                        FlowSegment(
++                            text,
++                            "en-US",
++                            tokens=(TokenView(0, len(text)),),
++                            boundary_after=("sentence",),
++                        ),
++                    )
++                ),
++            ),
++        )
++        flowplan.save(selected_plan_dir / f"chapter-{number:04d}.utterplan.toml")
++    return root
++
++
++def _profile(path: Path, voice: str = "amy") -> RenderProfile:
++    profile = RenderProfile(
++        roles={
++            "narrator": RoleProfile(
++                language="en-US", binding={"engine": "fixture", "voice": voice}
++            )
++        },
++        default_role="narrator",
++        planning=PlanningPolicy(split="sentence", capacity_fallback=("token",)),
++        pauses=PausePolicy(mode="manual", durations_ms={"sentence": 250}),
++    )
++    renderplan_codec.save_profile(profile, path)
++    return renderplan_codec.load_profile(path)
++
++
++def _render(
++    root: Path,
++    profile_path: Path,
++    *options: str,
++    input_path: Path | None = None,
++) -> int:
++    return main(
++        [
++            "render-book",
++            str(input_path or root),
++            *options,
++            "--profile",
++            str(profile_path),
++        ]
++    )
++
++
++def _variant(root: Path, profile: RenderProfile, label: str = "narration") -> Path:
++    profile_id = profile.profile_id or profile.computed_id()
++    return root / "renderplan" / f"{label}--{profile_id.removeprefix('sha256:')[:12]}"
++
++
++def _report(path: Path) -> dict[str, object]:
++    return dict(tomlkit.parse(path.read_text(encoding="utf-8")).unwrap())
++
++
++def test_render_book_parser_defaults_and_required_profile() -> None:
++    args = build_parser().parse_args(
++        [
++            "render-book",
++            "book.ssmdbook",
++            "--chapters",
++            "1,3-5",
++            "--profile",
++            "narration.renderprofile.toml",
++        ]
++    )
++    assert args.command == "render-book"
++    assert args.chapters == "1,3-5"
++    assert args.variant is None
++    assert args.output_root is None
++    assert args.utterplan_dir is None
++    assert args.report is None
++    assert args.force is False
++    assert args.fail_fast is False
++    with pytest.raises(SystemExit):
++        build_parser().parse_args(["render-book", "book.ssmdbook"])
++
++
++def test_render_book_success_matches_single_file_projection(tmp_path: Path, capsys) -> None:
++    root = _write_book(tmp_path / "ordered.ssmdbook", (5, 7, 6))
++    profile_path = root / "narration.renderprofile.toml"
++    profile = _profile(profile_path)
++    manifest_before = (root / "manifest.json").read_bytes()
++
++    result = _render(root, profile_path, "--chapters", "5-7")
++    captured = capsys.readouterr()
++    variant = _variant(root, profile)
++    set_path = variant / "renderplan-set.toml"
++    report_path = variant / "render-report.toml"
++    loaded_set = load_renderplan_set(set_path)
++
++    assert result == 0
++    assert "selected:   3" in captured.err
++    assert [chapter.id for chapter in loaded_set.chapters] == [
++        "chapter-0005",
++        "chapter-0007",
++        "chapter-0006",
++    ]
++    assert loaded_set.profile_id == profile.profile_id
++    assert loaded_set.profile_fingerprint == profile.profile_id.removeprefix("sha256:")[:12]
++    snapshot = renderplan_codec.load_profile(variant / "renderprofile.toml")
++    assert snapshot.profile_id == loaded_set.profile_id
++    for chapter in loaded_set.chapters:
++        plan_path = variant / chapter.renderplan
++        plan = renderplan_codec.load_plan(plan_path)
++        assert plan.render_profile_id == loaded_set.profile_id
++        assert chapter.source_plan_id == FlowPlan.load(root / "utterplan" / f"{chapter.id}.utterplan.toml").plan_id
++        assert chapter.render_plan_id == plan.plan_id
++
++    report = _report(report_path)
++    assert report["format"] == "utterplan-render-report"
++    assert report["complete"] is True
++    assert report["requested"] == 3
++    assert report["written"] == 3
++    assert report["failed"] == 0
++    assert len(report["item"]) == 3
++    assert (root / "manifest.json").read_bytes() == manifest_before
++
++    source_plan = root / "utterplan/chapter-0005.utterplan.toml"
++    single_output = tmp_path / "chapter-0005.single.renderplan.toml"
++    assert main(
++        ["render-plan", str(source_plan), "--profile", str(profile_path), "-o", str(single_output)]
++    ) == 0
++    batch_plan = renderplan_codec.load_plan(variant / "chapter-0005.renderplan.toml")
++    single_plan = renderplan_codec.load_plan(single_output)
++    assert batch_plan == single_plan
++    assert batch_plan.plan_id == single_plan.plan_id
++
++
++def test_render_book_accumulates_successful_chapters_and_replaces_latest_report(
++    tmp_path: Path, capsys
++) -> None:
++    root = _write_book(tmp_path / "incremental.ssmdbook", (5, 6, 7, 8))
++    profile_path = root / "narration.renderprofile.toml"
++    profile = _profile(profile_path)
++
++    assert _render(root, profile_path, "--chapters", "5-6") == 0
++    capsys.readouterr()
++    variant = _variant(root, profile)
++    first_plan_bytes = (variant / "chapter-0005.renderplan.toml").read_bytes()
++    assert _render(root, profile_path, "--chapters", "7-8") == 0
++    capsys.readouterr()
++
++    collection = load_renderplan_set(variant / "renderplan-set.toml")
++    assert [chapter.source_number for chapter in collection.chapters] == [5, 6, 7, 8]
++    assert (variant / "chapter-0005.renderplan.toml").read_bytes() == first_plan_bytes
++    report = _report(variant / "render-report.toml")
++    assert report["requested"] == 2
++    assert [item["source_number"] for item in report["item"]] == [7, 8]
++
++
++def test_different_profile_id_creates_independent_variant(tmp_path: Path, capsys) -> None:
++    root = _write_book(tmp_path / "voices.ssmdbook", (5,))
++    amy_path = root / "amy.renderprofile.toml"
++    joe_path = root / "joe.renderprofile.toml"
++    amy = _profile(amy_path, "amy")
++    joe = _profile(joe_path, "joe")
++
++    assert _render(root, amy_path, "--chapters", "5") == 0
++    capsys.readouterr()
++    amy_variant = _variant(root, amy, "amy")
++    amy_plan_bytes = (amy_variant / "chapter-0005.renderplan.toml").read_bytes()
++    assert _render(root, joe_path, "--chapters", "5") == 0
++    capsys.readouterr()
++    joe_variant = _variant(root, joe, "joe")
++
++    assert amy.profile_id != joe.profile_id
++    assert amy_variant != joe_variant
++    assert (amy_variant / "chapter-0005.renderplan.toml").read_bytes() == amy_plan_bytes
++    assert load_renderplan_set(joe_variant / "renderplan-set.toml").profile_id == joe.profile_id
++    assert renderplan_codec.load_profile(joe_variant / "renderprofile.toml").profile_id == joe.profile_id
++
++
++@pytest.mark.parametrize(
++    ("fail_fast", "expected_statuses", "expected_set"),
++    [
++        (False, ["written", "failed", "written"], ["chapter-0005", "chapter-0007"]),
++        (True, ["written", "failed", "skipped"], ["chapter-0005"]),
++    ],
++)
++def test_render_book_missing_plan_continues_or_skips(
++    tmp_path: Path,
++    capsys,
++    fail_fast: bool,
++    expected_statuses: list[str],
++    expected_set: list[str],
++) -> None:
++    root = _write_book(tmp_path / f"partial-{fail_fast}.ssmdbook", (5, 6, 7), plans=(5, 7))
++    profile_path = root / "narration.renderprofile.toml"
++    profile = _profile(profile_path)
++    options = ["--chapters", "5-7"]
++    if fail_fast:
++        options.extend(["--fail-fast", "--variant", "failfast"])
++    result = _render(root, profile_path, *options)
++    captured = capsys.readouterr()
++    variant = _variant(root, profile, "failfast" if fail_fast else "narration")
++
++    assert result == 1
++    assert [item["status"] for item in _report(variant / "render-report.toml")["item"]] == expected_statuses
++    report = _report(variant / "render-report.toml")
++    assert report["item"][1]["code"] == "input.missing"
++    assert report["item"][1]["stage"] == "load"
++    assert [chapter.id for chapter in load_renderplan_set(variant / "renderplan-set.toml").chapters] == expected_set
++    if not fail_fast:
++        assert "RenderPlans are already saved" in captured.err
++
++
++def test_render_book_force_replaces_only_after_success(tmp_path: Path, capsys) -> None:
++    root = _write_book(tmp_path / "force.ssmdbook", (5,))
++    profile_path = root / "narration.renderprofile.toml"
++    profile = _profile(profile_path)
++    assert _render(root, profile_path, "--chapters", "5") == 0
++    capsys.readouterr()
++    variant = _variant(root, profile)
++    output = variant / "chapter-0005.renderplan.toml"
++    before = output.read_bytes()
++    previous = load_renderplan_set(variant / "renderplan-set.toml").chapters[0]
++
++    changed_text = "Changed semantic chapter 5."
++    changed = FlowPlan(
++        language="en-US",
++        flow=(FlowUnit((FlowSegment(changed_text, "en-US"),)),),
++    )
++    changed.save(root / "utterplan/chapter-0005.utterplan.toml")
++    assert _render(root, profile_path, "--chapters", "5") == 1
++    captured = capsys.readouterr()
++    assert "output.exists" in captured.err
++    assert output.read_bytes() == before
++    assert load_renderplan_set(variant / "renderplan-set.toml").chapters[0] == previous
++
++    assert _render(root, profile_path, "--chapters", "5", "--force") == 0
++    capsys.readouterr()
++    updated = load_renderplan_set(variant / "renderplan-set.toml").chapters[0]
++    assert updated.source_plan_id != previous.source_plan_id
++    assert updated.render_plan_id != previous.render_plan_id
++    assert renderplan_codec.load_plan(output).speech[0].text == changed_text
++
++
++def test_render_book_supports_custom_roots_and_sanitizes_variant_label(tmp_path: Path, capsys) -> None:
++    root = _write_book(tmp_path / "custom.ssmdbook", (5,))
++    custom_plans = tmp_path / "generated-plans"
++    _write_book(root, (5,), utterplan_dir=custom_plans)
++    profile_path = root / "narration.renderprofile.toml"
++    profile = _profile(profile_path)
++    output_root = tmp_path / "build" / "renderplan"
++
++    result = _render(
++        root,
++        profile_path,
++        "--chapters",
++        "5",
++        "--utterplan-dir",
++        str(custom_plans),
++        "--output-root",
++        str(output_root),
++        "--variant",
++        "../Book Audio/..",
++        input_path=root / "chapters",
++    )
++    capsys.readouterr()
++    variant = output_root / f"book-audio--{profile.profile_id.removeprefix('sha256:')[:12]}"
++    assert result == 0
++    assert (variant / "chapter-0005.renderplan.toml").is_file()
++    expected_utterplan = Path(
++        os.path.relpath(custom_plans / "chapter-0005.utterplan.toml", start=variant)
++    ).as_posix()
++    assert load_renderplan_set(variant / "renderplan-set.toml").chapters[0].utterplan == expected_utterplan
++    assert not (tmp_path / "Book Audio").exists()
++
++
++def test_invalid_profile_and_unsafe_paths_do_not_create_outputs(tmp_path: Path, capsys) -> None:
++    root = _write_book(tmp_path / "unsafe.ssmdbook", (5,))
++    invalid_profile = root / "invalid.renderprofile.toml"
++    invalid_profile.write_text("not valid TOML", encoding="utf-8")
++    assert _render(root, invalid_profile, "--chapters", "5") == 2
++    capsys.readouterr()
++    assert not (root / "renderplan").exists()
++
++    profile_path = root / "narration.renderprofile.toml"
++    _profile(profile_path)
++    assert _render(
++        root,
++        profile_path,
++        "--chapters",
++        "5",
++        "--output-root",
++        str(root / "chapters" / "generated"),
++    ) == 2
++    capsys.readouterr()
++    assert not (root / "chapters/generated").exists()
++
++    assert _render(root, profile_path, "--chapters", "5", "--report", str(root / "manifest.json")) == 2
++    capsys.readouterr()
++    assert not (root / "renderplan").exists()
++
++
++def test_duplicate_source_basenames_are_rejected_before_output_creation(
++    tmp_path: Path, capsys
++) -> None:
++    root = _write_book(
++        tmp_path / "duplicates.ssmdbook",
++        (5, 6),
++        names={
++            5: "chapters/part-a/chapter.ssmd.md",
++            6: "chapters/part-b/chapter.ssmd.md",
++        },
++    )
++    profile_path = root / "narration.renderprofile.toml"
++    _profile(profile_path)
++
++    assert _render(root, profile_path, "--chapters", "5-6") == 2
++    assert "collide" in capsys.readouterr().err
++    assert not (root / "renderplan").exists()
++
++
++def test_existing_variant_corruption_and_nonempty_unindexed_directory_fail_closed(
++    tmp_path: Path, capsys
++) -> None:
++    root = _write_book(tmp_path / "corrupt.ssmdbook", (5, 6))
++    profile_path = root / "narration.renderprofile.toml"
++    profile = _profile(profile_path)
++    variant = _variant(root, profile)
++    variant.mkdir(parents=True)
++    (variant / "experiment.txt").write_text("unindexed", encoding="utf-8")
++
++    assert _render(root, profile_path, "--chapters", "5", "--force") == 2
++    assert "refusing to adopt" in capsys.readouterr().err
++    assert not (variant / "renderplan-set.toml").exists()
++
++
++def test_malformed_set_and_missing_snapshot_fail_closed_even_with_force(
++    tmp_path: Path, capsys
++) -> None:
++    root = _write_book(tmp_path / "provenance.ssmdbook", (5, 6))
++    profile_path = root / "narration.renderprofile.toml"
++    profile = _profile(profile_path)
++    assert _render(root, profile_path, "--chapters", "5") == 0
++    capsys.readouterr()
++    variant = _variant(root, profile)
++    set_path = variant / "renderplan-set.toml"
++    set_bytes = set_path.read_bytes()
++    set_path.write_text("format = [", encoding="utf-8")
++
++    assert _render(root, profile_path, "--chapters", "6", "--force") == 2
++    assert "invalid existing renderplan-set.toml" in capsys.readouterr().err
++    assert not (variant / "chapter-0006.renderplan.toml").exists()
++
++    set_path.write_bytes(set_bytes)
++    (variant / "renderprofile.toml").unlink()
++    assert _render(root, profile_path, "--chapters", "6", "--force") == 2
++    assert "snapshot is missing" in capsys.readouterr().err
++    assert not (variant / "chapter-0006.renderplan.toml").exists()
++
++
++def test_existing_set_and_snapshot_mismatches_are_not_bypassed_by_force(
++    tmp_path: Path, capsys
++) -> None:
++    root = _write_book(tmp_path / "mismatch.ssmdbook", (5, 6))
++    profile_a_path = root / "narration.renderprofile.toml"
++    profile_b_path = root / "other.renderprofile.toml"
++    profile_a = _profile(profile_a_path, "amy")
++    profile_b = _profile(profile_b_path, "joe")
++    assert _render(root, profile_a_path, "--chapters", "5", "--variant", "shared") == 0
++    capsys.readouterr()
++    variant_a = _variant(root, profile_a, "shared")
++    variant_b = _variant(root, profile_b, "shared")
++    shutil.copytree(variant_a, variant_b)
++
++    assert _render(
++        root, profile_b_path, "--chapters", "6", "--variant", "shared", "--force"
++    ) == 2
++    assert "does not match the active RenderProfile" in capsys.readouterr().err
++    assert not (variant_b / "chapter-0006.renderplan.toml").exists()
++
++    renderplan_codec.save_profile(profile_b, variant_a / "renderprofile.toml")
++    assert _render(
++        root, profile_a_path, "--chapters", "6", "--variant", "shared", "--force"
++    ) == 2
++    assert "snapshot identity" in capsys.readouterr().err
++    assert not (variant_a / "chapter-0006.renderplan.toml").exists()
+diff --git a/tests/test_renderplan_batch.py b/tests/test_renderplan_batch.py
+new file mode 100644
+index 0000000..6c8b52a
+--- /dev/null
++++ b/tests/test_renderplan_batch.py
+@@ -0,0 +1,336 @@
++from __future__ import annotations
++
++from dataclasses import replace
++from pathlib import Path
++
++import pytest
++import tomlkit
++from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
++from renderplan import codec as renderplan_codec
++
++from utterplan import FlowPlan, FlowSegment, FlowUnit, TokenView
++from utterplan.renderplan_batch import (
++    RenderPlanSet,
++    RenderPlanSetChapter,
++    RenderPlanSetError,
++    RenderRequest,
++    load_renderplan_set,
++    new_renderplan_set,
++    render_to_files,
++    renderplan_set_from_dict,
++    renderplan_set_to_dict,
++    save_renderplan_set,
++    validate_renderplan_set_profile,
++)
++
++
++def _profile(binding: str = "fixture") -> RenderProfile:
++    return RenderProfile(
++        roles={"narrator": RoleProfile(language="en-US", binding={"engine": binding})},
++        default_role="narrator",
++        planning=PlanningPolicy(split="sentence"),
++        pauses=PausePolicy(mode="manual"),
++    ).with_identity()
++
++
++def _chapter(
++    *,
++    chapter_id: str = "chapter-0005",
++    source_number: int = 5,
++    output: str = "chapter-0005.renderplan.toml",
++) -> RenderPlanSetChapter:
++    return RenderPlanSetChapter(
++        id=chapter_id,
++        source_number=source_number,
++        source="../../chapters/chapter-0005.ssmd.md",
++        utterplan="../../utterplan/chapter-0005.utterplan.toml",
++        source_plan_id="sha256:" + "1" * 64,
++        renderplan=output,
++        render_plan_id="sha256:" + "2" * 64,
++    )
++
++
++def _set(profile: RenderProfile | None = None) -> RenderPlanSet:
++    selected = profile or _profile()
++    return new_renderplan_set(
++        variant="narration",
++        profile_id=selected.profile_id or selected.computed_id(),
++        manifest="../../manifest.json",
++        utterplan_dir="../../utterplan",
++        source_profile="../../narration.renderprofile.toml",
++        chapters=(_chapter(),),
++    )
++
++
++def test_renderplan_set_toml_roundtrip_and_atomic_write(tmp_path: Path) -> None:
++    original = _set()
++    destination = tmp_path / "variant" / "renderplan-set.toml"
++
++    save_renderplan_set(destination, original)
++
++    loaded = load_renderplan_set(destination)
++    assert loaded == original
++    assert loaded.profile_fingerprint == loaded.profile_id.removeprefix("sha256:")[:12]
++    assert loaded.chapters == (_chapter(),)
++    assert "[[chapter]]" in destination.read_text(encoding="utf-8")
++
++
++def test_renderplan_set_rejects_profile_fingerprint_mismatch() -> None:
++    raw = renderplan_set_to_dict(_set())
++    raw["profile_fingerprint"] = "f" * 12
++
++    with pytest.raises(RenderPlanSetError, match="does not match"):
++        renderplan_set_from_dict(raw)
++
++
++def test_renderplan_set_rejects_unknown_and_missing_fields() -> None:
++    raw = renderplan_set_to_dict(_set())
++    raw["unexpected"] = True
++    with pytest.raises(RenderPlanSetError, match="unknown field"):
++        renderplan_set_from_dict(raw)
++
++    del raw["unexpected"]
++    del raw["profile"]
++    with pytest.raises(RenderPlanSetError, match="missing required field"):
++        renderplan_set_from_dict(raw)
++
++
++def test_renderplan_set_rejects_duplicate_chapter_ids_and_renderplan_paths() -> None:
++    original = _set()
++    with pytest.raises(RenderPlanSetError, match="duplicate chapter id"):
++        replace(original, chapters=(_chapter(), _chapter(source_number=6)))
++
++    with pytest.raises(RenderPlanSetError, match="duplicate renderplan path"):
++        replace(
++            original,
++            chapters=(
++                _chapter(),
++                _chapter(chapter_id="chapter-0006", source_number=6),
++            ),
++        )
++
++
++def test_renderplan_set_profile_and_snapshot_identity_are_verified(tmp_path: Path) -> None:
++    original_profile = _profile()
++    snapshot = tmp_path / "renderprofile.toml"
++    renderplan_codec.save_profile(original_profile, snapshot)
++    value = _set(original_profile)
++    identity = original_profile.profile_id or original_profile.computed_id()
++
++    assert validate_renderplan_set_profile(
++        value, snapshot, expected_profile_id=identity
++    ) == original_profile
++
++    other_profile = _profile("other")
++    other_identity = other_profile.profile_id or other_profile.computed_id()
++    with pytest.raises(RenderPlanSetError, match="does not match the active"):
++        validate_renderplan_set_profile(
++            value, snapshot, expected_profile_id=other_identity
++        )
++
++    other_set = _set(other_profile)
++    with pytest.raises(RenderPlanSetError, match="snapshot identity"):
++        validate_renderplan_set_profile(
++            other_set, snapshot, expected_profile_id=other_identity
++        )
++
++
++def test_load_renderplan_set_fails_closed_on_malformed_toml(tmp_path: Path) -> None:
++    path = tmp_path / "renderplan-set.toml"
++    path.write_text("format = [", encoding="utf-8")
++
++    with pytest.raises(RenderPlanSetError, match="cannot read renderplan set"):
++        load_renderplan_set(path)
++
++
++
++def _request(root: Path, number: int, *, missing: bool = False) -> RenderRequest:
++    source_plan_path = root / "utterplan" / f"chapter-{number:04d}.utterplan.toml"
++    source_chapter_path = root / "chapters" / f"chapter-{number:04d}.ssmd.md"
++    source_chapter_path.parent.mkdir(parents=True, exist_ok=True)
++    source_chapter_path.write_text(f"Chapter {number}.", encoding="utf-8")
++    if not missing:
++        source_plan_path.parent.mkdir(parents=True, exist_ok=True)
++        text = f"Chapter {number}."
++        source = FlowPlan(
++            language="en-US",
++            flow=(
++                FlowUnit(
++                    (
++                        FlowSegment(
++                            text,
++                            "en-US",
++                            tokens=(TokenView(0, len(text)),),
++                            boundary_after=("sentence",),
++                        ),
++                    )
++                ),
++            ),
++        )
++        source.save(source_plan_path)
++    return RenderRequest(
++        id=f"chapter-{number:04d}",
++        source_number=number,
++        source_plan=source_plan_path,
++        output=root / "renderplan" / "narration" / f"chapter-{number:04d}.renderplan.toml",
++        source_chapter=source_chapter_path,
++    )
++
++
++def test_render_batch_persists_plans_and_upserts_in_manifest_order(tmp_path: Path) -> None:
++    profile = _profile()
++    initial = replace(
++        _set(profile),
++        chapters=(
++            _chapter(
++                chapter_id="chapter-0006",
++                source_number=6,
++                output="chapter-0006.renderplan.toml",
++            ),
++        ),
++    )
++    set_path = tmp_path / "renderplan" / "narration" / "renderplan-set.toml"
++    report_path = set_path.parent / "render-report.toml"
++    save_renderplan_set(set_path, initial)
++    requests = [_request(tmp_path, 7), _request(tmp_path, 5)]
++
++    outcomes = render_to_files(
++        requests,
++        profile=profile,
++        renderplan_set=initial,
++        set_path=set_path,
++        report_path=report_path,
++        chapter_order={"chapter-0005": 0, "chapter-0006": 1, "chapter-0007": 2},
++    )
++
++    assert [outcome.status for outcome in outcomes] == ["written", "written"]
++    updated = load_renderplan_set(set_path)
++    assert [chapter.id for chapter in updated.chapters] == [
++        "chapter-0005",
++        "chapter-0006",
++        "chapter-0007",
++    ]
++    for outcome in outcomes:
++        assert outcome.render_plan_id is not None
++        saved = renderplan_codec.load_plan(outcome.output)
++        assert saved.plan_id == outcome.render_plan_id
++        assert saved.render_profile_id == profile.profile_id
++    report = tomlkit.parse(report_path.read_text(encoding="utf-8")).unwrap()
++    assert report["complete"] is True
++    assert report["requested"] == 2
++    assert report["written"] == 2
++    assert report["failed"] == 0
++
++
++@pytest.mark.parametrize(
++    ("fail_fast", "expected"),
++    [
++        (False, ["written", "failed", "written"]),
++        (True, ["written", "failed", "skipped"]),
++    ],
++)
++def test_render_batch_continues_or_skips_and_records_report(
++    tmp_path: Path, fail_fast: bool, expected: list[str]
++) -> None:
++    profile = _profile()
++    initial = replace(_set(profile), chapters=())
++    set_path = tmp_path / "renderplan" / "narration" / "renderplan-set.toml"
++    report_path = set_path.parent / "render-report.toml"
++    save_renderplan_set(set_path, initial)
++    requests = [_request(tmp_path, 5), _request(tmp_path, 6, missing=True), _request(tmp_path, 7)]
++
++    outcomes = render_to_files(
++        requests,
++        profile=profile,
++        renderplan_set=initial,
++        set_path=set_path,
++        report_path=report_path,
++        fail_fast=fail_fast,
++        chapter_order={"chapter-0005": 0, "chapter-0006": 1, "chapter-0007": 2},
++    )
++
++    assert [outcome.status for outcome in outcomes] == expected
++    report = tomlkit.parse(report_path.read_text(encoding="utf-8")).unwrap()
++    assert report["complete"] is True
++    assert report["written"] == expected.count("written")
++    assert report["failed"] == 1
++    assert report["skipped"] == expected.count("skipped")
++    assert report["item"][1]["stage"] == "load"
++    assert report["item"][1]["code"] == "input.missing"
++    assert [chapter.id for chapter in load_renderplan_set(set_path).chapters] == ["chapter-0005"] + (
++        ["chapter-0007"] if not fail_fast else []
++    )
++
++
++
++def test_render_batch_protects_existing_output_unless_force_is_enabled(tmp_path: Path) -> None:
++    profile = _profile()
++    initial = replace(_set(profile), chapters=())
++    set_path = tmp_path / "renderplan" / "narration" / "renderplan-set.toml"
++    report_path = set_path.parent / "render-report.toml"
++    save_renderplan_set(set_path, initial)
++    request = _request(tmp_path, 5)
++    request.output.parent.mkdir(parents=True, exist_ok=True)
++    request.output.write_text("keep this", encoding="utf-8")
++
++    protected = render_to_files(
++        [request],
++        profile=profile,
++        renderplan_set=initial,
++        set_path=set_path,
++        report_path=report_path,
++    )
++    assert protected[0].status == "failed"
++    assert protected[0].error_code == "output.exists"
++    assert request.output.read_text(encoding="utf-8") == "keep this"
++    assert load_renderplan_set(set_path).chapters == ()
++
++    forced = render_to_files(
++        [request],
++        profile=profile,
++        renderplan_set=initial,
++        set_path=set_path,
++        report_path=report_path,
++        force=True,
++    )
++    assert forced[0].status == "written"
++    assert renderplan_codec.load_plan(request.output).plan_id == forced[0].render_plan_id
++    assert [item.id for item in load_renderplan_set(set_path).chapters] == ["chapter-0005"]
++
++
++def test_render_batch_reports_invalid_utterplan_input(tmp_path: Path) -> None:
++    profile = _profile()
++    initial = replace(_set(profile), chapters=())
++    set_path = tmp_path / "renderplan" / "narration" / "renderplan-set.toml"
++    report_path = set_path.parent / "render-report.toml"
++    save_renderplan_set(set_path, initial)
++    request = _request(tmp_path, 5, missing=True)
++    request.source_plan.parent.mkdir(parents=True, exist_ok=True)
++    request.source_plan.write_text("not a valid flowplan", encoding="utf-8")
++
++    outcomes = render_to_files(
++        [request],
++        profile=profile,
++        renderplan_set=initial,
++        set_path=set_path,
++        report_path=report_path,
++    )
++
++    assert outcomes[0].status == "failed"
++    assert outcomes[0].stage == "load"
++    assert outcomes[0].error_code
++    assert load_renderplan_set(set_path).chapters == ()
++
++
++@pytest.mark.parametrize("unsafe_path", ["../manifest.json", "/tmp/plan.toml", "a/../b.toml", "a\\b.toml"])
++def test_renderplan_set_rejects_renderplan_paths_outside_variant(unsafe_path: str) -> None:
++    original = _set()
++    chapter = replace(_chapter(), renderplan=unsafe_path)
++
++    with pytest.raises(RenderPlanSetError, match="normalized relative path"):
++        replace(original, chapters=(chapter,))
++
++
++def test_renderplan_set_requires_canonical_profile_snapshot_path() -> None:
++    with pytest.raises(RenderPlanSetError, match="canonical"):
++        replace(_set(), snapshot="../outside.renderprofile.toml")
+diff --git a/utterplan/cli.py b/utterplan/cli.py
+index 0592d01..c4c2310 100644
+--- a/utterplan/cli.py
++++ b/utterplan/cli.py
+@@ -2,6 +2,8 @@ from __future__ import annotations
+
+ import argparse
+ import json
++import os
++import re
+ import sys
+ from contextlib import suppress
+ from pathlib import Path
+@@ -23,6 +25,17 @@ from .migration import MigrationResult, migrate_plan_data
+ from .model import FlowPlan, PauseIntent
+ from .preview import PreviewChunk, preview_plan
+ from .renderability import format_renderability_error
++from .renderplan_batch import (
++    RenderOutcome,
++    RenderPlanSet,
++    RenderPlanSetError,
++    RenderRequest,
++    load_renderplan_set,
++    new_renderplan_set,
++    render_to_files,
++    save_renderplan_set,
++    validate_renderplan_set_profile,
++)
+ from .renderplan_export import build_render_plan, format_render_plan_explanation
+ from .ssmdbook import (
+     SSMDBookError,
+@@ -303,6 +316,45 @@ def build_parser() -> argparse.ArgumentParser:
+     render_plan_parser.add_argument(
+         "--json", action="store_true", help="emit the generated plan as machine-readable JSON"
+     )
++    render_book_parser = commands.add_parser(
++        "render-book",
++        help="project selected SSMDBook UtterPlans into a profile-specific RenderPlan set",
++        formatter_class=argparse.RawDescriptionHelpFormatter,
++        epilog=(
++            "examples:\n"
++            "  utterplan render-book novel.ssmdbook --profile narration.renderprofile.toml\n"
++            "  utterplan render-book novel.ssmdbook --chapters 5-17 --profile narration.renderprofile.toml\n"
++            "  utterplan render-book chapters --chapters 1,3-5 --profile narration.renderprofile.toml"
++        ),
++    )
++    render_book_parser.add_argument(
++        "input", type=Path, help=".ssmdbook directory or its canonical chapters/ directory"
++    )
++    render_book_parser.add_argument(
++        "--profile", type=Path, required=True, help="shared RenderProfile TOML file"
++    )
++    render_book_parser.add_argument(
++        "--chapters",
++        default="all",
++        metavar="SELECTOR",
++        help="source chapter selection: all, N, N-M, or comma-separated ranges (default: all)",
++    )
++    render_book_parser.add_argument(
++        "--utterplan-dir", type=Path, help="directory of existing .utterplan.toml files"
++    )
++    render_book_parser.add_argument(
++        "--output-root", type=Path, help="RenderPlan collection root (default: <ssmdbook>/renderplan)"
++    )
++    render_book_parser.add_argument(
++        "--variant", help="safe human-readable variant label (profile fingerprint is always appended)"
++    )
++    render_book_parser.add_argument(
++        "--force", action="store_true", help="replace only selected existing RenderPlan files"
++    )
++    render_book_parser.add_argument(
++        "--fail-fast", action="store_true", help="skip later chapters after the first item failure"
++    )
++    render_book_parser.add_argument("--report", type=Path, help="TOML operational report path")
+     inspect_parser = commands.add_parser("inspect", help="inspect a saved TTS plan")
+     inspect_parser.add_argument("input", type=Path)
+     inspect_parser.add_argument("--unit", type=int)
+@@ -444,14 +496,21 @@ def _linguistics_config(policy: str) -> LinguisticsConfig:
+     )
+
+
+-def _batch_output_name(source: Path) -> str:
++def _source_output_stem(source: Path) -> str:
+     lower_name = source.name.lower()
+     for suffix in (".ssmd.md", ".ssmd", ".md"):
+         if lower_name.endswith(suffix):
+-            return source.name[: -len(suffix)] + ".utterplan.toml"
+-    return source.stem + ".utterplan.toml"
++            return source.name[: -len(suffix)]
++    return source.stem
+
+
++def _utterplan_output_name(source: Path) -> str:
++    return _source_output_stem(source) + ".utterplan.toml"
++
++
++def _renderplan_output_name(source: Path) -> str:
++    return _source_output_stem(source) + ".renderplan.toml"
++
+ def _planner_config_from_batch_args(args: argparse.Namespace) -> PlannerConfig:
+     return PlannerConfig(
+         language=args.language or "en-US",
+@@ -550,6 +609,7 @@ def _print_batch_diagnostics(
+     *,
+     verbosity: Literal["warnings", "all", "none"],
+ ) -> None:
++    labels: tuple[tuple[str, str], ...]
+     if verbosity == "all":
+         selected = outcome.diagnostics
+         labels = (("info", "info"), ("warning", "warnings"), ("error", "errors"))
+@@ -586,7 +646,7 @@ def _print_batch_diagnostics(
+
+ def _compile_many(args: argparse.Namespace) -> int:
+     sources: list[Path] = args.inputs
+-    outputs = [args.output_dir / _batch_output_name(source) for source in sources]
++    outputs = [args.output_dir / _utterplan_output_name(source) for source in sources]
+     owners: dict[Path, Path] = {}
+     for source, output in zip(sources, outputs, strict=True):
+         key = output.resolve()
+@@ -644,7 +704,7 @@ def _compile_book(args: argparse.Namespace) -> int:
+     if _path_is_within(resolved_output_dir, chapters_dir):
+         raise _CliUsageError("book plan output must not be inside the source chapters/ directory")
+
+-    outputs = [output_dir / _batch_output_name(source) for source in sources]
++    outputs = [output_dir / _utterplan_output_name(source) for source in sources]
+     owners: dict[Path, Path] = {}
+     for source, output in zip(sources, outputs, strict=True):
+         key = output.resolve()
+@@ -699,6 +759,246 @@ def _compile_book(args: argparse.Namespace) -> int:
+     )
+
+
++def _render_book(args: argparse.Namespace) -> int:
++    try:
++        book = load_ssmdbook_index(args.input)
++        chapters = select_ssmdbook_chapters(book, args.chapters)
++        sources = [selected_chapter_path(book, chapter) for chapter in chapters]
++    except SSMDBookError as exc:
++        raise _CliUsageError(str(exc)) from exc
++
++    utterplan_dir_arg = args.utterplan_dir or (book.root / "utterplan")
++    try:
++        utterplan_dir = utterplan_dir_arg.expanduser().resolve(strict=True)
++    except (OSError, RuntimeError) as exc:
++        raise _CliUsageError(f"cannot resolve UtterPlan directory {utterplan_dir_arg}: {exc}") from exc
++    if not utterplan_dir.is_dir():
++        raise _CliUsageError(f"UtterPlan directory does not exist or is not a directory: {utterplan_dir}")
++
++    profile_input = args.profile.expanduser()
++    try:
++        profile = renderplan_codec.load_profile(profile_input)
++        profile_path = profile_input.resolve(strict=True)
++    except (OSError, RuntimeError, ValueError, TypeError) as exc:
++        raise _CliUsageError(f"invalid RenderProfile {profile_input}: {exc}") from exc
++    profile_id = profile.profile_id or profile.computed_id()
++    fingerprint = profile_id.removeprefix("sha256:")[:12]
++    label = _render_variant_label(profile_path, args.variant)
++    variant_name = f"{label}--{fingerprint}"
++
++    output_root_arg = args.output_root or (book.root / "renderplan")
++    output_root = output_root_arg.expanduser().resolve(strict=False)
++    variant_dir = (output_root / variant_name).resolve(strict=False)
++    snapshot_path = variant_dir / "renderprofile.toml"
++    set_path = variant_dir / "renderplan-set.toml"
++    report_arg = args.report or (variant_dir / "render-report.toml")
++    report_path = report_arg.expanduser().resolve(strict=False)
++    chapters_dir = (book.root / "chapters").resolve(strict=False)
++    manifest_path = book.manifest_path.resolve(strict=True)
++
++    source_plans = [utterplan_dir / _utterplan_output_name(source) for source in sources]
++    outputs = [variant_dir / _renderplan_output_name(source) for source in sources]
++    requests = [
++        RenderRequest(
++            id=chapter.id,
++            source_number=chapter.source_number,
++            source_plan=source_plan,
++            output=output,
++            source_chapter=source,
++        )
++        for chapter, source, source_plan, output in zip(
++            chapters, sources, source_plans, outputs, strict=True
++        )
++    ]
++
++    if output_root.exists() and not output_root.is_dir():
++        raise _CliUsageError(f"RenderPlan output root is not a directory: {output_root}")
++    if variant_dir.exists() and not variant_dir.is_dir():
++        raise _CliUsageError(f"RenderPlan variant path is not a directory: {variant_dir}")
++    if _path_is_within(output_root, chapters_dir) or _path_is_within(variant_dir, chapters_dir):
++        raise _CliUsageError("RenderPlan output root and variant must not be inside source chapters/")
++    if _path_is_within(variant_dir, utterplan_dir):
++        raise _CliUsageError("RenderPlan variant must not be inside the active UtterPlan directory")
++
++    write_paths = [*outputs, snapshot_path, set_path, report_path]
++    owners: dict[Path, Path] = {}
++    for path in write_paths:
++        key = path.resolve(strict=False)
++        if key in owners:
++            raise _CliUsageError(f"RenderPlan output paths collide: {owners[key]} and {path}")
++        owners[key] = path
++        if _path_is_within(key, chapters_dir):
++            raise _CliUsageError(f"RenderPlan output would write into source chapters/: {path}")
++    if len({path.resolve(strict=False) for path in outputs}) != len(outputs):
++        raise _CliUsageError("selected chapters map to duplicate RenderPlan output paths")
++
++    input_paths = [manifest_path, profile_path, *source_plans, *sources]
++    input_owners = {path.resolve(strict=False): path for path in input_paths}
++    for path in write_paths:
++        collision = input_owners.get(path.resolve(strict=False))
++        if collision is not None:
++            raise _CliUsageError(f"RenderPlan output path {path} collides with input {collision}")
++    for path in (snapshot_path, set_path, report_path):
++        if path.exists() and path.is_dir():
++            raise _CliUsageError(f"RenderPlan metadata output is a directory: {path}")
++
++    if variant_dir.exists():
++        if set_path.exists():
++            try:
++                renderplan_set = load_renderplan_set(set_path)
++            except RenderPlanSetError as exc:
++                raise _CliUsageError(f"invalid existing renderplan-set.toml: {exc}") from exc
++            if renderplan_set.variant != label:
++                raise _CliUsageError("existing renderplan-set.toml variant does not match its directory")
++            if renderplan_set.snapshot != "renderprofile.toml":
++                raise _CliUsageError("existing renderplan-set.toml does not use the canonical profile snapshot")
++            try:
++                validate_renderplan_set_profile(
++                    renderplan_set,
++                    variant_dir / renderplan_set.snapshot,
++                    expected_profile_id=profile_id,
++                )
++            except RenderPlanSetError as exc:
++                raise _CliUsageError(str(exc)) from exc
++            existing_owners = {
++                (variant_dir / chapter.renderplan).resolve(strict=False): chapter.id
++                for chapter in renderplan_set.chapters
++            }
++            for request in requests:
++                owner = existing_owners.get(request.output.resolve(strict=False))
++                if owner is not None and owner != request.id:
++                    raise _CliUsageError(
++                        f"RenderPlan output {request.output} is already assigned to chapter {owner}"
++                    )
++        else:
++            try:
++                nonempty = next(variant_dir.iterdir(), None) is not None
++            except OSError as exc:
++                raise _CliUsageError(f"cannot inspect RenderPlan variant {variant_dir}: {exc}") from exc
++            if nonempty:
++                raise _CliUsageError(
++                    f"refusing to adopt non-empty RenderPlan variant without a valid set index: {variant_dir}"
++                )
++            renderplan_set = _new_renderplan_set(
++                label, profile_id, profile_path, book.root, utterplan_dir, variant_dir, manifest_path
++            )
++    else:
++        renderplan_set = _new_renderplan_set(
++            label, profile_id, profile_path, book.root, utterplan_dir, variant_dir, manifest_path
++        )
++
++    if not variant_dir.exists():
++        try:
++            variant_dir.mkdir(parents=True)
++        except OSError as exc:
++            raise _CliUsageError(f"cannot create RenderPlan variant directory {variant_dir}: {exc}") from exc
++    if not set_path.exists():
++        try:
++            renderplan_codec.save_profile(profile, snapshot_path)
++            save_renderplan_set(set_path, renderplan_set)
++        except (OSError, ValueError, TypeError) as exc:
++            raise _CliUsageError(f"cannot initialize RenderPlan variant {variant_dir}: {exc}") from exc
++
++    print("UtterPlan book render", file=sys.stderr)
++    print(f"  workspace:  {book.root}", file=sys.stderr)
++    print(f"  chapters:   {args.chapters}", file=sys.stderr)
++    print(f"  selected:   {len(requests)}", file=sys.stderr)
++    print(f"  profile:    {profile_path}", file=sys.stderr)
++    print(f"  profile-id: {profile_id}", file=sys.stderr)
++    print(f"  variant:    {variant_name}", file=sys.stderr)
++    print(f"  utterplans: {utterplan_dir}", file=sys.stderr)
++    print(f"  output:     {variant_dir}", file=sys.stderr)
++
++    written = 0
++
++    def report_progress(outcome: RenderOutcome) -> None:
++        nonlocal written
++        print(f"[{outcome.index}/{len(requests)}] {outcome.id}  {outcome.source_plan}", file=sys.stderr)
++        if outcome.status == "written":
++            written += 1
++            print(f"       wrote {outcome.output}", file=sys.stderr)
++        elif outcome.status == "failed":
++            print("       FAILED", file=sys.stderr)
++            print(
++                f"       {outcome.error_code or 'unknown'}: {outcome.error_message or 'projection failed'}",
++                file=sys.stderr,
++            )
++            if not args.fail_fast and outcome.index < len(requests):
++                print(
++                    f"       continuing with {requests[outcome.index].id}; "
++                    f"{written} RenderPlans are already saved",
++                    file=sys.stderr,
++                )
++        else:
++            print("       skipped after an earlier failure", file=sys.stderr)
++
++    try:
++        outcomes = render_to_files(
++            requests,
++            profile=profile,
++            renderplan_set=renderplan_set,
++            set_path=set_path,
++            report_path=report_path,
++            force=args.force,
++            fail_fast=args.fail_fast,
++            chapter_order={chapter.id: index for index, chapter in enumerate(book.chapters)},
++            on_progress=report_progress,
++        )
++    except RenderPlanSetError as exc:
++        raise _CliUsageError(str(exc)) from exc
++
++    failed = sum(outcome.status == "failed" for outcome in outcomes)
++    skipped = sum(outcome.status == "skipped" for outcome in outcomes)
++    print("UtterPlan render summary", file=sys.stderr)
++    print(f"  requested: {len(requests)}", file=sys.stderr)
++    print(f"  written:   {written}", file=sys.stderr)
++    print(f"  failed:    {failed}", file=sys.stderr)
++    if skipped:
++        print(f"  skipped:   {skipped}", file=sys.stderr)
++    return 1 if failed else 0
++
++
++def _new_renderplan_set(
++    label: str,
++    profile_id: str,
++    profile_path: Path,
++    book_root: Path,
++    utterplan_dir: Path,
++    variant_dir: Path,
++    manifest_path: Path,
++) -> RenderPlanSet:
++    profile_in_workspace = _path_is_within(profile_path, book_root) or _path_is_within(
++        profile_path, variant_dir.parent
++    )
++    profile_reference = (
++        _relative_path_reference(profile_path, variant_dir)
++        if profile_in_workspace
++        else str(profile_path)
++    )
++    return new_renderplan_set(
++        variant=label,
++        profile_id=profile_id,
++        manifest=_relative_path_reference(manifest_path, variant_dir),
++        utterplan_dir=_relative_path_reference(utterplan_dir, variant_dir),
++        source_profile=profile_reference,
++    )
++
++
++def _relative_path_reference(path: Path, base: Path) -> str:
++    return Path(os.path.relpath(path.resolve(strict=False), start=base.resolve(strict=False))).as_posix()
++
++
++def _render_variant_label(profile_path: Path, override: str | None) -> str:
++    if override is not None:
++        raw_label = override
++    else:
++        name = profile_path.name
++        suffix = ".renderprofile.toml"
++        raw_label = name[: -len(suffix)] if name.lower().endswith(suffix) else profile_path.stem
++    label = re.sub(r"[^a-z0-9_.-]+", "-", raw_label.lower()).strip("._-")
++    return label or "profile"
++
++
+ def _compile(args: argparse.Namespace) -> int:
+     source, input_format = _read_compile_input(args)
+     trace_path: Path | None = args.trace
+@@ -951,6 +1251,8 @@ def main(argv: list[str] | None = None) -> int:
+             return _compile_many(args)
+         if args.command == "compile-book":
+             return _compile_book(args)
++        if args.command == "render-book":
++            return _render_book(args)
+         if args.command == "migrate":
+             return _migrate(args)
+         if args.command == "validate":
+@@ -1042,8 +1344,8 @@ def _preview(plan: FlowPlan, args: argparse.Namespace) -> None:
+                     "markers",
+                     "heading",
+                 ):
+-                    value = facts.get(key)
+-                    if value not in (None, [], {}):
++                    fact_value = facts.get(key)
++                    if fact_value not in (None, [], {}):
+                         print(
+                             f"      {key}: {json.dumps(value, ensure_ascii=False, sort_keys=True)}"
+                         )
+diff --git a/utterplan/planner.py b/utterplan/planner.py
+index 7d15a2c..1e36b4a 100644
+--- a/utterplan/planner.py
++++ b/utterplan/planner.py
+@@ -238,7 +238,7 @@ class UtterancePlanner:
+             parsed.annotations,
+             parsed.boundaries,
+         )
+-        if ssmd_mode:
++        if isinstance(preparer, SSMDSubstitutionPreparer):
+             prepared = preparer.prepare(*preparation_args, analyses=pass_a, parsed_document=parsed)
+         else:
+             prepared = preparer.prepare(*preparation_args, analyses=pass_a)
+diff --git a/utterplan/preview.py b/utterplan/preview.py
+index b163837..46b81f4 100644
+--- a/utterplan/preview.py
++++ b/utterplan/preview.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+
+ import re
++from collections.abc import Sequence
+ from dataclasses import dataclass
+ from typing import Literal
+
+@@ -86,6 +87,7 @@ def resolve_segment_selector(selector: str | None, segment_count: int) -> frozen
+         item = raw_item.strip()
+         if not item or _SELECTOR_ITEM.fullmatch(item) is None:
+             raise ValueError(f"invalid segment selector item: {raw_item!r}")
++        indexes: Sequence[int]
+         if "-" in item:
+             first_text, last_text = item.split("-", 1)
+             first, last = int(first_text), int(last_text)
+diff --git a/utterplan/renderplan_batch.py b/utterplan/renderplan_batch.py
+new file mode 100644
+index 0000000..cb6ccbf
+--- /dev/null
++++ b/utterplan/renderplan_batch.py
+@@ -0,0 +1,733 @@
++"""UtterPlan-owned metadata and batch projection support for book RenderPlans."""
++
++from __future__ import annotations
++
++import os
++import re
++from collections.abc import Callable, Mapping, Sequence
++from dataclasses import dataclass, replace
++from pathlib import Path, PurePosixPath, PureWindowsPath
++from typing import Any, Literal
++
++import tomlkit
++from renderplan import RenderProfile
++from renderplan import codec as renderplan_codec
++from tomlkit.exceptions import ParseError
++
++from ._version import __version__
++from .atomic_io import atomic_write_text
++from .exceptions import UtterPlanError
++from .model import FlowPlan
++from .renderplan_export import build_render_plan
++
++RENDERPLAN_SET_FORMAT = "utterplan-renderplan-set"
++RENDERPLAN_SET_VERSION = 1
++_PROFILE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
++_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{12}$")
++
++
++class RenderPlanSetError(ValueError):
++    """Invalid or unreadable UtterPlan RenderPlan collection metadata."""
++
++    def __init__(self, message: str, *, code: str = "index.invalid") -> None:
++        super().__init__(message)
++        self.code = code
++
++
++@dataclass(frozen=True, slots=True)
++class RenderPlanSetChapter:
++    """One successfully written chapter projection in a RenderPlan set."""
++
++    id: str
++    source_number: int
++    source: str
++    utterplan: str
++    source_plan_id: str
++    renderplan: str
++    render_plan_id: str
++
++
++@dataclass(frozen=True, slots=True)
++class RenderPlanSet:
++    """Workspace index for one immutable RenderProfile identity."""
++
++    variant: str
++    profile_fingerprint: str
++    producer_version: str
++    manifest: str
++    utterplan_dir: str
++    profile_id: str
++    snapshot: str
++    source_profile: str
++    chapters: tuple[RenderPlanSetChapter, ...] = ()
++
++    def __post_init__(self) -> None:
++        validate_renderplan_set(self)
++
++
++def validate_renderplan_set(value: RenderPlanSet) -> None:
++    """Reject malformed set values before they are read from or written to disk."""
++    _require_nonempty(value.variant, "variant")
++    _require_nonempty(value.producer_version, "producer.version")
++    _require_nonempty(value.manifest, "book.manifest")
++    _require_nonempty(value.utterplan_dir, "book.utterplan_dir")
++    _require_nonempty(value.snapshot, "profile.snapshot")
++    if value.snapshot != "renderprofile.toml":
++        raise RenderPlanSetError("profile.snapshot must be the canonical 'renderprofile.toml' file")
++    _require_nonempty(value.source_profile, "profile.source")
++    if not _PROFILE_ID_RE.fullmatch(value.profile_id):
++        raise RenderPlanSetError("profile.profile_id must be a full sha256 identity")
++    if not _FINGERPRINT_RE.fullmatch(value.profile_fingerprint):
++        raise RenderPlanSetError("profile_fingerprint must be 12 lowercase hexadecimal characters")
++    if value.profile_fingerprint != value.profile_id.removeprefix("sha256:")[:12]:
++        raise RenderPlanSetError("profile_fingerprint does not match profile.profile_id")
++    if not isinstance(value.chapters, tuple):
++        raise RenderPlanSetError("chapter entries must be a tuple")
++
++    seen_ids: set[str] = set()
++    seen_numbers: set[int] = set()
++    seen_renderplan_paths: set[str] = set()
++    for index, chapter in enumerate(value.chapters):
++        label = f"chapter[{index}]"
++        _require_nonempty(chapter.id, f"{label}.id")
++        if type(chapter.source_number) is not int or chapter.source_number <= 0:
++            raise RenderPlanSetError(f"{label}.source_number must be a positive integer")
++        for key in ("source", "utterplan", "renderplan"):
++            _require_nonempty(getattr(chapter, key), f"{label}.{key}")
++        renderplan_path = PurePosixPath(chapter.renderplan)
++        if (
++            "\x00" in chapter.renderplan
++            or "\\" in chapter.renderplan
++            or renderplan_path.is_absolute()
++            or PureWindowsPath(chapter.renderplan).drive
++            or not renderplan_path.parts
++            or any(part in {".", ".."} for part in renderplan_path.parts)
++            or renderplan_path.as_posix() != chapter.renderplan
++        ):
++            raise RenderPlanSetError(
++                f"{label}.renderplan must be a normalized relative path inside the variant"
++            )
++        for key in ("source_plan_id", "render_plan_id"):
++            plan_id = getattr(chapter, key)
++            if not _PROFILE_ID_RE.fullmatch(plan_id):
++                raise RenderPlanSetError(f"{label}.{key} must be a full sha256 identity")
++        if chapter.id in seen_ids:
++            raise RenderPlanSetError(f"duplicate chapter id: {chapter.id}")
++        if chapter.source_number in seen_numbers:
++            raise RenderPlanSetError(f"duplicate chapter source_number: {chapter.source_number}")
++        if chapter.renderplan in seen_renderplan_paths:
++            raise RenderPlanSetError(f"duplicate renderplan path: {chapter.renderplan}")
++        seen_ids.add(chapter.id)
++        seen_numbers.add(chapter.source_number)
++        seen_renderplan_paths.add(chapter.renderplan)
++
++
++def renderplan_set_to_dict(value: RenderPlanSet) -> dict[str, Any]:
++    """Return the stable plain-data representation for renderplan-set.toml."""
++    validate_renderplan_set(value)
++    return {
++        "format": RENDERPLAN_SET_FORMAT,
++        "version": RENDERPLAN_SET_VERSION,
++        "variant": value.variant,
++        "profile_fingerprint": value.profile_fingerprint,
++        "producer": {"name": "utterplan", "version": value.producer_version},
++        "book": {"manifest": value.manifest, "utterplan_dir": value.utterplan_dir},
++        "profile": {
++            "profile_id": value.profile_id,
++            "snapshot": value.snapshot,
++            "source": value.source_profile,
++        },
++        "chapter": [
++            {
++                "id": chapter.id,
++                "source_number": chapter.source_number,
++                "source": chapter.source,
++                "utterplan": chapter.utterplan,
++                "source_plan_id": chapter.source_plan_id,
++                "renderplan": chapter.renderplan,
++                "render_plan_id": chapter.render_plan_id,
++            }
++            for chapter in value.chapters
++        ],
++    }
++
++
++def renderplan_set_to_toml(value: RenderPlanSet) -> str:
++    """Serialize a validated set as UtterPlan-owned TOML metadata."""
++    return tomlkit.dumps(renderplan_set_to_dict(value))
++
++
++def renderplan_set_from_dict(raw: Mapping[str, Any]) -> RenderPlanSet:
++    """Parse plain TOML data and strictly validate every supported set field."""
++    _check_keys(
++        raw,
++        {"format", "version", "variant", "profile_fingerprint", "producer", "book", "profile", "chapter"},
++        "renderplan-set",
++    )
++    if raw.get("format") != RENDERPLAN_SET_FORMAT:
++        raise RenderPlanSetError(f"format must be {RENDERPLAN_SET_FORMAT!r}")
++    if type(raw.get("version")) is not int or raw["version"] != RENDERPLAN_SET_VERSION:
++        raise RenderPlanSetError(f"version must be {RENDERPLAN_SET_VERSION}")
++
++    producer = _table(raw.get("producer"), "producer")
++    _check_keys(producer, {"name", "version"}, "producer")
++    if producer.get("name") != "utterplan":
++        raise RenderPlanSetError("producer.name must be 'utterplan'")
++    book = _table(raw.get("book"), "book")
++    _check_keys(book, {"manifest", "utterplan_dir"}, "book")
++    profile = _table(raw.get("profile"), "profile")
++    _check_keys(profile, {"profile_id", "snapshot", "source"}, "profile")
++
++    chapter_data = raw.get("chapter")
++    if not isinstance(chapter_data, list):
++        raise RenderPlanSetError("chapter must be an array of tables")
++    chapters: list[RenderPlanSetChapter] = []
++    chapter_keys = {
++        "id",
++        "source_number",
++        "source",
++        "utterplan",
++        "source_plan_id",
++        "renderplan",
++        "render_plan_id",
++    }
++    for index, item in enumerate(chapter_data):
++        item_table = _table(item, f"chapter[{index}]")
++        _check_keys(item_table, chapter_keys, f"chapter[{index}]")
++        source_number = item_table.get("source_number")
++        if type(source_number) is not int:
++            raise RenderPlanSetError(f"chapter[{index}].source_number must be an integer")
++        chapters.append(
++            RenderPlanSetChapter(
++                id=_string(item_table, "id", f"chapter[{index}]"),
++                source_number=source_number,
++                source=_string(item_table, "source", f"chapter[{index}]"),
++                utterplan=_string(item_table, "utterplan", f"chapter[{index}]"),
++                source_plan_id=_string(item_table, "source_plan_id", f"chapter[{index}]"),
++                renderplan=_string(item_table, "renderplan", f"chapter[{index}]"),
++                render_plan_id=_string(item_table, "render_plan_id", f"chapter[{index}]"),
++            )
++        )
++    return RenderPlanSet(
++        variant=_string(raw, "variant", "renderplan-set"),
++        profile_fingerprint=_string(raw, "profile_fingerprint", "renderplan-set"),
++        producer_version=_string(producer, "version", "producer"),
++        manifest=_string(book, "manifest", "book"),
++        utterplan_dir=_string(book, "utterplan_dir", "book"),
++        profile_id=_string(profile, "profile_id", "profile"),
++        snapshot=_string(profile, "snapshot", "profile"),
++        source_profile=_string(profile, "source", "profile"),
++        chapters=tuple(chapters),
++    )
++
++
++def load_renderplan_set(path: str | Path) -> RenderPlanSet:
++    """Read a set index; malformed documents fail closed instead of being replaced."""
++    source = Path(path)
++    try:
++        raw = tomlkit.parse(source.read_text(encoding="utf-8")).unwrap()
++    except (OSError, UnicodeError, ParseError) as exc:
++        raise RenderPlanSetError(f"cannot read renderplan set {source}: {exc}", code="index.read_failed") from exc
++    if not isinstance(raw, Mapping):
++        raise RenderPlanSetError("renderplan-set root must be a table")
++    return renderplan_set_from_dict(raw)
++
++
++def save_renderplan_set(path: str | Path, value: RenderPlanSet) -> None:
++    """Atomically write a validated set index."""
++    atomic_write_text(path, renderplan_set_to_toml(value), create_parent=True)
++
++
++def validate_renderplan_set_profile(
++    value: RenderPlanSet,
++    snapshot_path: str | Path,
++    *,
++    expected_profile_id: str,
++) -> RenderProfile:
++    """Verify the set and canonical snapshot against the active RenderProfile identity."""
++    validate_renderplan_set(value)
++    if value.profile_id != expected_profile_id:
++        raise RenderPlanSetError(
++            "existing renderplan set profile_id does not match the active RenderProfile",
++            code="profile.identity_mismatch",
++        )
++    snapshot = Path(snapshot_path)
++    if not snapshot.is_file():
++        raise RenderPlanSetError(
++            f"RenderProfile snapshot is missing: {snapshot}", code="profile.snapshot_missing"
++        )
++    try:
++        profile = renderplan_codec.load_profile(snapshot)
++    except (OSError, ValueError) as exc:
++        raise RenderPlanSetError(
++            f"cannot load RenderProfile snapshot {snapshot}: {exc}", code="profile.snapshot_invalid"
++        ) from exc
++    snapshot_id = profile.profile_id or profile.computed_id()
++    if snapshot_id != value.profile_id or snapshot_id != expected_profile_id:
++        raise RenderPlanSetError(
++            "RenderProfile snapshot identity does not match the set and active profile",
++            code="profile.snapshot_mismatch",
++        )
++    return profile
++
++
++def new_renderplan_set(
++    *,
++    variant: str,
++    profile_id: str,
++    manifest: str,
++    utterplan_dir: str,
++    source_profile: str,
++    chapters: tuple[RenderPlanSetChapter, ...] = (),
++) -> RenderPlanSet:
++    """Build an empty or populated set with producer and snapshot defaults."""
++    return RenderPlanSet(
++        variant=variant,
++        profile_fingerprint=profile_id.removeprefix("sha256:")[:12],
++        producer_version=__version__,
++        manifest=manifest,
++        utterplan_dir=utterplan_dir,
++        profile_id=profile_id,
++        snapshot="renderprofile.toml",
++        source_profile=source_profile,
++        chapters=chapters,
++    )
++
++
++def _check_keys(raw: Mapping[str, Any], allowed: set[str], label: str) -> None:
++    unknown = set(raw) - allowed
++    missing = allowed - set(raw)
++    if unknown:
++        raise RenderPlanSetError(f"{label} contains unknown field(s): {', '.join(sorted(unknown))}")
++    if missing:
++        raise RenderPlanSetError(f"{label} is missing required field(s): {', '.join(sorted(missing))}")
++
++
++def _table(value: Any, label: str) -> Mapping[str, Any]:
++    if not isinstance(value, Mapping):
++        raise RenderPlanSetError(f"{label} must be a table")
++    return value
++
++
++def _string(raw: Mapping[str, Any], key: str, label: str) -> str:
++    value = raw.get(key)
++    if not isinstance(value, str) or not value:
++        raise RenderPlanSetError(f"{label}.{key} must be a non-empty string")
++    return value
++
++
++def _require_nonempty(value: str, label: str) -> None:
++    if not isinstance(value, str) or not value:
++        raise RenderPlanSetError(f"{label} must be a non-empty string")
++
++
++RenderBatchStatus = Literal["written", "failed", "skipped"]
++RenderBatchStage = Literal["load", "projection", "serialization", "write", "index"]
++
++
++@dataclass(frozen=True, slots=True)
++class RenderRequest:
++    """One semantic UtterPlan input and its independent RenderPlan output."""
++
++    id: str
++    source_number: int
++    source_plan: Path
++    output: Path
++    source_chapter: Path
++
++    def __post_init__(self) -> None:
++        if not self.id:
++            raise ValueError("render request id must be non-empty")
++        if type(self.source_number) is not int or self.source_number <= 0:
++            raise ValueError("render request source_number must be a positive integer")
++        object.__setattr__(self, "source_plan", Path(self.source_plan))
++        object.__setattr__(self, "output", Path(self.output))
++        object.__setattr__(self, "source_chapter", Path(self.source_chapter))
++
++
++@dataclass(frozen=True, slots=True)
++class RenderOutcome:
++    """Operational result for one chapter projection; plan objects are not retained."""
++
++    id: str
++    source_number: int
++    index: int
++    total: int | None
++    status: RenderBatchStatus
++    source_plan: Path
++    output: Path
++    source_plan_id: str | None = None
++    render_plan_id: str | None = None
++    stage: RenderBatchStage | None = None
++    error_code: str | None = None
++    error_message: str | None = None
++
++
++def render_to_files(
++    requests: Sequence[RenderRequest],
++    *,
++    profile: RenderProfile,
++    renderplan_set: RenderPlanSet,
++    set_path: str | Path,
++    report_path: str | Path,
++    force: bool = False,
++    fail_fast: bool = False,
++    chapter_order: Mapping[str, int] | None = None,
++    on_progress: Callable[[RenderOutcome], None] | None = None,
++) -> list[RenderOutcome]:
++    """Project and persist chapters incrementally, keeping successful outputs on failure."""
++    validate_renderplan_set(renderplan_set)
++    profile_id = profile.profile_id or profile.computed_id()
++    if profile_id != renderplan_set.profile_id:
++        raise RenderPlanSetError(
++            "renderplan set profile_id does not match the active RenderProfile",
++            code="profile.identity_mismatch",
++        )
++    selected_set_path = Path(set_path)
++    selected_report_path = Path(report_path)
++    _validate_render_requests(requests, renderplan_set, selected_set_path)
++
++    outcomes: list[RenderOutcome] = []
++    _write_render_report(
++        selected_report_path,
++        outcomes,
++        requested=len(requests),
++        complete=False,
++        value=renderplan_set,
++    )
++    stopped = False
++    active_set = renderplan_set
++    for index, request in enumerate(requests, start=1):
++        if stopped:
++            outcome = RenderOutcome(
++                id=request.id,
++                source_number=request.source_number,
++                index=index,
++                total=len(requests),
++                status="skipped",
++                source_plan=request.source_plan,
++                output=request.output,
++                error_code="batch.fail_fast",
++                error_message="Skipped after an earlier failure because fail_fast is enabled.",
++            )
++        else:
++            outcome, updated_set = _render_one(
++                request,
++                index=index,
++                total=len(requests),
++                profile=profile,
++                renderplan_set=active_set,
++                set_path=selected_set_path,
++                force=force,
++                chapter_order=chapter_order or {},
++            )
++            if outcome.status == "written":
++                active_set = updated_set
++        outcomes.append(outcome)
++        _write_render_report(
++            selected_report_path,
++            outcomes,
++            requested=len(requests),
++            complete=False,
++            value=renderplan_set,
++        )
++        if on_progress is not None:
++            on_progress(outcome)
++        if fail_fast and outcome.status == "failed":
++            stopped = True
++
++    _write_render_report(
++        selected_report_path,
++        outcomes,
++        requested=len(requests),
++        complete=True,
++        value=renderplan_set,
++    )
++    return outcomes
++
++
++def _validate_render_requests(
++    requests: Sequence[RenderRequest], value: RenderPlanSet, set_path: Path
++) -> None:
++    seen_ids: set[str] = set()
++    seen_outputs: set[Path] = set()
++    existing_owners = {
++        (set_path.parent / chapter.renderplan).resolve(): chapter.id for chapter in value.chapters
++    }
++    for request in requests:
++        output = request.output.resolve()
++        if request.id in seen_ids:
++            raise RenderPlanSetError(f"duplicate selected chapter id: {request.id}")
++        if output in seen_outputs:
++            raise RenderPlanSetError(f"duplicate selected RenderPlan output path: {request.output}")
++        owner = existing_owners.get(output)
++        if owner is not None and owner != request.id:
++            raise RenderPlanSetError(
++                f"RenderPlan output {request.output} is already assigned to chapter {owner}"
++            )
++        seen_ids.add(request.id)
++        seen_outputs.add(output)
++
++
++def _render_one(
++    request: RenderRequest,
++    *,
++    index: int,
++    total: int,
++    profile: RenderProfile,
++    renderplan_set: RenderPlanSet,
++    set_path: Path,
++    force: bool,
++    chapter_order: Mapping[str, int],
++) -> tuple[RenderOutcome, RenderPlanSet]:
++    output = request.output
++    if not force and output.exists():
++        return (
++            _render_failure(
++                request,
++                index=index,
++                total=total,
++                stage="write",
++                error_code="output.exists",
++                error_message=f"output already exists: {output}; use --force to replace it",
++            ),
++            renderplan_set,
++        )
++    if not request.source_plan.is_file():
++        code = "input.missing" if not request.source_plan.exists() else "input.read_failed"
++        return (
++            _render_failure(
++                request,
++                index=index,
++                total=total,
++                stage="load",
++                error_code=code,
++                error_message=f"cannot read UtterPlan input: {request.source_plan}",
++            ),
++            renderplan_set,
++        )
++    try:
++        source_plan = FlowPlan.load(request.source_plan)
++    except (OSError, UtterPlanError, ValueError, TypeError) as exc:
++        return (
++            _render_failure(
++                request,
++                index=index,
++                total=total,
++                stage="load",
++                error_code=_error_code(exc, "input.plan_invalid"),
++                error_message=str(exc),
++            ),
++            renderplan_set,
++        )
++
++    source_plan_id = source_plan.plan_id
++    try:
++        plan = build_render_plan(source_plan, profile).with_identity()
++    except (OSError, ValueError, TypeError) as exc:
++        return (
++            _render_failure(
++                request,
++                index=index,
++                total=total,
++                stage="projection",
++                error_code=_error_code(exc, "renderplan.projection_failed"),
++                error_message=str(exc),
++                source_plan_id=source_plan_id,
++            ),
++            renderplan_set,
++        )
++
++    try:
++        renderplan_codec.plan_to_dict(plan)
++    except (OSError, ValueError, TypeError) as exc:
++        return (
++            _render_failure(
++                request,
++                index=index,
++                total=total,
++                stage="serialization",
++                error_code=_error_code(exc, "renderplan.serialization_failed"),
++                error_message=str(exc),
++                source_plan_id=source_plan_id,
++            ),
++            renderplan_set,
++        )
++    try:
++        renderplan_codec.save_plan(plan, output)
++    except (OSError, ValueError, TypeError) as exc:
++        return (
++            _render_failure(
++                request,
++                index=index,
++                total=total,
++                stage="write",
++                error_code=_error_code(exc, "output.write_failed"),
++                error_message=str(exc),
++                source_plan_id=source_plan_id,
++            ),
++            renderplan_set,
++        )
++
++    render_plan_id = plan.plan_id or plan.computed_id()
++    entry = RenderPlanSetChapter(
++        id=request.id,
++        source_number=request.source_number,
++        source=_path_reference(request.source_chapter, set_path.parent),
++        utterplan=_path_reference(request.source_plan, set_path.parent),
++        source_plan_id=source_plan_id,
++        renderplan=_path_reference(output, set_path.parent),
++        render_plan_id=render_plan_id,
++    )
++    try:
++        updated_set = _upsert_renderplan_set(renderplan_set, entry, chapter_order)
++        save_renderplan_set(set_path, updated_set)
++    except (OSError, ValueError, TypeError) as exc:
++        return (
++            _render_failure(
++                request,
++                index=index,
++                total=total,
++                stage="index",
++                error_code=_error_code(exc, "index.write_failed"),
++                error_message=str(exc),
++                source_plan_id=source_plan_id,
++                render_plan_id=render_plan_id,
++            ),
++            renderplan_set,
++        )
++    return (
++        RenderOutcome(
++            id=request.id,
++            source_number=request.source_number,
++            index=index,
++            total=total,
++            status="written",
++            source_plan=request.source_plan,
++            output=output,
++            source_plan_id=source_plan_id,
++            render_plan_id=render_plan_id,
++        ),
++        updated_set,
++    )
++
++
++def _upsert_renderplan_set(
++    value: RenderPlanSet, entry: RenderPlanSetChapter, chapter_order: Mapping[str, int]
++) -> RenderPlanSet:
++    previous_order = {chapter.id: index for index, chapter in enumerate(value.chapters)}
++    chapters_by_id = {chapter.id: chapter for chapter in value.chapters}
++    chapters_by_id[entry.id] = entry
++    chapters = tuple(
++        sorted(
++            chapters_by_id.values(),
++            key=lambda chapter: (
++                0 if chapter.id in chapter_order else 1,
++                chapter_order.get(chapter.id, previous_order.get(chapter.id, len(chapter_order))),
++            ),
++        )
++    )
++    return replace(value, chapters=chapters)
++
++
++def _path_reference(path: Path, base: Path) -> str:
++    return Path(os.path.relpath(path.resolve(), start=base.resolve())).as_posix()
++
++
++def _render_failure(
++    request: RenderRequest,
++    *,
++    index: int,
++    total: int,
++    stage: RenderBatchStage,
++    error_code: str,
++    error_message: str,
++    source_plan_id: str | None = None,
++    render_plan_id: str | None = None,
++) -> RenderOutcome:
++    return RenderOutcome(
++        id=request.id,
++        source_number=request.source_number,
++        index=index,
++        total=total,
++        status="failed",
++        source_plan=request.source_plan,
++        output=request.output,
++        source_plan_id=source_plan_id,
++        render_plan_id=render_plan_id,
++        stage=stage,
++        error_code=error_code,
++        error_message=error_message,
++    )
++
++
++def _write_render_report(
++    path: Path,
++    outcomes: Sequence[RenderOutcome],
++    *,
++    requested: int,
++    complete: bool,
++    value: RenderPlanSet,
++) -> None:
++    items: list[dict[str, Any]] = []
++    for outcome in outcomes:
++        item: dict[str, Any] = {
++            "index": outcome.index,
++            "id": outcome.id,
++            "source_number": outcome.source_number,
++            "source": str(outcome.source_plan.resolve()),
++            "output": str(outcome.output.resolve()),
++            "status": outcome.status,
++        }
++        if outcome.source_plan_id is not None:
++            item["source_plan_id"] = outcome.source_plan_id
++        if outcome.render_plan_id is not None:
++            item["render_plan_id"] = outcome.render_plan_id
++        if outcome.stage is not None:
++            item["stage"] = outcome.stage
++        if outcome.error_code is not None:
++            item["code"] = outcome.error_code
++        if outcome.error_message is not None:
++            item["message"] = outcome.error_message
++        items.append(item)
++    counts = {status: sum(outcome.status == status for outcome in outcomes) for status in ("written", "failed", "skipped")}
++    report = {
++        "format": "utterplan-render-report",
++        "version": 1,
++        "requested": requested,
++        "written": counts["written"],
++        "failed": counts["failed"],
++        "skipped": counts["skipped"],
++        "complete": complete,
++        "variant": value.variant,
++        "profile_id": value.profile_id,
++        "item": items,
++    }
++    atomic_write_text(path, tomlkit.dumps(report), create_parent=True)
++
++
++def _error_code(error: Exception, fallback: str) -> str:
++    code = getattr(error, "code", None)
++    return code if isinstance(code, str) and code else fallback
++
++
++__all__ = [
++    "RENDERPLAN_SET_FORMAT",
++    "RENDERPLAN_SET_VERSION",
++    "RenderBatchStage",
++    "RenderBatchStatus",
++    "RenderOutcome",
++    "RenderRequest",
++    "RenderPlanSet",
++    "RenderPlanSetChapter",
++    "RenderPlanSetError",
++    "load_renderplan_set",
++    "new_renderplan_set",
++    "renderplan_set_from_dict",
++    "renderplan_set_to_dict",
++    "renderplan_set_to_toml",
++    "save_renderplan_set",
++    "validate_renderplan_set",
++    "render_to_files",
++    "validate_renderplan_set_profile",
++]
+diff --git a/utterplan/renderplan_grouping.py b/utterplan/renderplan_grouping.py
+index 57c7885..3d468c4 100644
+--- a/utterplan/renderplan_grouping.py
++++ b/utterplan/renderplan_grouping.py
+@@ -5,7 +5,7 @@ from __future__ import annotations
+ import re
+ from collections.abc import Sequence
+ from dataclasses import replace
+-from typing import Any
++from typing import Any, TypeAlias
+
+ from renderplan import (
+     AudioItem,
+@@ -19,7 +19,7 @@ from renderplan import (
+ from .model import FlowSegment, PauseIntent
+ from .renderplan_projection import RenderPlanProjectionError, SourceSegmentIndex, SourceSegmentRef
+
+-FlowItem = AudioItem | PauseItem | SpeechItem
++FlowItem: TypeAlias = AudioItem | PauseItem | SpeechItem
+
+ _TIMED_PAUSE = re.compile(r"^(0|[1-9][0-9]*)ms$")
+ _BOUNDARY_PRIORITY = {"clause": 1, "sentence": 2, "paragraph": 3, "voice_change": 4}
+@@ -552,7 +552,7 @@ def _partition_source(
+     index: SourceSegmentIndex, source: Sequence[SourceSpan], offsets: Sequence[int]
+ ) -> tuple[tuple[SourceSpan, ...], ...]:
+     chunks: list[tuple[SourceSpan, ...]] = []
+-    remainder = tuple(source)
++    remainder: Sequence[SourceSpan] = tuple(source)
+     previous = 0
+     for offset in sorted(set(offsets)):
+         left, remainder = _split_source(index, remainder, offset - previous)
+diff --git a/utterplan/renderplan_replan.py b/utterplan/renderplan_replan.py
+index 08e4313..f53486a 100644
+--- a/utterplan/renderplan_replan.py
++++ b/utterplan/renderplan_replan.py
+@@ -4,6 +4,7 @@ from __future__ import annotations
+
+ from collections.abc import Sequence
+ from dataclasses import replace
++from typing import TypeAlias
+
+ from renderplan import (
+     AudioItem,
+@@ -27,7 +28,7 @@ from .renderplan_grouping import (
+ )
+ from .renderplan_projection import RenderPlanProjectionError, SourceSegmentIndex
+
+-FlowItem = AudioItem | PauseItem | SpeechItem
++FlowItem: TypeAlias = AudioItem | PauseItem | SpeechItem
+
+
+ def replan_flow(

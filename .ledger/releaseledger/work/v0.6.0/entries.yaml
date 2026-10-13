@@ -1,0 +1,453 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.6.0
+git_base_ref: a06da00122bda9de70d345d91a97259bbda6b18a
+git_base_sha: a06da00122bda9de70d345d91a97259bbda6b18a
+git_head_ref: 50dd54d4a3670cd9ca05cf3190c6f4b2f1330b9f
+git_head_sha: 50dd54d4a3670cd9ca05cf3190c6f4b2f1330b9f
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: "Added authoritative prepared-text linguistic context and compact replacement provenance"
+    status: accepted
+    source_refs:
+      - git:719a45462f090d42744f3cf0341e373713eeeb7d
+    paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/coordinate-spaces.md
+      - docs/debugging.md
+      - docs/format.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/pykokoro-integration.md
+      - docs/python-api.md
+      - docs/ssmdbook.md
+      - tests/migration/cases.py
+      - tests/test_cli.py
+      - tests/test_cli_batch.py
+      - tests/test_cli_ssmdbook.py
+      - tests/test_consumer_contract.py
+      - tests/test_flow_compilation.py
+      - tests/test_format.py
+      - tests/test_linguistics.py
+      - tests/test_migration_v4_to_v5.py
+      - tests/test_planner.py
+      - tests/test_progress.py
+      - tests/test_replacement_provenance.py
+      - tests/test_segment_topology.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/codecs/v5_toml.py
+      - utterplan/config.py
+      - utterplan/explain.py
+      - utterplan/flow_projection.py
+      - utterplan/linguistics.py
+      - utterplan/migrations/v4_to_v5.py
+      - utterplan/model.py
+    sources:
+      - git:719a45462f090d42744f3cf0341e373713eeeb7d
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: changed
+    summary: "Changed written-to-spoken preparation to route through TTSReady with a stable spokenform compatibility label"
+    status: accepted
+    source_refs:
+      - git:4abca5cfad32ac0f9c4987dbeadcbafa232c785b
+    paths:
+      - README.md
+      - docs/architecture.md
+      - docs/consumer-guide.md
+      - docs/getting-started.md
+      - docs/python-api.md
+      - pyproject.toml
+      - tests/migration/cases.py
+      - tests/test_cli.py
+      - tests/test_consumer_contract.py
+      - tests/test_dependency_architecture.py
+      - tests/test_import_boundaries.py
+      - tests/test_linguistics.py
+      - tests/test_migration_v4_to_v5.py
+      - tests/test_planner.py
+      - tests/test_preparation.py
+      - tests/test_replacement_provenance.py
+      - tests/test_ttsready_preparation_adapter.py
+      - utterplan/codecs/v5_toml.py
+      - utterplan/flow_projection.py
+      - utterplan/model.py
+      - utterplan/planner.py
+      - utterplan/preparation.py
+      - utterplan/stages/preparation/spokenform.py
+      - utterplan/stages/preparation/ttsready.py
+    sources:
+      - git:4abca5cfad32ac0f9c4987dbeadcbafa232c785b
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added schema v6 source provenance, source-aware identity, SSMD preparation, and sequential migration"
+    status: accepted
+    source_refs:
+      - git:1a807cc4f865ad55a1a31e531288fe931f8aec71
+    paths:
+      - AGENTS.md
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/coordinate-spaces.md
+      - docs/debugging.md
+      - docs/format.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/pykokoro-integration.md
+      - docs/python-api.md
+      - docs/ssmdbook.md
+      - tests/migration/cases.py
+      - tests/migration/test_legacy_json_import.py
+      - tests/migration/test_semantic_migration_regressions.py
+      - tests/schema_history/README.md
+      - tests/schema_history/v5/canonical_consumer_contract.toml
+      - tests/test_batch.py
+      - tests/test_cli.py
+      - tests/test_cli_ssmdbook.py
+      - tests/test_consumer_contract.py
+      - tests/test_consumer_readiness.py
+      - tests/test_coordinates.py
+      - tests/test_explain.py
+      - tests/test_flow_compilation.py
+      - tests/test_format.py
+      - tests/test_golden.py
+      - tests/test_linguistics.py
+      - tests/test_migration_framework.py
+      - tests/test_migration_v4_to_v5.py
+      - tests/test_planner.py
+      - tests/test_preparation.py
+      - tests/test_public_identity.py
+      - tests/test_replacement_provenance.py
+      - tests/test_schema_history.py
+      - tests/test_schema_registry.py
+      - tests/test_schema_v6_source.py
+      - tests/test_segmentation_recovery.py
+      - tests/test_ssmd_09_parser.py
+      - tests/test_ssmd_substitution_preparation.py
+      - tests/test_toml_format.py
+      - tests/test_ttsready_preparation_adapter.py
+      - utterplan/__init__.py
+      - utterplan/batch.py
+      - utterplan/cli.py
+      - utterplan/codecs/v5_toml.py
+      - utterplan/codecs/v6_toml.py
+      - utterplan/compiler.py
+      - utterplan/config.py
+      - utterplan/directives.py
+      - utterplan/explain.py
+      - utterplan/flow_projection.py
+      - utterplan/format.py
+      - utterplan/hashing.py
+      - utterplan/migration.py
+      - utterplan/migrations/__init__.py
+      - utterplan/migrations/v4_to_v5.py
+      - utterplan/migrations/v5_to_v6.py
+      - utterplan/model.py
+      - utterplan/planner.py
+      - utterplan/preparation.py
+      - utterplan/schema_registry.py
+      - utterplan/segmentation.py
+      - utterplan/serialization.py
+      - utterplan/stages/preparation/ssmd.py
+      - utterplan/toml_codec.py
+      - utterplan/versioning.py
+    sources:
+      - git:1a807cc4f865ad55a1a31e531288fe931f8aec71
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added schema v7 paragraph-local flow units and safe boundary opportunities separate from authored pauses"
+    status: accepted
+    source_refs:
+      - git:98080aa46e015fd7e4e24a40d6f9a77c2aa55666
+    paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/coordinate-spaces.md
+      - docs/debugging.md
+      - docs/format.md
+      - docs/getting-started.md
+      - docs/pykokoro-integration.md
+      - docs/python-api.md
+      - docs/ssmdbook.md
+      - tests/compiler_helpers.py
+      - tests/migration/cases.py
+      - tests/migration/test_legacy_json_import.py
+      - tests/migration/test_semantic_migration_regressions.py
+      - tests/test_boundaries.py
+      - tests/test_cli.py
+      - tests/test_cli_ssmdbook.py
+      - tests/test_compiler.py
+      - tests/test_consumer_contract.py
+      - tests/test_consumer_readiness.py
+      - tests/test_explain.py
+      - tests/test_fake_renderer.py
+      - tests/test_flow_compilation.py
+      - tests/test_format.py
+      - tests/test_golden.py
+      - tests/test_identity_units.py
+      - tests/test_linguistics.py
+      - tests/test_migration_framework.py
+      - tests/test_pauses.py
+      - tests/test_planner.py
+      - tests/test_public_identity.py
+      - tests/test_renderability.py
+      - tests/test_renderability_repair.py
+      - tests/test_replacement_provenance.py
+      - tests/test_schema_history.py
+      - tests/test_schema_registry.py
+      - tests/test_schema_v6_source.py
+      - tests/test_schema_v7.py
+      - tests/test_semantic_boundaries.py
+      - tests/test_ssmd_09_parser.py
+      - tests/test_toml_format.py
+      - utterplan/__init__.py
+      - utterplan/boundaries.py
+      - utterplan/cli.py
+      - utterplan/codecs/v5_toml.py
+      - utterplan/codecs/v6_toml.py
+      - utterplan/codecs/v7_toml.py
+      - utterplan/config.py
+      - utterplan/explain.py
+      - utterplan/flow_projection.py
+      - utterplan/format.py
+      - utterplan/hashing.py
+      - utterplan/migrations/__init__.py
+      - utterplan/migrations/v5_to_v6.py
+      - utterplan/migrations/v6_to_v7.py
+      - utterplan/model.py
+      - utterplan/pauses.py
+      - utterplan/planner.py
+      - utterplan/renderability.py
+      - utterplan/schema_registry.py
+      - utterplan/serialization.py
+      - utterplan/toml_codec.py
+      - utterplan/units.py
+      - utterplan/versioning.py
+    sources:
+      - git:98080aa46e015fd7e4e24a40d6f9a77c2aa55666
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: internal
+    internal: true
+    summary: "Changed CLI typing around the planner interface"
+    status: accepted
+    source_refs:
+      - git:60f27d0c44ad57306b082b3c8915dcd937f5c136
+    paths:
+      - utterplan/cli.py
+    sources:
+      - git:60f27d0c44ad57306b082b3c8915dcd937f5c136
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added pure plan previews and configurable diagnostic verbosity"
+    status: accepted
+    source_refs:
+      - git:8ec900e06e12c51339747c1b739dc2c7992e287f
+    paths:
+      - README.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/debugging.md
+      - docs/format.md
+      - tests/test_cli.py
+      - tests/test_cli_batch.py
+      - tests/test_cli_ssmdbook.py
+      - tests/test_consumer_contract.py
+      - tests/test_golden.py
+      - tests/test_linguistics.py
+      - tests/test_preview.py
+      - tests/test_renderability_repair.py
+      - tests/test_ssmd_substitution_preparation.py
+      - utterplan/__init__.py
+      - utterplan/batch.py
+      - utterplan/cli.py
+      - utterplan/parsers.py
+      - utterplan/planner.py
+      - utterplan/preparation.py
+      - utterplan/preview.py
+    sources:
+      - git:8ec900e06e12c51339747c1b739dc2c7992e287f
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added schema-v7 RenderPlan projection and deterministic failed-occurrence replanning"
+    status: accepted
+    source_refs:
+      - git:aaea8d1f5a8b375ec1f336b269904dc049d24c9e
+    paths:
+      - README.md
+      - docs/cli.md
+      - docs/python-api.md
+      - pyproject.toml
+      - tests/test_renderplan_export.py
+      - tests/test_renderplan_replan.py
+      - tests/test_renderplan_v7_contract.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/renderplan_export.py
+      - utterplan/renderplan_grouping.py
+      - utterplan/renderplan_projection.py
+      - utterplan/renderplan_replan.py
+    sources:
+      - git:aaea8d1f5a8b375ec1f336b269904dc049d24c9e
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added SSMDBook batch projection into profile-specific RenderPlan variants"
+    status: accepted
+    source_refs:
+      - git:34c58d4f0d9d46e348a6d9ea332299a037e73a72
+    paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/ssmdbook.md
+      - tests/test_cli_render_book.py
+      - tests/test_renderplan_batch.py
+      - utterplan/cli.py
+      - utterplan/planner.py
+      - utterplan/preview.py
+      - utterplan/renderplan_batch.py
+      - utterplan/renderplan_grouping.py
+      - utterplan/renderplan_replan.py
+    sources:
+      - git:34c58d4f0d9d46e348a6d9ea332299a037e73a72
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: fixed
+    summary: "Fixed model compatibility for SSMD substitution preparation"
+    status: accepted
+    source_refs:
+      - git:613ed5ec66a996e63f50056ac51532a20f20b500
+    paths:
+      - tests/test_ssmd_substitution_preparation.py
+      - utterplan/model.py
+    sources:
+      - git:613ed5ec66a996e63f50056ac51532a20f20b500
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: internal
+    internal: true
+    summary: "Changed pre-commit validation for the RenderPlan batch workflow"
+    status: accepted
+    source_refs:
+      - git:5cce29e3e19ee482af21b58ff36532c7a8ce36ee
+    paths:
+      - README.md
+      - docs/architecture.md
+      - docs/ssmdbook.md
+      - tests/test_cli_render_book.py
+      - tests/test_renderplan_batch.py
+      - utterplan/cli.py
+      - utterplan/renderplan_batch.py
+    sources:
+      - git:5cce29e3e19ee482af21b58ff36532c7a8ce36ee
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: internal
+    internal: true
+    summary: "Improved CI coverage for the project test workflow"
+    status: accepted
+    source_refs:
+      - git:b6f5ce2dc29e969d3cc6dcc8655eed85290f40c4
+    paths:
+      - .github/workflows/tests.yml
+    sources:
+      - git:b6f5ce2dc29e969d3cc6dcc8655eed85290f40c4
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: internal
+    internal: true
+    summary: "Changed supported RenderPlan dependency versions and batch compatibility"
+    status: accepted
+    source_refs:
+      - git:657f2dc268553cb30da8a8ecbcee9e78339a4f7b
+    paths:
+      - .github/workflows/tests.yml
+      - pyproject.toml
+      - tests/test_dependency_architecture.py
+      - utterplan/cli.py
+      - utterplan/renderplan_batch.py
+    sources:
+      - git:657f2dc268553cb30da8a8ecbcee9e78339a4f7b
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: changed
+    summary: "Changed normal plan loading to accept schema v7 only and aligned the RenderPlan 0.1.1 contract"
+    status: accepted
+    source_refs:
+      - git:50dd54d4a3670cd9ca05cf3190c6f4b2f1330b9f
+    paths:
+      - .github/workflows/tests.yml
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/format.md
+      - docs/index.md
+      - docs/python-api.md
+      - pyproject.toml
+      - tests/test_cli.py
+      - tests/test_cli_render_book.py
+      - tests/test_golden.py
+      - tests/test_renderplan_batch.py
+      - tests/test_renderplan_dependency_contract.py
+      - tests/test_renderplan_export.py
+      - tests/test_renderplan_replan.py
+      - tests/test_schema_history.py
+      - tests/test_schema_registry.py
+      - tests/test_schema_v6_source.py
+      - tests/test_schema_v7.py
+      - tests/test_toml_format.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/exceptions.py
+      - utterplan/model.py
+      - utterplan/serialization.py
+      - utterplan/toml_codec.py
+      - utterplan/versioning.py
+    sources:
+      - git:50dd54d4a3670cd9ca05cf3190c6f4b2f1330b9f
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

@@ -1,0 +1,490 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: v0.6.0
+git_base_ref: v0.5.1
+git_base_sha: a06da00122bda9de70d345d91a97259bbda6b18a
+git_head_ref: HEAD
+git_head_sha: 50dd54d4a3670cd9ca05cf3190c6f4b2f1330b9f
+git_range: a06da00122bda9de70d345d91a97259bbda6b18a..50dd54d4a3670cd9ca05cf3190c6f4b2f1330b9f
+commit_count: 13
+rows:
+  - sha: 719a45462f090d42744f3cf0341e373713eeeb7d
+    source_ref: git:719a45462f090d42744f3cf0341e373713eeeb7d
+    short_sha: 719a454
+    changed_paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/coordinate-spaces.md
+      - docs/debugging.md
+      - docs/format.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/pykokoro-integration.md
+      - docs/python-api.md
+      - docs/ssmdbook.md
+      - tests/migration/cases.py
+      - tests/test_cli.py
+      - tests/test_cli_batch.py
+      - tests/test_cli_ssmdbook.py
+      - tests/test_consumer_contract.py
+      - tests/test_flow_compilation.py
+      - tests/test_format.py
+      - tests/test_linguistics.py
+      - tests/test_migration_v4_to_v5.py
+      - tests/test_planner.py
+      - tests/test_progress.py
+      - tests/test_replacement_provenance.py
+      - tests/test_segment_topology.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/codecs/v5_toml.py
+      - utterplan/config.py
+      - utterplan/explain.py
+      - utterplan/flow_projection.py
+      - utterplan/linguistics.py
+      - utterplan/migrations/v4_to_v5.py
+      - utterplan/model.py
+    stats:
+      files_changed: 34
+      insertions: 736
+      deletions: 83
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: add token span"
+  - sha: 4abca5cfad32ac0f9c4987dbeadcbafa232c785b
+    source_ref: git:4abca5cfad32ac0f9c4987dbeadcbafa232c785b
+    short_sha: 4abca5c
+    changed_paths:
+      - README.md
+      - docs/architecture.md
+      - docs/consumer-guide.md
+      - docs/getting-started.md
+      - docs/python-api.md
+      - pyproject.toml
+      - tests/migration/cases.py
+      - tests/test_cli.py
+      - tests/test_consumer_contract.py
+      - tests/test_dependency_architecture.py
+      - tests/test_import_boundaries.py
+      - tests/test_linguistics.py
+      - tests/test_migration_v4_to_v5.py
+      - tests/test_planner.py
+      - tests/test_preparation.py
+      - tests/test_replacement_provenance.py
+      - tests/test_ttsready_preparation_adapter.py
+      - utterplan/codecs/v5_toml.py
+      - utterplan/flow_projection.py
+      - utterplan/model.py
+      - utterplan/planner.py
+      - utterplan/preparation.py
+      - utterplan/stages/preparation/spokenform.py
+      - utterplan/stages/preparation/ttsready.py
+    stats:
+      files_changed: 24
+      insertions: 647
+      deletions: 199
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: use ttsready instead of spokenform"
+  - sha: 1a807cc4f865ad55a1a31e531288fe931f8aec71
+    source_ref: git:1a807cc4f865ad55a1a31e531288fe931f8aec71
+    short_sha: 1a807cc
+    changed_paths:
+      - AGENTS.md
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/coordinate-spaces.md
+      - docs/debugging.md
+      - docs/format.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/pykokoro-integration.md
+      - docs/python-api.md
+      - docs/ssmdbook.md
+      - tests/migration/cases.py
+      - tests/migration/test_legacy_json_import.py
+      - tests/migration/test_semantic_migration_regressions.py
+      - tests/schema_history/README.md
+      - tests/schema_history/v5/canonical_consumer_contract.toml
+      - tests/test_batch.py
+      - tests/test_cli.py
+      - tests/test_cli_ssmdbook.py
+      - tests/test_consumer_contract.py
+      - tests/test_consumer_readiness.py
+      - tests/test_coordinates.py
+      - tests/test_explain.py
+      - tests/test_flow_compilation.py
+      - tests/test_format.py
+      - tests/test_golden.py
+      - tests/test_linguistics.py
+      - tests/test_migration_framework.py
+      - tests/test_migration_v4_to_v5.py
+      - tests/test_planner.py
+      - tests/test_preparation.py
+      - tests/test_public_identity.py
+      - tests/test_replacement_provenance.py
+      - tests/test_schema_history.py
+      - tests/test_schema_registry.py
+      - tests/test_schema_v6_source.py
+      - tests/test_segmentation_recovery.py
+      - tests/test_ssmd_09_parser.py
+      - tests/test_ssmd_substitution_preparation.py
+      - tests/test_toml_format.py
+      - tests/test_ttsready_preparation_adapter.py
+      - utterplan/__init__.py
+      - utterplan/batch.py
+      - utterplan/cli.py
+      - utterplan/codecs/v5_toml.py
+      - utterplan/codecs/v6_toml.py
+      - utterplan/compiler.py
+      - utterplan/config.py
+      - utterplan/directives.py
+      - utterplan/explain.py
+      - utterplan/flow_projection.py
+      - utterplan/format.py
+      - utterplan/hashing.py
+      - utterplan/migration.py
+      - utterplan/migrations/__init__.py
+      - utterplan/migrations/v4_to_v5.py
+      - utterplan/migrations/v5_to_v6.py
+      - utterplan/model.py
+      - utterplan/planner.py
+      - utterplan/preparation.py
+      - utterplan/schema_registry.py
+      - utterplan/segmentation.py
+      - utterplan/serialization.py
+      - utterplan/stages/preparation/ssmd.py
+      - utterplan/toml_codec.py
+      - utterplan/versioning.py
+    stats:
+      files_changed: 68
+      insertions: 2219
+      deletions: 308
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: better support for ssmdbook"
+  - sha: 98080aa46e015fd7e4e24a40d6f9a77c2aa55666
+    source_ref: git:98080aa46e015fd7e4e24a40d6f9a77c2aa55666
+    short_sha: 98080aa
+    changed_paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/coordinate-spaces.md
+      - docs/debugging.md
+      - docs/format.md
+      - docs/getting-started.md
+      - docs/pykokoro-integration.md
+      - docs/python-api.md
+      - docs/ssmdbook.md
+      - tests/compiler_helpers.py
+      - tests/migration/cases.py
+      - tests/migration/test_legacy_json_import.py
+      - tests/migration/test_semantic_migration_regressions.py
+      - tests/test_boundaries.py
+      - tests/test_cli.py
+      - tests/test_cli_ssmdbook.py
+      - tests/test_compiler.py
+      - tests/test_consumer_contract.py
+      - tests/test_consumer_readiness.py
+      - tests/test_explain.py
+      - tests/test_fake_renderer.py
+      - tests/test_flow_compilation.py
+      - tests/test_format.py
+      - tests/test_golden.py
+      - tests/test_identity_units.py
+      - tests/test_linguistics.py
+      - tests/test_migration_framework.py
+      - tests/test_pauses.py
+      - tests/test_planner.py
+      - tests/test_public_identity.py
+      - tests/test_renderability.py
+      - tests/test_renderability_repair.py
+      - tests/test_replacement_provenance.py
+      - tests/test_schema_history.py
+      - tests/test_schema_registry.py
+      - tests/test_schema_v6_source.py
+      - tests/test_schema_v7.py
+      - tests/test_semantic_boundaries.py
+      - tests/test_ssmd_09_parser.py
+      - tests/test_toml_format.py
+      - utterplan/__init__.py
+      - utterplan/boundaries.py
+      - utterplan/cli.py
+      - utterplan/codecs/v5_toml.py
+      - utterplan/codecs/v6_toml.py
+      - utterplan/codecs/v7_toml.py
+      - utterplan/config.py
+      - utterplan/explain.py
+      - utterplan/flow_projection.py
+      - utterplan/format.py
+      - utterplan/hashing.py
+      - utterplan/migrations/__init__.py
+      - utterplan/migrations/v5_to_v6.py
+      - utterplan/migrations/v6_to_v7.py
+      - utterplan/model.py
+      - utterplan/pauses.py
+      - utterplan/planner.py
+      - utterplan/renderability.py
+      - utterplan/schema_registry.py
+      - utterplan/serialization.py
+      - utterplan/toml_codec.py
+      - utterplan/units.py
+      - utterplan/versioning.py
+    stats:
+      files_changed: 65
+      insertions: 1958
+      deletions: 896
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: remove tts pause and split mode from utterplan"
+  - sha: 60f27d0c44ad57306b082b3c8915dcd937f5c136
+    source_ref: git:60f27d0c44ad57306b082b3c8915dcd937f5c136
+    short_sha: 60f27d0
+    changed_paths:
+      - utterplan/cli.py
+    stats:
+      files_changed: 1
+      insertions: 6
+      deletions: 2
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "chore: fix mypy"
+  - sha: 8ec900e06e12c51339747c1b739dc2c7992e287f
+    source_ref: git:8ec900e06e12c51339747c1b739dc2c7992e287f
+    short_sha: 8ec900e
+    changed_paths:
+      - README.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/debugging.md
+      - docs/format.md
+      - tests/test_cli.py
+      - tests/test_cli_batch.py
+      - tests/test_cli_ssmdbook.py
+      - tests/test_consumer_contract.py
+      - tests/test_golden.py
+      - tests/test_linguistics.py
+      - tests/test_preview.py
+      - tests/test_renderability_repair.py
+      - tests/test_ssmd_substitution_preparation.py
+      - utterplan/__init__.py
+      - utterplan/batch.py
+      - utterplan/cli.py
+      - utterplan/parsers.py
+      - utterplan/planner.py
+      - utterplan/preparation.py
+      - utterplan/preview.py
+    stats:
+      files_changed: 21
+      insertions: 1308
+      deletions: 54
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: better diagnostics and logging"
+  - sha: aaea8d1f5a8b375ec1f336b269904dc049d24c9e
+    source_ref: git:aaea8d1f5a8b375ec1f336b269904dc049d24c9e
+    short_sha: aaea8d1
+    changed_paths:
+      - README.md
+      - docs/cli.md
+      - docs/python-api.md
+      - pyproject.toml
+      - tests/test_renderplan_export.py
+      - tests/test_renderplan_replan.py
+      - tests/test_renderplan_v7_contract.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/renderplan_export.py
+      - utterplan/renderplan_grouping.py
+      - utterplan/renderplan_projection.py
+      - utterplan/renderplan_replan.py
+    stats:
+      files_changed: 13
+      insertions: 2783
+      deletions: 0
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: include renderplan"
+  - sha: 34c58d4f0d9d46e348a6d9ea332299a037e73a72
+    source_ref: git:34c58d4f0d9d46e348a6d9ea332299a037e73a72
+    short_sha: 34c58d4
+    changed_paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/ssmdbook.md
+      - tests/test_cli_render_book.py
+      - tests/test_renderplan_batch.py
+      - utterplan/cli.py
+      - utterplan/planner.py
+      - utterplan/preview.py
+      - utterplan/renderplan_batch.py
+      - utterplan/renderplan_grouping.py
+      - utterplan/renderplan_replan.py
+    stats:
+      files_changed: 14
+      insertions: 2061
+      deletions: 16
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: improve renderplan creation"
+  - sha: 613ed5ec66a996e63f50056ac51532a20f20b500
+    source_ref: git:613ed5ec66a996e63f50056ac51532a20f20b500
+    short_sha: 613ed5e
+    changed_paths:
+      - tests/test_ssmd_substitution_preparation.py
+      - utterplan/model.py
+    stats:
+      files_changed: 2
+      insertions: 47
+      deletions: 5
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "fix: pytest"
+  - sha: 5cce29e3e19ee482af21b58ff36532c7a8ce36ee
+    source_ref: git:5cce29e3e19ee482af21b58ff36532c7a8ce36ee
+    short_sha: 5cce29e
+    changed_paths:
+      - README.md
+      - docs/architecture.md
+      - docs/ssmdbook.md
+      - tests/test_cli_render_book.py
+      - tests/test_renderplan_batch.py
+      - utterplan/cli.py
+      - utterplan/renderplan_batch.py
+    stats:
+      files_changed: 7
+      insertions: 128
+      deletions: 61
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "chore: pre-commit"
+  - sha: b6f5ce2dc29e969d3cc6dcc8655eed85290f40c4
+    source_ref: git:b6f5ce2dc29e969d3cc6dcc8655eed85290f40c4
+    short_sha: b6f5ce2
+    changed_paths:
+      - .github/workflows/tests.yml
+    stats:
+      files_changed: 1
+      insertions: 5
+      deletions: 2
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "chore: ci"
+  - sha: 657f2dc268553cb30da8a8ecbcee9e78339a4f7b
+    source_ref: git:657f2dc268553cb30da8a8ecbcee9e78339a4f7b
+    short_sha: 657f2dc
+    changed_paths:
+      - .github/workflows/tests.yml
+      - pyproject.toml
+      - tests/test_dependency_architecture.py
+      - utterplan/cli.py
+      - utterplan/renderplan_batch.py
+    stats:
+      files_changed: 5
+      insertions: 30
+      deletions: 303
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: fix min dep floor"
+  - sha: 50dd54d4a3670cd9ca05cf3190c6f4b2f1330b9f
+    source_ref: git:50dd54d4a3670cd9ca05cf3190c6f4b2f1330b9f
+    short_sha: 50dd54d
+    changed_paths:
+      - .github/workflows/tests.yml
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/consumer-guide.md
+      - docs/format.md
+      - docs/index.md
+      - docs/python-api.md
+      - pyproject.toml
+      - tests/test_cli.py
+      - tests/test_cli_render_book.py
+      - tests/test_golden.py
+      - tests/test_renderplan_batch.py
+      - tests/test_renderplan_dependency_contract.py
+      - tests/test_renderplan_export.py
+      - tests/test_renderplan_replan.py
+      - tests/test_schema_history.py
+      - tests/test_schema_registry.py
+      - tests/test_schema_v6_source.py
+      - tests/test_schema_v7.py
+      - tests/test_toml_format.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/exceptions.py
+      - utterplan/model.py
+      - utterplan/serialization.py
+      - utterplan/toml_codec.py
+      - utterplan/versioning.py
+    stats:
+      files_changed: 27
+      insertions: 365
+      deletions: 87
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: support new renderplan"

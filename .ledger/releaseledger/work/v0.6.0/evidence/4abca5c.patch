@@ -1,0 +1,1313 @@
+ README.md                                  |   2 +-
+ docs/architecture.md                       |  50 +++--
+ docs/consumer-guide.md                     |   3 +-
+ docs/getting-started.md                    |   2 +-
+ docs/python-api.md                         |   2 +-
+ pyproject.toml                             |   2 +-
+ tests/migration/cases.py                   |  14 +-
+ tests/test_cli.py                          |   3 +-
+ tests/test_consumer_contract.py            |   7 +-
+ tests/test_dependency_architecture.py      |  41 ++++
+ tests/test_import_boundaries.py            |  15 +-
+ tests/test_linguistics.py                  |  18 +-
+ tests/test_migration_v4_to_v5.py           |   7 +-
+ tests/test_planner.py                      |   7 +-
+ tests/test_preparation.py                  |  20 +-
+ tests/test_replacement_provenance.py       |  12 +-
+ tests/test_ttsready_preparation_adapter.py | 307 +++++++++++++++++++++++++++++
+ utterplan/codecs/v5_toml.py                |  12 +-
+ utterplan/flow_projection.py               |   4 +-
+ utterplan/model.py                         |   8 +-
+ utterplan/planner.py                       |   4 +-
+ utterplan/preparation.py                   | 300 ++++++++++++++++------------
+ utterplan/stages/preparation/spokenform.py |   3 -
+ utterplan/stages/preparation/ttsready.py   |   3 +
+ 24 files changed, 647 insertions(+), 199 deletions(-)
+
+diff --git a/README.md b/README.md
+index 170d80d..b02ffa7 100644
+--- a/README.md
++++ b/README.md
+@@ -9,7 +9,7 @@ UtterPlan is the canonical, engine-independent semantic compiler from one SSMD
+ document (or explicitly selected plain-text document) to an executable speech
+ plan. It produces deterministic prepared text, ordered flow units, segment-local
+ semantics, pause intents, portable document metadata, and typed directives for
+-independent consumers such as ttsready and Readio. It does not manage or modify book workspaces; `compile-book` reads an SSMDBook manifest only to discover selected source chapters. It stops before G2P, synthesis, and audio.
++independent downstream consumers such as Readio, VoiceRender, and other FlowPlan users. It does not manage or modify book workspaces; `compile-book` reads an SSMDBook manifest only to discover selected source chapters. It uses TTSReady for written-to-spoken preparation and stops before G2P, synthesis, and audio.
+
+ ## CLI
+
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 103306c..bcfe4fa 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -1,26 +1,42 @@
+ # Architecture
+
+-UtterPlan is an engine-independent compiler from one SSMD document (or explicitly selected plain-text document) to an executable speech plan. Consumers compile documents independently; UtterPlan does not load books or manage workspaces.
++UtterPlan is an engine-independent compiler from one SSMD document (or explicitly selected plain-text document) to an executable speech plan. It owns document parsing, language runs, source linguistic analysis, SSMD annotation meanings, coordinate mapping, spoken-text analysis, segmentation, directives, pause intent, and FlowPlan construction. It uses TTSReady for reusable written-to-spoken preparation and stops before G2P, synthesis, and audio. Consumers compile documents independently; UtterPlan does not load books or manage workspaces.
+
+ ```text
+-one SSMD document / explicit plain text
+-                 |
+-                 v
+-       parse -> language semantics -> spokenform preparation
+-                 -> segmentation -> directive resolution
+-                 -> semantic pause intent -> internal compiler plan
+-                 |                                |
+-                 |                                +--> optional trace sidecar
+-                 v
+-       FlowPlan (ordered units, local segments)
+-              /                 \
+-       consumer A             consumer B
+-                 |
+-                 v
+-          G2P / renderer / audio
++SSMD / plain text
++       |
++       v
++UtterPlan parsing + language runs + source analysis
++       | provider-neutral token hints + protected spans + explicit profile
++       v
++TTSReady.prepare_run() -> Spokenform normalization
++       |
++       v
++UtterPlan mapping + spoken analysis + segmentation + directives + pauses
++       |
++       v
++FlowPlan (ordered units and local segments)
++       |
++       v
++Readio / VoiceRender / other FlowPlan consumers
++       |
++       v
++G2P / synthesis / audio (downstream)
+ ```
+
+-The dependency direction is from SSMD, spokenform, and phrasplit into UtterPlan, then from UtterPlan to consumer packages. UtterPlan must not depend on ttsready, Readio, engine registries, G2P packages, model runtimes, or audio packages. Book iteration belongs to consumers and conversion tools.
++Dependency layering (each component uses the dependency above it):
++
++```text
++Spokenform
++    ^
++TTSReady
++    ^
++UtterPlan
++    ^
++Readio / VoiceRender / other FlowPlan consumers
++```
++
++UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady. TTSReady owns the direct Spokenform integration; production UtterPlan code does not import Spokenform. Readio, VoiceRender, and other consumers consume FlowPlan and may perform downstream G2P, synthesis, and audio work. UtterPlan must not depend on those consumer or engine packages, model runtimes, or audio libraries. Book iteration belongs to consumers and conversion tools.
+
+ ## Compiler and public plan boundary
+
+diff --git a/docs/consumer-guide.md b/docs/consumer-guide.md
+index 367da73..46e8af3 100644
+--- a/docs/consumer-guide.md
++++ b/docs/consumer-guide.md
+@@ -18,7 +18,7 @@ Migration operates on serialized plain data and does not reparse, reprepare, rer
+
+ ## Planning defaults
+
+-The default text-preparation backend is `spokenform`, pause activation mode is `tts`, and spaCy policy is best-effort `auto`. Auto uses only installed compatible local models in `sm`, `md`, `lg`, `trf` preference order and falls back deterministically if unavailable; provider documents remain internal. Use `--spacy off` to force fallback or a tier flag to require that model.
++The default text-preparation backend is `spokenform`, pause activation mode is `tts`, and spaCy policy is best-effort `auto`. Spokenform preparation is routed through TTSReady `prepare_run()`; the `spokenform` backend label remains stable for plan compatibility. Auto uses only installed compatible local models in `sm`, `md`, `lg`, `trf` preference order and falls back deterministically if unavailable; provider documents remain internal. Use `--spacy off` to force fallback or a tier flag to require that model.
+
+ In Python, `PlannerConfig.document_format` defaults to `"plain"`; select `"ssmd"` for SSMD source. `PauseConfig.mode` controls whether eligible semantic pause intents are activated by the compiler. The executable plan carries semantic intent (or an exact authored timed pause), not numeric durations invented from an activation policy. A renderer may interpret supported intents according to its own capabilities.
+
+@@ -72,6 +72,7 @@ utterplan inspect-trace chapter.trace.toml --preparation --boundaries
+
+ The trace contains source text/hash, structural/prepared text, coordinate maps, preparation changes, diagnostics, and renderability evidence. It is not renderer input, does not affect `FlowPlan.plan_id`, and does not change the resulting plan TOML. See the [coordinate-space contract](coordinate-spaces) for every trace offset's coordinate space.
+ The trace contains source text/hash, structural/prepared text, full coordinate maps, preparation changes, diagnostics, and renderability evidence. Compact replacement views are available in v5 segments, but the trace is still needed for original source offsets and complete mappings. The trace is not renderer input, does not affect `FlowPlan.plan_id`, and does not change the executable plan.
++
+ ## Directives and media
+
+ Voice bindings and directive voice references are logical names, not backend voice IDs; consumers translate them to engine-specific resources. UtterPlan resolves SSMD scopes and defaults but does not choose engine settings or recompute pause policy.
+diff --git a/docs/getting-started.md b/docs/getting-started.md
+index 89602e6..9195c11 100644
+--- a/docs/getting-started.md
++++ b/docs/getting-started.md
+@@ -41,7 +41,7 @@ Without `-o`, the complete canonical TOML plan is written to stdout. Status mess
+
+ ## Defaults and linguistic resources
+
+-The default compile policy is `spokenform` for text preparation, `tts` for pause activation, and best-effort spaCy `auto`. Auto mode uses only an already-installed compatible model, preferring `sm`, `md`, `lg`, then `trf`; if spaCy or a compatible model is unavailable, planning continues with deterministic fallback tokens. UtterPlan never downloads models.
++The default compile policy is `spokenform` for written-to-spoken preparation through TTSReady, `tts` for pause activation, and best-effort spaCy `auto`. The `spokenform` label remains stable for plan compatibility. Auto mode uses only an already-installed compatible model, preferring `sm`, `md`, `lg`, then `trf`; if spaCy or a compatible model is unavailable, planning continues with deterministic fallback tokens. UtterPlan never downloads models.
+
+ Use `--spacy off` to force fallback, or `--spacy sm|md|lg|trf` to require a specific local tier. Python `LinguisticsConfig` has the same best-effort default. Install the optional library with `python -m pip install 'utterplan[spacy]'` when needed; install language model packages separately.
+ Language model packages remain explicit environment dependencies; UtterPlan never downloads them.
+diff --git a/docs/python-api.md b/docs/python-api.md
+index 22b86b1..8efbd04 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -7,7 +7,7 @@ diagnostics describe compilation, and an optional `PreparationTrace` holds compi
+ provenance separately. `UtterancePlanner.plan` is also supported and returns the
+ same current `FlowPlan` directly.
+
+-The Python defaults are repair-first with best-effort spaCy enrichment: `PlannerConfig` uses `spokenform` preparation and `renderability_mode="repair"`, `PauseConfig().mode` is `"tts"`, and `LinguisticsConfig` uses local-model `auto`. Auto prefers installed compatible models `sm`, `md`, `lg`, `trf`, then falls back safely if spaCy or models are unavailable. No model is downloaded.
++The Python defaults are repair-first with best-effort spaCy enrichment: `PlannerConfig` uses `spokenform` preparation through TTSReady and `renderability_mode="repair"`, `PauseConfig().mode` is `"tts"`, and `LinguisticsConfig` uses local-model `auto`. The `spokenform` backend label remains stable for plan compatibility. Auto prefers installed compatible models `sm`, `md`, `lg`, `trf`, then falls back safely if spaCy or models are unavailable. No model is downloaded.
+
+ To require a specific installed model, set `require_spacy=True` and configure its model or tier. The plan records final pass-B token provenance in `linguistic_runs`; provider documents are not retained. Set `use_spacy=False` for deterministic opt-out.
+ V5 `token.span`, `pos`, `tag`, `lemma`, and `morph` are the authoritative linguistic context for the exact prepared segment text. Consumers should not retokenize or rerun spaCy. Optional replacement spans are local to final prepared `segment.text`; original spellings are stored as provenance strings, while complete source offsets and preparation maps belong in the optional trace sidecar.
+diff --git a/pyproject.toml b/pyproject.toml
+index 1e16af7..2865820 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -14,7 +14,7 @@ keywords = ["tts", "text-to-speech", "ssmd", "speech markup"]
+ dependencies = [
+   "phrasplit>=0.3.9,<0.4",
+   "ssmd>=0.9.3,<0.10",
+-  "spokenform>=0.4.3,<0.5",
++  "ttsready>=0.2.2,<0.3",
+   "typing_extensions>=4.0",
+   "tomlkit>=0.13,<1",
+  ]
+diff --git a/tests/migration/cases.py b/tests/migration/cases.py
+index 1a9f0ed..f80f6c2 100644
+--- a/tests/migration/cases.py
++++ b/tests/migration/cases.py
+@@ -13,7 +13,12 @@ class MigrationCase:
+
+
+ FALLBACK_LINGUISTICS = LinguisticsConfig(use_spacy=False)
+-PLAIN = PlannerConfig(language="en-us", document_format="plain", renderability_mode="strict", linguistics=FALLBACK_LINGUISTICS)
++PLAIN = PlannerConfig(
++    language="en-us",
++    document_format="plain",
++    renderability_mode="strict",
++    linguistics=FALLBACK_LINGUISTICS,
++)
+ IDENTITY = PlannerConfig(
+     language="en-us",
+     document_format="plain",
+@@ -28,7 +33,12 @@ AUTO = PlannerConfig(
+     renderability_mode="strict",
+     linguistics=FALLBACK_LINGUISTICS,
+ )
+-SSMD = PlannerConfig(language="en-us", document_format="ssmd", renderability_mode="strict", linguistics=FALLBACK_LINGUISTICS)
++SSMD = PlannerConfig(
++    language="en-us",
++    document_format="ssmd",
++    renderability_mode="strict",
++    linguistics=FALLBACK_LINGUISTICS,
++)
+ SSMD_IDENTITY = PlannerConfig(
+     language="en-us",
+     document_format="ssmd",
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index bd1481e..1ff3bd8 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -46,8 +46,6 @@ def test_compile_cli_defaults() -> None:
+     assert args.renderability == "repair"
+
+
+-
+-
+ def test_spacy_cli_policies_preserve_auto_off_and_required_tiers() -> None:
+     parser = build_parser()
+     assert parser.parse_args(["compile", "Hello.", "--lang", "en"]).spacy == "auto"
+@@ -63,6 +61,7 @@ def test_spacy_cli_policies_preserve_auto_off_and_required_tiers() -> None:
+         assert config.spacy_model_size == tier
+         assert config.require_spacy is True
+
++
+ def test_compile_literal_text_to_stdout_toml(capsys: pytest.CaptureFixture[str]) -> None:
+     assert main(["compile", "Hello world.", "--lang", "en-us"]) == 0
+     payload = _payload(capsys)
+diff --git a/tests/test_consumer_contract.py b/tests/test_consumer_contract.py
+index ba3cb93..a378afb 100644
+--- a/tests/test_consumer_contract.py
++++ b/tests/test_consumer_contract.py
+@@ -163,7 +163,12 @@ def test_shared_fixture_has_one_canonical_v5_interpretation() -> None:
+     result = compile_document(
+         source,
+         input_format="ssmd",
+-        config=PlannerConfig(language="fr-FR", document_format="ssmd", text_preparation="identity", linguistics=LinguisticsConfig(use_spacy=False)),
++        config=PlannerConfig(
++            language="fr-FR",
++            document_format="ssmd",
++            text_preparation="identity",
++            linguistics=LinguisticsConfig(use_spacy=False),
++        ),
+     )
+
+     assert result.plan.plan_id == expected.plan_id
+diff --git a/tests/test_dependency_architecture.py b/tests/test_dependency_architecture.py
+new file mode 100644
+index 0000000..93532c8
+--- /dev/null
++++ b/tests/test_dependency_architecture.py
+@@ -0,0 +1,41 @@
++from __future__ import annotations
++
++import ast
++import re
++from pathlib import Path
++
++import tomlkit
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def _requirement_name(requirement: str) -> str:
++    match = re.match(r"([A-Za-z0-9_.-]+)", requirement)
++    assert match is not None, f"invalid dependency declaration: {requirement!r}"
++    return match.group(1).lower().replace("_", "-")
++
++
++def test_runtime_dependencies_use_ttsready_without_direct_spokenform() -> None:
++    project = tomlkit.parse((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
++    dependencies = project["dependencies"]
++    by_name = {_requirement_name(item): item for item in dependencies}
++
++    assert by_name["ttsready"] == "ttsready>=0.2.2,<0.3"
++    assert "phrasplit" in by_name
++    assert "ssmd" in by_name
++    assert "spokenform" not in by_name
++
++    optional = project.get("optional-dependencies", {})
++    assert all(
++        _requirement_name(item) != "spokenform" for group in optional.values() for item in group
++    )
++
++
++def test_production_sources_do_not_import_spokenform() -> None:
++    for path in sorted((ROOT / "utterplan").rglob("*.py")):
++        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
++        for node in ast.walk(tree):
++            if isinstance(node, ast.Import):
++                assert all(alias.name.split(".")[0] != "spokenform" for alias in node.names), path
++            elif isinstance(node, ast.ImportFrom) and node.module:
++                assert node.module.split(".")[0] != "spokenform", path
+diff --git a/tests/test_import_boundaries.py b/tests/test_import_boundaries.py
+index 77905f3..6e36710 100644
+--- a/tests/test_import_boundaries.py
++++ b/tests/test_import_boundaries.py
+@@ -5,7 +5,7 @@ import sys
+ def test_import_does_not_load_consumers_engines_models_or_audio() -> None:
+     code = (
+         "import sys, utterplan; "
+-        "forbidden={'ttsready','readio','ssmdconvert','pykokoro','pipersynth',"
++        "forbidden={'ttsready','spokenform','readio','ssmdconvert','pykokoro','pipersynth',"
+         "'kokorog2p','piperg2p','onnxruntime','numpy','soundfile'}; "
+         "loaded=sorted({name.split('.')[0].lower() for name in sys.modules} & forbidden); "
+         "print(loaded)"
+@@ -14,3 +14,16 @@ def test_import_does_not_load_consumers_engines_models_or_audio() -> None:
+         [sys.executable, "-c", code], check=True, capture_output=True, text=True
+     )
+     assert result.stdout.strip() == "[]"
++
++
++def test_non_identity_planning_loads_ttsready_lazily() -> None:
++    code = (
++        "import sys, utterplan; "
++        "assert 'ttsready' not in sys.modules; "
++        "utterplan.UtterancePlanner(utterplan.PlannerConfig(language='en-us')).plan('Hello.'); "
++        "print('ttsready' in sys.modules)"
++    )
++    result = subprocess.run(
++        [sys.executable, "-c", code], check=True, capture_output=True, text=True
++    )
++    assert result.stdout.strip() == "True"
+diff --git a/tests/test_linguistics.py b/tests/test_linguistics.py
+index c8a9154..1a4b88e 100644
+--- a/tests/test_linguistics.py
++++ b/tests/test_linguistics.py
+@@ -58,7 +58,9 @@ def test_default_planner_falls_back_when_spacy_cannot_be_imported(monkeypatch):
+
+     assert LinguisticsConfig().use_spacy is True
+     assert plan.linguistic_runs[0].provider == "fallback"
+-    assert all(token.pos is None and token.tag is None and token.morph is None for token in plan.tokens)
++    assert all(
++        token.pos is None and token.tag is None and token.morph is None for token in plan.tokens
++    )
+
+
+ def test_default_planner_falls_back_when_no_compatible_model_is_installed(monkeypatch):
+@@ -72,7 +74,6 @@ def test_default_planner_falls_back_when_no_compatible_model_is_installed(monkey
+     assert plan.linguistic_runs[0].provider == "fallback"
+
+
+-
+ def test_default_planner_falls_back_when_auto_model_loading_fails(monkeypatch):
+     def fail_load(model):
+         raise OSError("model cannot load")
+@@ -89,7 +90,9 @@ def test_default_planner_falls_back_when_auto_model_loading_fails(monkeypatch):
+
+ def test_explicit_spacy_off_never_inspects_or_loads_spacy(monkeypatch):
+     fake_spacy = SimpleNamespace(
+-        util=SimpleNamespace(get_installed_models=lambda: pytest.fail("spaCy must not be inspected")),
++        util=SimpleNamespace(
++            get_installed_models=lambda: pytest.fail("spaCy must not be inspected")
++        ),
+         load=lambda model: pytest.fail(f"spaCy must not be loaded: {model}"),
+     )
+     monkeypatch.setitem(sys.modules, "spacy", fake_spacy)
+@@ -154,6 +157,7 @@ def test_default_planner_uses_small_installed_spacy_model_and_reuses_it(monkeypa
+         "Tense=Pres|VerbForm=Fin",
+     )
+
++
+ def test_spacy_enrichment_does_not_collapse_sentence_topology(monkeypatch):
+     class Pipeline:
+         def __call__(self, text):
+@@ -381,11 +385,11 @@ def test_fallback_does_not_attempt_clausal_boundary_detection(monkeypatch):
+     monkeypatch.setattr(phrasplit, "detect_clause_boundaries", fail_if_called)
+     plan = UtterancePlanner(
+         PlannerConfig(
+-            language="en-us", text_preparation="identity", linguistics=LinguisticsConfig(use_spacy=False)
++            language="en-us",
++            text_preparation="identity",
++            linguistics=LinguisticsConfig(use_spacy=False),
+         )
+-    ).plan(
+-        "I wanted to go, but it was raining."
+-    )
++    ).plan("I wanted to go, but it was raining.")
+
+     assert not any(item.kind == "clausal_comma" for item in plan.boundaries)
+     assert not any(item.kind == "clause" for item in plan.semantic_boundaries)
+diff --git a/tests/test_migration_v4_to_v5.py b/tests/test_migration_v4_to_v5.py
+index d8ac4f0..df9c1fa 100644
+--- a/tests/test_migration_v4_to_v5.py
++++ b/tests/test_migration_v4_to_v5.py
+@@ -75,7 +75,6 @@ def test_token_facts_are_local_and_surface_verified() -> None:
+     assert error.value.code == "migration.token-coordinate-ambiguous"
+
+
+-
+ def test_v4_replacements_migrate_to_segment_local_compact_views() -> None:
+     plan = migrate_v4_to_v5(_fixture("spokenform_offsets.utterplan.json"))
+     segment = _segments(plan)[0]
+@@ -92,7 +91,11 @@ def test_v4_migration_skips_malformed_and_cross_segment_replacements() -> None:
+     malformed = _fixture("spokenform_offsets.utterplan.json")
+     malformed["preparation"]["replacements"][0]["kind"] = ""
+     plan = migrate_v4_to_v5(malformed)
+-    assert all(item["source"] != "Dr." for segment in _segments(plan) for item in segment.get("replacements", []))
++    assert all(
++        item["source"] != "Dr."
++        for segment in _segments(plan)
++        for item in segment.get("replacements", [])
++    )
+
+     crossing = _fixture("multilingual.utterplan.json")
+     crossing["preparation"]["replacements"] = [
+diff --git a/tests/test_planner.py b/tests/test_planner.py
+index ee9a6f3..2843f85 100644
+--- a/tests/test_planner.py
++++ b/tests/test_planner.py
+@@ -71,7 +71,12 @@ def test_pause_config_default_is_tts():
+
+ def test_pass_a_tokens_counts_tokens_not_language_runs():
+     plan = UtterancePlanner(
+-        PlannerConfig(language="en-us", document_format="plain", text_preparation="identity", linguistics=LinguisticsConfig(use_spacy=False))
++        PlannerConfig(
++            language="en-us",
++            document_format="plain",
++            text_preparation="identity",
++            linguistics=LinguisticsConfig(use_spacy=False),
++        )
+     ).plan("One two three.")
+
+     assert plan.document_metadata["planning"]["pass_a_tokens"] == 3
+diff --git a/tests/test_preparation.py b/tests/test_preparation.py
+index 2135450..1314455 100644
+--- a/tests/test_preparation.py
++++ b/tests/test_preparation.py
+@@ -1,7 +1,7 @@
+ import sys
+
+ import pytest
+-import spokenform
++import ttsready
+
+ from tests.compiler_helpers import CompilerTestPlanner as UtterancePlanner
+ from utterplan import PauseIntent, PlannerConfig
+@@ -10,13 +10,13 @@ from utterplan.exceptions import PlanFormatError
+
+ def _record_sequence_fallback_modes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+     modes: list[str] = []
+-    prepare = spokenform.prepare
++    prepare_run = ttsready.prepare_run
+
+     def record(text, **kwargs):
+-        modes.append(kwargs["sequence_fallback_mode"])
+-        return prepare(text, **kwargs)
++        modes.append(kwargs["profile"].sequence_fallback_mode)
++        return prepare_run(text, **kwargs)
+
+-    monkeypatch.setattr(spokenform, "prepare", record)
++    monkeypatch.setattr(ttsready, "prepare_run", record)
+     return modes
+
+
+@@ -46,13 +46,13 @@ def test_plain_input_forwards_spell_by_default(monkeypatch: pytest.MonkeyPatch)
+
+
+ @pytest.mark.parametrize("value", ["unknown", "null"])
+-def test_invalid_sequence_fallback_mode_fails_before_spokenform(
++def test_invalid_sequence_fallback_mode_fails_before_ttsready(
+     value: str, monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+     def fail_if_called(*args, **kwargs):
+-        raise AssertionError("spokenform.prepare must not run for invalid metadata")
++        raise AssertionError("ttsready.prepare_run must not run for invalid metadata")
+
+-    monkeypatch.setattr(spokenform, "prepare", fail_if_called)
++    monkeypatch.setattr(ttsready, "prepare_run", fail_if_called)
+     source = f'---\nssmd_version: "0.9"\nsequence_fallback_mode: {value}\n---\nin-system'
+
+     with pytest.raises(PlanFormatError) as error:
+@@ -60,10 +60,10 @@ def test_invalid_sequence_fallback_mode_fails_before_spokenform(
+     assert error.value.code == "header.sequence_fallback_mode_invalid"
+
+
+-def test_identity_preparation_keeps_sequence_fallback_mode_without_spokenform(
++def test_identity_preparation_keeps_sequence_fallback_mode_without_ttsready(
+     monkeypatch: pytest.MonkeyPatch,
+ ) -> None:
+-    monkeypatch.setitem(sys.modules, "spokenform", None)
++    monkeypatch.setitem(sys.modules, "ttsready", None)
+     source = '---\nssmd_version: "0.9"\nsequence_fallback_mode: preserve\n---\nin-system'
+     plan = UtterancePlanner(
+         PlannerConfig(
+diff --git a/tests/test_replacement_provenance.py b/tests/test_replacement_provenance.py
+index 5f93731..463d201 100644
+--- a/tests/test_replacement_provenance.py
++++ b/tests/test_replacement_provenance.py
+@@ -59,9 +59,8 @@ def test_art_replacement_projects_to_compact_segment_local_v5_provenance() -> No
+     )
+     assert restored_replacement == replacement
+     assert restored_replacement.surface(restored_segment.text) == "A R T"
+-    assert (
+-        f'[{replacement.start}:{replacement.end}] "A R T" <- "ART"'
+-        in format_explanation(restored)
++    assert f'[{replacement.start}:{replacement.end}] "A R T" <- "ART"' in format_explanation(
++        restored
+     )
+
+     example = FlowPlan(
+@@ -83,6 +82,7 @@ def test_art_replacement_projects_to_compact_segment_local_v5_provenance() -> No
+     assert "replacement.span = [[17, 22]]" in example_toml
+     assert 'replacement.source = ["ART"]' in example_toml
+
++
+ def test_multiple_replacements_keep_ordered_parallel_columns_and_round_trip() -> None:
+     flow = _compile_flow("Dr. bought 5 kg.")
+     segment = flow.flow[0].segments[0]
+@@ -141,15 +141,12 @@ def test_replacement_view_and_flow_segment_validate_local_spans() -> None:
+         FlowSegment("short", "en-us", replacements=(ReplacementView(0, 6, "source"),))
+
+
+-
+ def test_v5_replacement_columns_reject_invalid_cardinality_bounds_and_sparse_indexes() -> None:
+     flow = _compile_flow("Dr. bought 5 kg.")
+     base = to_v5_toml_data(flow)
+
+     invalid_bounds = deepcopy(base)
+-    segment = next(
+-        item for item in invalid_bounds["flow"][0]["segment"] if "replacement" in item
+-    )
++    segment = next(item for item in invalid_bounds["flow"][0]["segment"] if "replacement" in item)
+     segment["replacement"]["span"][0][1] = len(segment["text"]) + 1
+     with pytest.raises(PlanFormatError, match="replacement span"):
+         from_v5_toml_data(invalid_bounds)
+@@ -172,7 +169,6 @@ def test_v5_replacement_columns_reject_invalid_cardinality_bounds_and_sparse_ind
+         from_v5_toml_data(invalid_sparse_index)
+
+
+-
+ def test_replacement_provenance_does_not_change_hashes_but_token_semantics_do() -> None:
+     token = TokenView(
+         0,
+diff --git a/tests/test_ttsready_preparation_adapter.py b/tests/test_ttsready_preparation_adapter.py
+new file mode 100644
+index 0000000..79fb531
+--- /dev/null
++++ b/tests/test_ttsready_preparation_adapter.py
+@@ -0,0 +1,307 @@
++from __future__ import annotations
++
++from dataclasses import fields, replace
++from types import SimpleNamespace
++
++import pytest
++import ttsready
++
++from utterplan.exceptions import TextPreparationError
++from utterplan.language import LanguageRun
++from utterplan.linguistics import RunAnalysis
++from utterplan.model import AnnotationSpan, TokenAnnotation
++from utterplan.preparation import TTSReadyTextPreparer
++
++
++def _runs_and_analyses(text: str) -> tuple[tuple[LanguageRun, ...], tuple[RunAnalysis, ...]]:
++    split = text.index("Bonjour")
++    runs = (
++        LanguageRun("en-run", 0, split, "en-us"),
++        LanguageRun("fr-run", split, len(text), "fr"),
++    )
++    english_doc = object()
++    french_doc = object()
++    analyses = (
++        RunAnalysis(
++            language="en-us",
++            start=0,
++            end=split,
++            tokens=(
++                TokenAnnotation(0, 4, "Live", pos="VERB", tag="VB", lemma="live", language="en-us"),
++                TokenAnnotation(5, 8, "ART", pos="NOUN", tag="NN", lemma="art", language="en-us"),
++                TokenAnnotation(9, 10, "5", pos="NUM", lemma="5", language="en-us"),
++                TokenAnnotation(11, 13, "kg", pos="NOUN", lemma="kg", language="en-us"),
++            ),
++            provider_doc=english_doc,
++        ),
++        RunAnalysis(
++            language="fr",
++            start=split,
++            end=len(text),
++            tokens=(TokenAnnotation(split, len(text), "Bonjour.", lemma="bonjour", language="fr"),),
++            provider_doc=french_doc,
++        ),
++    )
++    return runs, analyses
++
++
++def test_adapter_builds_explicit_profile_and_always_preserves_run_boundaries(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    calls: list[tuple[str, dict[str, object]]] = []
++    prepare_run = ttsready.prepare_run
++
++    def spy(text: str, **kwargs: object):
++        calls.append((text, kwargs))
++        return prepare_run(text, **kwargs)
++
++    monkeypatch.setattr(ttsready, "prepare_run", spy)
++    text = "Live ART 5 kg Bonjour."
++    runs, analyses = _runs_and_analyses(text)
++    result = TTSReadyTextPreparer(sequence_fallback_mode="preserve").prepare(
++        text, "en-us", runs, analyses=analyses
++    )
++
++    assert result.spoken_text
++    assert [local_text for local_text, _ in calls] == [
++        text[run.spoken_start : run.spoken_end] for run in runs
++    ]
++    for _local_text, kwargs in calls:
++        profile = kwargs["profile"]
++        assert {field.name: getattr(profile, field.name) for field in fields(profile)} == {
++            "use_spacy": False,
++            "symbol_mode": "none",
++            "normalize_unicode": True,
++            "normalize_whitespace": True,
++            "strip_outer_whitespace": False,
++            "collapse_horizontal_whitespace": True,
++            "normalize_line_whitespace": True,
++            "collapse_blank_lines": True,
++            "generic_acronym_mode": "known_only",
++            "sequence_fallback_mode": "preserve",
++            "expand_abbreviations": True,
++            "expand_structured": True,
++            "expand_numbers": True,
++        }
++        assert kwargs["preserve_run_boundaries"] is True
++        assert kwargs["strict"] is False
++        assert kwargs["unit_id"] in {"en-run", "fr-run"}
++
++
++def test_adapter_localizes_provider_neutral_tokens_and_protects_ssmd_spans(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    calls: list[tuple[str, dict[str, object]]] = []
++    prepare_run = ttsready.prepare_run
++
++    def spy(text: str, **kwargs: object):
++        calls.append((text, kwargs))
++        return prepare_run(text, **kwargs)
++
++    monkeypatch.setattr(ttsready, "prepare_run", spy)
++    text = "Live ART 5 kg Bonjour."
++    runs, analyses = _runs_and_analyses(text)
++    annotation = AnnotationSpan(
++        id="pronunciation-1",
++        kind="pronunciation",
++        attrs={"ph": "ɑːrt"},
++        structural_start=5,
++        structural_end=8,
++        source_start=5,
++        source_end=8,
++    )
++
++    TTSReadyTextPreparer().prepare(text, "en-us", runs, (annotation,), analyses=analyses)
++
++    first_tokens = calls[0][1]["linguistic_tokens"]
++    assert [
++        (token.start, token.end, token.text, token.pos, token.tag, token.lemma, token.language)
++        for token in first_tokens
++    ] == [
++        (0, 4, "Live", "VERB", "VB", "live", "en-us"),
++        (5, 8, "ART", "NOUN", "NN", "art", "en-us"),
++        (9, 10, "5", "NUM", None, "5", "en-us"),
++        (11, 13, "kg", "NOUN", None, "kg", "en-us"),
++    ]
++    second_token = calls[1][1]["linguistic_tokens"][0]
++    assert (second_token.start, second_token.end, second_token.text, second_token.language) == (
++        0,
++        len("Bonjour."),
++        "Bonjour.",
++        "fr",
++    )
++    protected = calls[0][1]["protected_spans"]
++    assert [(span.start, span.end, span.reason) for span in protected] == [
++        (5, 8, "ssmd.speech-directive")
++    ]
++    assert calls[1][1]["protected_spans"] == ()
++    assert all("nlp" not in kwargs for _, kwargs in calls)
++
++
++def test_adapter_concatenates_exact_maps_rebases_changes_and_preserves_metadata(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    calls = []
++    prepare_run = ttsready.prepare_run
++
++    def spy(text: str, **kwargs: object):
++        result = prepare_run(text, **kwargs)
++        calls.append(result)
++        return result
++
++    monkeypatch.setattr(ttsready, "prepare_run", spy)
++    monkeypatch.setattr(
++        ttsready,
++        "runtime_versions",
++        lambda: {"ttsready": "0.2.2", "spokenform": "0.4.5"},
++    )
++    text = "Hello Bonjour 5 kg."
++    runs = (
++        LanguageRun("en-run", 0, len("Hello "), "en-us"),
++        LanguageRun("fr-run", len("Hello "), len(text), "fr"),
++    )
++    result = TTSReadyTextPreparer().prepare(text, "en-us", runs)
++
++    expected_map = ttsready.SourceOutputMap.concatenate(item.source_map for item in calls)
++    assert result.source_map.source_length == len(text)
++    assert result.source_map.output_length == len(result.spoken_text)
++    for start, end in ((0, 0), (0, 5), (6, 11), (len(text), len(text))):
++        assert result.source_map.map_source_span(start, end) == expected_map.map_source_span(
++            start, end
++        )
++    assert result.info.backend == "spokenform"
++    assert result.info.version == "0.4.5"
++    assert result.info.languages == ("en-us", "fr")
++    assert result.info.replacements
++    assert [item["source_start"] for item in result.info.replacements] == sorted(
++        item["source_start"] for item in result.info.replacements
++    )
++    replacement = next(item for item in result.info.replacements if item["source"] == "5 kg")
++    assert replacement["source_start"] == text.index("5 kg")
++    assert (
++        result.spoken_text[replacement["output_start"] : replacement["output_end"]]
++        == "cinq kilogrammes"
++    )
++    assert set(replacement) <= {
++        "source_start",
++        "source_end",
++        "output_start",
++        "output_end",
++        "source",
++        "replacement",
++        "kind",
++        "rule",
++        "language",
++    }
++
++
++def test_adapter_translates_ttsready_errors_and_rejects_bad_maps(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    run = LanguageRun("run", 0, 3, "en-us")
++    preparer = TTSReadyTextPreparer()
++
++    def fail(*_args: object, **_kwargs: object):
++        raise ttsready.TTSReadyError("backend failure")
++
++    monkeypatch.setattr(ttsready, "prepare_run", fail)
++    with pytest.raises(TextPreparationError, match="backend failure") as error:
++        preparer.prepare("abc", "en-us", (run,))
++    assert isinstance(error.value.__cause__, ttsready.TTSReadyError)
++
++    malformed = SimpleNamespace(
++        source_text="abc",
++        spoken_text="xyz",
++        changes=(),
++        warnings=(),
++        source_map=SimpleNamespace(source_length=4, output_length=3),
++    )
++    monkeypatch.setattr(ttsready, "prepare_run", lambda *_args, **_kwargs: malformed)
++    with pytest.raises(TextPreparationError, match="source map length"):
++        preparer.prepare("abc", "en-us", (run,))
++
++    malformed.source_map = SimpleNamespace(source_length=3, output_length=2)
++    with pytest.raises(TextPreparationError, match="output map length"):
++        preparer.prepare("abc", "en-us", (run,))
++
++
++def test_adapter_rejects_mismatched_analysis_and_tokens_before_prepare_run(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    calls = 0
++
++    def spy(*_args: object, **_kwargs: object):
++        nonlocal calls
++        calls += 1
++        return ttsready.prepare_run(*_args, **_kwargs)
++
++    monkeypatch.setattr(ttsready, "prepare_run", spy)
++    run = LanguageRun("run", 0, 4, "en-us")
++    mismatched = RunAnalysis("fr", 0, 4, (), provider_doc=object())
++    with pytest.raises(TextPreparationError, match="does not match"):
++        TTSReadyTextPreparer().prepare("text", "en-us", (run,), analyses=(mismatched,))
++    assert calls == 0
++
++    crossing = RunAnalysis("en-us", 0, 4, (TokenAnnotation(3, 5, "xt", language="en-us"),))
++    with pytest.raises(TextPreparationError, match="falls outside"):
++        TTSReadyTextPreparer().prepare("text", "en-us", (run,), analyses=(crossing,))
++    assert calls == 0
++
++
++def test_adapter_keeps_ttsready_warnings_as_strings(monkeypatch: pytest.MonkeyPatch) -> None:
++    prepare_run = ttsready.prepare_run
++
++    def with_warning(text: str, **kwargs: object):
++        result = prepare_run(text, **kwargs)
++        return SimpleNamespace(
++            source_text=result.source_text,
++            spoken_text=result.spoken_text,
++            changes=result.changes,
++            issues=result.issues,
++            source_map=result.source_map,
++            warnings=("adapter warning",),
++        )
++
++    monkeypatch.setattr(ttsready, "prepare_run", with_warning)
++    run = LanguageRun("run", 0, 6, "en-us")
++    result = TTSReadyTextPreparer().prepare("Hello.", "en-us", (run,))
++
++    assert result.info.warnings == ("adapter warning",)
++
++
++
++def test_adapter_preserves_backend_per_change_language_provenance() -> None:
++    text = "Dr. bought 5 kg."
++    run = LanguageRun("run", 0, len(text), "en-us")
++
++    result = TTSReadyTextPreparer().prepare(text, "en-us", (run,))
++
++    assert [(change["source"], change["language"]) for change in result.info.replacements] == [
++        ("Dr.", "en_US"),
++        ("5 kg", "en"),
++    ]
++
++
++
++def test_adapter_does_not_invent_language_when_change_language_is_absent(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    prepare_run = ttsready.prepare_run
++
++    def without_change_language(text: str, **kwargs: object):
++        result = prepare_run(text, **kwargs)
++        return SimpleNamespace(
++            source_text=result.source_text,
++            spoken_text=result.spoken_text,
++            changes=tuple(replace(change, language=None) for change in result.changes),
++            warnings=result.warnings,
++            source_map=result.source_map,
++        )
++
++    monkeypatch.setattr(ttsready, "prepare_run", without_change_language)
++    text = "Dr."
++    run = LanguageRun("run", 0, len(text), "en-us")
++    result = TTSReadyTextPreparer().prepare(text, "en-us", (run,))
++
++    assert result.info.replacements
++    assert "language" not in result.info.replacements[0]
+diff --git a/utterplan/codecs/v5_toml.py b/utterplan/codecs/v5_toml.py
+index cc33196..9cf2c47 100644
+--- a/utterplan/codecs/v5_toml.py
++++ b/utterplan/codecs/v5_toml.py
+@@ -161,6 +161,8 @@ def _token_columns(segment: Any) -> dict[str, Any]:
+     if morph:
+         columns["morph"] = morph
+     return columns
++
++
+ def _replacement_columns(segment: Any) -> dict[str, Any]:
+     replacements = segment.replacements
+     if not replacements:
+@@ -176,8 +178,6 @@ def _replacement_columns(segment: Any) -> dict[str, Any]:
+     return columns
+
+
+-
+-
+ def _segment_to_wire(segment: Any, default_language: str) -> dict[str, Any]:
+     result: dict[str, Any] = {"text": segment.text}
+     if segment.language != default_language:
+@@ -381,7 +381,9 @@ def _replacements_from_wire(value: Any, text: str, path: str) -> list[dict[str,
+             or len(span) != 2
+             or any(type(point) is not int for point in span)
+         ):
+-            raise _error("replacement span must be [start, end]", code="replacement.span", path=span_path)
++            raise _error(
++                "replacement span must be [start, end]", code="replacement.span", path=span_path
++            )
+         start, end = span
+         if start < 0 or end < start or end > len(text):
+             raise _error(
+@@ -453,9 +455,7 @@ def _segment_from_wire(value: Any, default_language: str, path: str) -> dict[str
+         "tokens": _tokens_from_wire(value["token"], text, f"{path}.token")
+         if "token" in value
+         else [],
+-        "replacements": _replacements_from_wire(
+-            value["replacement"], text, f"{path}.replacement"
+-        )
++        "replacements": _replacements_from_wire(value["replacement"], text, f"{path}.replacement")
+         if "replacement" in value
+         else [],
+         "markers": value.get("marker", []),
+diff --git a/utterplan/flow_projection.py b/utterplan/flow_projection.py
+index 892c330..9c4ac86 100644
+--- a/utterplan/flow_projection.py
++++ b/utterplan/flow_projection.py
+@@ -183,7 +183,9 @@ def _tokens_for_segment(
+     return tuple(result)
+
+
+-def _replacement_views_for_segment(plan: UtterancePlan, segment: Any) -> tuple[ReplacementView, ...]:
++def _replacement_views_for_segment(
++    plan: UtterancePlan, segment: Any
++) -> tuple[ReplacementView, ...]:
+     views: list[ReplacementView] = []
+     for raw in plan.preparation.replacements:
+         if not isinstance(raw, Mapping):
+diff --git a/utterplan/model.py b/utterplan/model.py
+index 990a443..078752f 100644
+--- a/utterplan/model.py
++++ b/utterplan/model.py
+@@ -2027,9 +2027,13 @@ class FlowPlan:
+                             )
+                         replacements.append(
+                             ReplacementView(
+-                                _expect(raw_replacement.get("start"), int, f"{replacement_path}.start"),
++                                _expect(
++                                    raw_replacement.get("start"), int, f"{replacement_path}.start"
++                                ),
+                                 _expect(raw_replacement.get("end"), int, f"{replacement_path}.end"),
+-                                _expect(raw_replacement.get("source"), str, f"{replacement_path}.source"),
++                                _expect(
++                                    raw_replacement.get("source"), str, f"{replacement_path}.source"
++                                ),
+                                 raw_replacement.get("kind"),
+                                 raw_replacement.get("rule"),
+                             )
+diff --git a/utterplan/planner.py b/utterplan/planner.py
+index 411cb62..5a83a17 100644
+--- a/utterplan/planner.py
++++ b/utterplan/planner.py
+@@ -41,7 +41,7 @@ from .parsers import (
+     effective_sequence_fallback_mode,
+ )
+ from .pauses import boundary_is_active, resolve_pause_intents
+-from .preparation import IdentityTextPreparer, SourceToSpokenMap, SpokenformTextPreparer
++from .preparation import IdentityTextPreparer, SourceToSpokenMap, TTSReadyTextPreparer
+ from .progress import PlannerProgressEvent, ProgressCallback, _notify_progress
+ from .renderability import (
+     RenderabilityIssue,
+@@ -214,7 +214,7 @@ class UtterancePlanner:
+         preparer = (
+             IdentityTextPreparer()
+             if config.text_preparation == "identity"
+-            else SpokenformTextPreparer(sequence_fallback_mode=fallback_mode)
++            else TTSReadyTextPreparer(sequence_fallback_mode=fallback_mode)
+         )
+         prepared = preparer.prepare(
+             parsed.structural_text,
+diff --git a/utterplan/preparation.py b/utterplan/preparation.py
+index 03f76e8..4780081 100644
+--- a/utterplan/preparation.py
++++ b/utterplan/preparation.py
+@@ -1,8 +1,10 @@
+ from __future__ import annotations
+
+ from dataclasses import dataclass
+-from importlib.metadata import PackageNotFoundError, version
+-from typing import Any, Protocol
++from typing import TYPE_CHECKING, Any, Protocol
++
++if TYPE_CHECKING:
++    from .linguistics import RunAnalysis
+
+ from .exceptions import TextPreparationError
+ from .language import LanguageRun, language_lookup_key
+@@ -27,7 +29,7 @@ class PreparedText:
+     source_map: SourceToSpokenMap
+
+
+-class SpokenformTextPreparer:
++class TTSReadyTextPreparer:
+     def __init__(self, *, sequence_fallback_mode: str = "spell") -> None:
+         if sequence_fallback_mode not in ("spell", "preserve"):
+             raise ValueError("sequence_fallback_mode must be 'spell' or 'preserve'")
+@@ -40,70 +42,99 @@ class SpokenformTextPreparer:
+         runs: tuple[LanguageRun, ...],
+         annotations: tuple[AnnotationSpan, ...] = (),
+         boundaries: tuple[BoundaryEvent, ...] = (),
+-        analyses: tuple[Any, ...] = (),
++        analyses: tuple[RunAnalysis, ...] = (),
+     ) -> PreparedText:
+         try:
+-            import spokenform
++            import ttsready
++        except ImportError as exc:
++            raise TextPreparationError(str(exc)) from exc
+
++        try:
+             prepared_runs: list[Any] = []
+             active_runs = runs or (LanguageRun("lang-0", 0, len(text), language),)
++            _validate_run_coverage(text, active_runs)
++            if len(analyses) > len(active_runs):
++                raise TextPreparationError("source analysis count exceeds language run count")
++
++            profile = _ttsready_profile(ttsready, self.sequence_fallback_mode)
+             for run_index, run in enumerate(active_runs):
+                 local_text = text[run.spoken_start : run.spoken_end]
+-                protected = [
+-                    (
+-                        annotation.structural_start - run.spoken_start,
+-                        annotation.structural_end - run.spoken_start,
++                analysis = analyses[run_index] if run_index < len(analyses) else None
++                linguistic_tokens = _linguistic_tokens_for_run(ttsready, run, analysis)
++                protected_spans = _protected_spans_for_run(ttsready, run, annotations)
++                prepared_runs.append(
++                    ttsready.prepare_run(
++                        local_text,
++                        language=language_lookup_key(run.language),
++                        unit_id=run.id or f"run-{run_index}",
++                        protected_spans=protected_spans,
++                        linguistic_tokens=linguistic_tokens,
++                        profile=profile,
++                        strict=False,
++                        preserve_run_boundaries=True,
+                     )
+-                    for annotation in annotations
+-                    if annotation.structural_start >= run.spoken_start
+-                    and annotation.structural_end <= run.spoken_end
+-                    and any(
+-                        key in annotation.attrs for key in ("sub", "as", "say-as", "ph", "phonemes")
++                )
++
++            for run, item in zip(active_runs, prepared_runs, strict=True):
++                expected_length = run.spoken_end - run.spoken_start
++                if item.source_map.source_length != expected_length:
++                    raise TextPreparationError("TTSReady source map length does not match its run")
++                if item.source_map.output_length != len(item.spoken_text):
++                    raise TextPreparationError(
++                        "TTSReady output map length does not match spoken text"
+                     )
+-                ]
+-                kwargs: dict[str, Any] = {
+-                    "language": language_lookup_key(run.language),
+-                    "use_spacy": False,
+-                    "strip_outer_whitespace": False,
+-                    "preserve_run_boundaries": True,
+-                    "protected_spans": protected,
+-                    "sequence_fallback_mode": self.sequence_fallback_mode,
+-                }
+-                if run_index < len(analyses) and analyses[run_index].provider_doc is not None:
+-                    kwargs["nlp"] = analyses[run_index].provider_doc
+-                prepared_runs.append(spokenform.prepare(local_text, **kwargs))
+-            spoken = "".join(str(item.spoken_text) for item in prepared_runs)
+-            source_map = _compose_offsets(text, prepared_runs)
++
++            spoken = "".join(item.spoken_text for item in prepared_runs)
++            if sum(len(item.source_text) for item in prepared_runs) != len(text):
++                raise TextPreparationError("TTSReady prepared runs do not cover the source text")
++            source_map = ttsready.SourceOutputMap.concatenate(
++                item.source_map for item in prepared_runs
++            )
++            if source_map.source_length != len(text):
++                raise TextPreparationError("TTSReady concatenated source map length is invalid")
++            if source_map.output_length != len(spoken):
++                raise TextPreparationError("TTSReady concatenated output map length is invalid")
++
+             replacements: list[dict[str, Any]] = []
+             warnings: list[str] = []
+             output_offset = 0
+-            for run, item in zip(
+-                runs or (LanguageRun("lang-0", 0, len(text), language),),
+-                prepared_runs,
+-                strict=False,
+-            ):
+-                for replacement in getattr(item, "source_replacements", ()):
+-                    value = _replacement_dict(replacement)
+-                    value["source_start"] = int(value.get("source_start", 0)) + run.spoken_start
+-                    value["source_end"] = int(value.get("source_end", 0)) + run.spoken_start
+-                    value["output_start"] = int(value.get("output_start", 0)) + output_offset
+-                    value["output_end"] = int(value.get("output_end", 0)) + output_offset
++            for run, item in zip(active_runs, prepared_runs, strict=True):
++                for change in item.changes:
++                    value: dict[str, Any] = {
++                        "source_start": change.source_start + run.spoken_start,
++                        "source_end": change.source_end + run.spoken_start,
++                        "output_start": change.output_start + output_offset,
++                        "output_end": change.output_end + output_offset,
++                        "source": change.source,
++                        "replacement": change.replacement,
++                        "kind": change.kind,
++                    }
++                    if change.language is not None:
++                        value["language"] = change.language
++                    if change.rule is not None:
++                        value["rule"] = change.rule
+                     replacements.append(value)
+-                warnings.extend(str(value) for value in getattr(item, "warnings", ()))
+-                output_offset += len(str(item.spoken_text))
+-            try:
+-                ver = version("spokenform")
+-            except PackageNotFoundError:
+-                ver = None
+-        except (ImportError, ValueError, TypeError) as exc:
++                warnings.extend(str(value) for value in item.warnings)
++                output_offset += len(item.spoken_text)
++
++            _validate_replacement_order(replacements)
++            versions = ttsready.runtime_versions()
++            raw_version = versions.get("spokenform")
++            version_value = None if raw_version in (None, "", "unknown") else str(raw_version)
++        except TextPreparationError:
++            raise
++        except ttsready.TTSReadyError as exc:
+             raise TextPreparationError(str(exc)) from exc
++        except (ImportError, TypeError, ValueError) as exc:
++            raise TextPreparationError(str(exc)) from exc
++
+         mapped_annotations = tuple(
+             _map_annotation(annotation, source_map) for annotation in annotations
+         )
+         mapped_boundaries = tuple(_map_boundary(boundary, source_map) for boundary in boundaries)
+         info = TextPreparationInfo(
+             backend="spokenform",
+-            version=ver,
++            version=version_value,
+             languages=tuple(run.language for run in runs),
+             replacements=tuple(replacements),
+             warnings=tuple(warnings),
+@@ -111,6 +142,99 @@ class SpokenformTextPreparer:
+         return PreparedText(spoken, info, mapped_annotations, mapped_boundaries, source_map)
+
+
++def _ttsready_profile(ttsready: Any, sequence_fallback_mode: str) -> Any:
++    return ttsready.PreparationProfile(
++        use_spacy=False,
++        symbol_mode="none",
++        normalize_unicode=True,
++        normalize_whitespace=True,
++        strip_outer_whitespace=False,
++        collapse_horizontal_whitespace=True,
++        normalize_line_whitespace=True,
++        collapse_blank_lines=True,
++        generic_acronym_mode="known_only",
++        sequence_fallback_mode=sequence_fallback_mode,
++        expand_abbreviations=True,
++        expand_structured=True,
++        expand_numbers=True,
++    )
++
++
++def _validate_run_coverage(text: str, runs: tuple[LanguageRun, ...]) -> None:
++    position = 0
++    for run in runs:
++        if run.spoken_start != position or run.spoken_end < run.spoken_start:
++            raise TextPreparationError("language runs must be contiguous and ordered")
++        position = run.spoken_end
++    if position != len(text):
++        raise TextPreparationError("language runs do not cover the source text")
++
++
++def _protected_spans_for_run(
++    ttsready: Any,
++    run: LanguageRun,
++    annotations: tuple[AnnotationSpan, ...],
++) -> tuple[Any, ...]:
++    protected_keys = ("sub", "as", "say-as", "ph", "phonemes")
++    return tuple(
++        ttsready.ProtectedSpan(
++            start=annotation.structural_start - run.spoken_start,
++            end=annotation.structural_end - run.spoken_start,
++            reason="ssmd.speech-directive",
++        )
++        for annotation in annotations
++        if annotation.structural_start >= run.spoken_start
++        and annotation.structural_end <= run.spoken_end
++        and any(key in annotation.attrs for key in protected_keys)
++    )
++
++
++def _linguistic_tokens_for_run(
++    ttsready: Any,
++    run: LanguageRun,
++    analysis: RunAnalysis | None,
++) -> tuple[Any, ...]:
++    if analysis is None:
++        return ()
++    if (
++        analysis.start != run.spoken_start
++        or analysis.end != run.spoken_end
++        or analysis.language != run.language
++    ):
++        raise TextPreparationError("source analysis does not match its language run")
++
++    result: list[Any] = []
++    for token in analysis.tokens:
++        if (
++            token.spoken_start < run.spoken_start
++            or token.spoken_end > run.spoken_end
++            or token.spoken_end < token.spoken_start
++        ):
++            raise TextPreparationError("linguistic token falls outside its language run")
++        result.append(
++            ttsready.LinguisticToken(
++                start=token.spoken_start - run.spoken_start,
++                end=token.spoken_end - run.spoken_start,
++                text=token.text,
++                pos=token.pos,
++                tag=token.tag,
++                lemma=token.lemma,
++                language=token.language or run.language,
++            )
++        )
++    return tuple(result)
++
++
++def _validate_replacement_order(replacements: list[dict[str, Any]]) -> None:
++    previous_end = 0
++    for replacement in replacements:
++        start = replacement["source_start"]
++        end = replacement["source_end"]
++        if start < previous_end or end < start:
++            raise TextPreparationError("TTSReady replacement ranges are overlapping or unordered")
++        previous_end = end
++
++
+ class IdentityTextPreparer:
+     def prepare(
+         self,
+@@ -150,88 +274,6 @@ class _IdentitySourceMap:
+         return start, end
+
+
+-class _CompositeSourceMap:
+-    def __init__(
+-        self,
+-        source_length: int,
+-        output_length: int,
+-        source_left: list[int],
+-        source_right: list[int],
+-    ) -> None:
+-        self.source_length = source_length
+-        self.output_length = output_length
+-        self.source_left = source_left
+-        self.source_right = source_right
+-
+-    def map_source_span(self, start: int, end: int) -> tuple[int, int]:
+-        start = max(0, min(self.source_length, start))
+-        end = max(start, min(self.source_length, end))
+-        return self.source_left[start], self.source_right[end]
+-
+-    def map_output_span(self, start: int, end: int) -> tuple[int, int]:
+-        start = max(0, min(self.output_length, start))
+-        end = max(start, min(self.output_length, end))
+-        start_candidates = [
+-            index
+-            for index, (left, right) in enumerate(
+-                zip(self.source_left, self.source_right, strict=True)
+-            )
+-            if left <= start <= right
+-        ]
+-        end_candidates = [
+-            index
+-            for index, (left, right) in enumerate(
+-                zip(self.source_left, self.source_right, strict=True)
+-            )
+-            if left <= end <= right
+-        ]
+-        source_start = min(start_candidates) if start_candidates else self.source_length
+-        source_end = max(end_candidates) if end_candidates else source_start
+-        return source_start, max(source_start, source_end)
+-
+-
+-def _compose_offsets(text: str, prepared_runs: list[Any]) -> SourceToSpokenMap:
+-    if not prepared_runs:
+-        return _IdentitySourceMap(len(text))
+-
+-    source_left: list[int] = []
+-    source_right: list[int] = []
+-    source_length = output_length = 0
+-    for item in prepared_runs:
+-        offset = getattr(item, "offset_map", None)
+-        if offset is None:
+-            raise TextPreparationError("spokenform did not provide an offset map")
+-        local_left = list(offset.source_left)
+-        local_right = list(offset.source_right)
+-        if not source_left:
+-            source_left.extend(value + output_length for value in local_left)
+-            source_right.extend(value + output_length for value in local_right)
+-        else:
+-            source_left.extend(value + output_length for value in local_left[1:])
+-            source_right.extend(value + output_length for value in local_right[1:])
+-        source_length += int(offset.source_length)
+-        output_length += int(offset.output_length)
+-    return _CompositeSourceMap(source_length, output_length, source_left, source_right)
+-
+-
+-def _replacement_dict(item: Any) -> dict[str, Any]:
+-    return {
+-        key: getattr(item, key)
+-        for key in (
+-            "source_start",
+-            "source_end",
+-            "output_start",
+-            "output_end",
+-            "source",
+-            "replacement",
+-            "kind",
+-            "rule",
+-            "language",
+-        )
+-        if hasattr(item, key)
+-    }
+-
+-
+ def _map_annotation(annotation: AnnotationSpan, source_map: SourceToSpokenMap) -> AnnotationSpan:
+     spoken_start, spoken_end = source_map.map_source_span(
+         annotation.structural_start, annotation.structural_end
+diff --git a/utterplan/stages/preparation/spokenform.py b/utterplan/stages/preparation/spokenform.py
+deleted file mode 100644
+index e282912..0000000
+--- a/utterplan/stages/preparation/spokenform.py
++++ /dev/null
+@@ -1,3 +0,0 @@
+-from ...preparation import SpokenformTextPreparer
+-
+-__all__ = ["SpokenformTextPreparer"]
+diff --git a/utterplan/stages/preparation/ttsready.py b/utterplan/stages/preparation/ttsready.py
+new file mode 100644
+index 0000000..74f0e3d
+--- /dev/null
++++ b/utterplan/stages/preparation/ttsready.py
+@@ -0,0 +1,3 @@
++from ...preparation import TTSReadyTextPreparer
++
++__all__ = ["TTSReadyTextPreparer"]
