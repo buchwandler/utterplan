@@ -5,12 +5,14 @@ from typing import Any, Literal
 import pytest
 import ttsready
 
+import utterplan.planner as planner_module
 from tests.compiler_helpers import CompilerTestPlanner
-from utterplan import PlannerConfig
+from utterplan import LinguisticsConfig, PlannerConfig
 from utterplan.exceptions import ConfigurationError, PlanFormatError
 from utterplan.flow_projection import project_compiler_plan
 from utterplan.language import LanguageRun
-from utterplan.model import AnnotationSpan, BoundaryEvent
+from utterplan.linguistics import RunAnalysis
+from utterplan.model import AnnotationSpan, BoundaryEvent, TokenAnnotation
 from utterplan.preparation import SSMDSubstitutionPreparer
 
 
@@ -203,9 +205,49 @@ def test_substitution_span_with_unproven_edge_whitespace_fails_safely() -> None:
     assert error.value.code == "preparation.ssmd_sub_span_ambiguous"
 
 
-def test_segmentation_diagnostic_offsets_slice_raw_ssmd_source() -> None:
+def test_segmentation_diagnostic_offsets_slice_raw_ssmd_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_analysis(text, runs, _config, _resources, **_kwargs):
+        analyses = []
+        for run in runs:
+            surface = text[run.spoken_start : run.spoken_end]
+            tokens = []
+            cursor = run.spoken_start
+            for word in surface.split():
+                token_start = text.index(word, cursor, run.spoken_end)
+                token_end = token_start + len(word)
+                tokens.append(
+                    TokenAnnotation(
+                        token_start,
+                        token_end,
+                        word,
+                        language=run.language,
+                    )
+                )
+                cursor = token_end
+            analyses.append(
+                RunAnalysis(
+                    run.language,
+                    run.spoken_start,
+                    run.spoken_end,
+                    tuple(tokens),
+                    provider="spacy",
+                    model_name="fake-model",
+                )
+            )
+        return tuple(analyses)
+
+    monkeypatch.setattr(planner_module, "analyze_run_analyses", fake_analysis)
+    planner = CompilerTestPlanner(
+        PlannerConfig(
+            language="en-us",
+            document_format="ssmd",
+            linguistics=LinguisticsConfig(use_spacy=True, spacy_model="fake-model"),
+        )
+    )
     source = "Tar*get* is here."
-    plan = _planner().plan(source)
+    plan = planner.plan(source)
     diagnostic = next(
         item for item in plan.diagnostics if item.code == "segmentation.token_reanalyzed"
     )

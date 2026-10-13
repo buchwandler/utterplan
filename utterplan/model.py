@@ -2366,7 +2366,7 @@ class LegacyFlowPlan(FlowPlan):
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> LegacyFlowPlan:
-        plan = super().from_dict(data)
+        plan = FlowPlan.from_dict(data)
         if not isinstance(plan, cls):
             raise PlanFormatError(
                 "expected a schema-v5 or schema-v6 flow plan", code="schema.version"
