@@ -240,7 +240,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     migrate_parser = commands.add_parser(
         "migrate",
-        help="migrate supported legacy JSON or v4/v5/v6 TOML plans to the current v6 TOML format",
+        help="migrate supported legacy JSON or v4/v5/v6 TOML plans to the current v7 TOML format",
     )
     migrate_parser.add_argument("input", type=Path)
     migrate_parser.add_argument("-o", "--output", type=Path)
@@ -1130,7 +1130,7 @@ def _migration_result(path: Path) -> MigrationResult:
             plan = FlowPlan.from_toml(content)
             return migrate_plan_data(plan.to_dict())
         raise PlanFormatError(
-            "migrate supports schema-v4/v5/v6 TOML plan files", code="schema.version"
+            "migrate supports schema-v4/v5/v6/v7 TOML plan files", code="schema.version"
         )
     try:
         value = json.loads(content)

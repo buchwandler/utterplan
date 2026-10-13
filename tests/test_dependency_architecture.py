@@ -20,7 +20,7 @@ def test_runtime_dependencies_use_ttsready_without_direct_spokenform() -> None:
     dependencies = project["dependencies"]
     by_name = {_requirement_name(item): item for item in dependencies}
 
-    assert by_name["ttsready"] == "ttsready>=0.2.2,<0.3"
+    assert by_name["ttsready"] == "ttsready>=0.2.3,<0.3"
     assert "phrasplit" in by_name
     assert "ssmd" in by_name
     assert "spokenform" not in by_name

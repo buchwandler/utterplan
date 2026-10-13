@@ -49,7 +49,7 @@ jobs:
           python -m pip install \
             "phrasplit==0.3.9" \
             "ssmd==0.9.3" \
-            "ttsready==0.2.2" \
+            "ttsready==0.2.3" \
             "spokenform==0.4.5" \
             "renderplan==0.1.0" \
             "typing_extensions==4.0.0" \
@@ -99,7 +99,7 @@ jobs:
           expected_ranges = {
               "phrasplit": ("0.3.9", "0.4"),
               "ssmd": ("0.9.3", "0.10"),
-              "ttsready": ("0.2.2", "0.3"),
+              "ttsready": ("0.2.3", "0.3"),
               "renderplan": ("0.1", "0.2"),
           }
 
@@ -180,8 +180,13 @@ jobs:
             exit 1
           fi
           grep -q "header.version_unsupported" "$RUNNER_TEMP/test-0.8.out"
-          "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" migrate \
-            "$GITHUB_WORKSPACE/tests/schema_history/v1/basic.json" --check
+          if "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" migrate \
+            "$GITHUB_WORKSPACE/tests/schema_history/v1/basic.json" --check > "$RUNNER_TEMP/migration-check.out" 2>&1; then
+            cat "$RUNNER_TEMP/migration-check.out"
+            echo "Expected historical schema migration to require recompilation" >&2
+            exit 1
+          fi
+          grep -q "migration.recompile_required" "$RUNNER_TEMP/migration-check.out"
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" inspect \
             "$RUNNER_TEMP/test.utterplan.toml" --segment 0
 
