@@ -343,10 +343,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--utterplan-dir", type=Path, help="directory of existing .utterplan.toml files"
     )
     render_book_parser.add_argument(
-        "--output-root", type=Path, help="RenderPlan collection root (default: <ssmdbook>/renderplan)"
+        "--output-root",
+        type=Path,
+        help="RenderPlan collection root (default: <ssmdbook>/renderplan)",
     )
     render_book_parser.add_argument(
-        "--variant", help="safe human-readable variant label (profile fingerprint is always appended)"
+        "--variant",
+        help="safe human-readable variant label (profile fingerprint is always appended)",
     )
     render_book_parser.add_argument(
         "--force", action="store_true", help="replace only selected existing RenderPlan files"
@@ -510,6 +513,7 @@ def _utterplan_output_name(source: Path) -> str:
 
 def _renderplan_output_name(source: Path) -> str:
     return _source_output_stem(source) + ".renderplan.toml"
+
 
 def _planner_config_from_batch_args(args: argparse.Namespace) -> PlannerConfig:
     return PlannerConfig(
@@ -771,9 +775,13 @@ def _render_book(args: argparse.Namespace) -> int:
     try:
         utterplan_dir = utterplan_dir_arg.expanduser().resolve(strict=True)
     except (OSError, RuntimeError) as exc:
-        raise _CliUsageError(f"cannot resolve UtterPlan directory {utterplan_dir_arg}: {exc}") from exc
+        raise _CliUsageError(
+            f"cannot resolve UtterPlan directory {utterplan_dir_arg}: {exc}"
+        ) from exc
     if not utterplan_dir.is_dir():
-        raise _CliUsageError(f"UtterPlan directory does not exist or is not a directory: {utterplan_dir}")
+        raise _CliUsageError(
+            f"UtterPlan directory does not exist or is not a directory: {utterplan_dir}"
+        )
 
     profile_input = args.profile.expanduser()
     try:
@@ -816,7 +824,9 @@ def _render_book(args: argparse.Namespace) -> int:
     if variant_dir.exists() and not variant_dir.is_dir():
         raise _CliUsageError(f"RenderPlan variant path is not a directory: {variant_dir}")
     if _path_is_within(output_root, chapters_dir) or _path_is_within(variant_dir, chapters_dir):
-        raise _CliUsageError("RenderPlan output root and variant must not be inside source chapters/")
+        raise _CliUsageError(
+            "RenderPlan output root and variant must not be inside source chapters/"
+        )
     if _path_is_within(variant_dir, utterplan_dir):
         raise _CliUsageError("RenderPlan variant must not be inside the active UtterPlan directory")
 
@@ -849,9 +859,13 @@ def _render_book(args: argparse.Namespace) -> int:
             except RenderPlanSetError as exc:
                 raise _CliUsageError(f"invalid existing renderplan-set.toml: {exc}") from exc
             if renderplan_set.variant != label:
-                raise _CliUsageError("existing renderplan-set.toml variant does not match its directory")
+                raise _CliUsageError(
+                    "existing renderplan-set.toml variant does not match its directory"
+                )
             if renderplan_set.snapshot != "renderprofile.toml":
-                raise _CliUsageError("existing renderplan-set.toml does not use the canonical profile snapshot")
+                raise _CliUsageError(
+                    "existing renderplan-set.toml does not use the canonical profile snapshot"
+                )
             try:
                 validate_renderplan_set_profile(
                     renderplan_set,
@@ -874,13 +888,21 @@ def _render_book(args: argparse.Namespace) -> int:
             try:
                 nonempty = next(variant_dir.iterdir(), None) is not None
             except OSError as exc:
-                raise _CliUsageError(f"cannot inspect RenderPlan variant {variant_dir}: {exc}") from exc
+                raise _CliUsageError(
+                    f"cannot inspect RenderPlan variant {variant_dir}: {exc}"
+                ) from exc
             if nonempty:
                 raise _CliUsageError(
                     f"refusing to adopt non-empty RenderPlan variant without a valid set index: {variant_dir}"
                 )
             renderplan_set = _new_renderplan_set(
-                label, profile_id, profile_path, book.root, utterplan_dir, variant_dir, manifest_path
+                label,
+                profile_id,
+                profile_path,
+                book.root,
+                utterplan_dir,
+                variant_dir,
+                manifest_path,
             )
     else:
         renderplan_set = _new_renderplan_set(
@@ -891,13 +913,17 @@ def _render_book(args: argparse.Namespace) -> int:
         try:
             variant_dir.mkdir(parents=True)
         except OSError as exc:
-            raise _CliUsageError(f"cannot create RenderPlan variant directory {variant_dir}: {exc}") from exc
+            raise _CliUsageError(
+                f"cannot create RenderPlan variant directory {variant_dir}: {exc}"
+            ) from exc
     if not set_path.exists():
         try:
             renderplan_codec.save_profile(profile, snapshot_path)
             save_renderplan_set(set_path, renderplan_set)
         except (OSError, ValueError, TypeError) as exc:
-            raise _CliUsageError(f"cannot initialize RenderPlan variant {variant_dir}: {exc}") from exc
+            raise _CliUsageError(
+                f"cannot initialize RenderPlan variant {variant_dir}: {exc}"
+            ) from exc
 
     print("UtterPlan book render", file=sys.stderr)
     print(f"  workspace:  {book.root}", file=sys.stderr)
@@ -913,7 +939,10 @@ def _render_book(args: argparse.Namespace) -> int:
 
     def report_progress(outcome: RenderOutcome) -> None:
         nonlocal written
-        print(f"[{outcome.index}/{len(requests)}] {outcome.id}  {outcome.source_plan}", file=sys.stderr)
+        print(
+            f"[{outcome.index}/{len(requests)}] {outcome.id}  {outcome.source_plan}",
+            file=sys.stderr,
+        )
         if outcome.status == "written":
             written += 1
             print(f"       wrote {outcome.output}", file=sys.stderr)
@@ -985,7 +1014,9 @@ def _new_renderplan_set(
 
 
 def _relative_path_reference(path: Path, base: Path) -> str:
-    return Path(os.path.relpath(path.resolve(strict=False), start=base.resolve(strict=False))).as_posix()
+    return Path(
+        os.path.relpath(path.resolve(strict=False), start=base.resolve(strict=False))
+    ).as_posix()
 
 
 def _render_variant_label(profile_path: Path, override: str | None) -> str:

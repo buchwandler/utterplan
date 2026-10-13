@@ -161,7 +161,16 @@ def renderplan_set_from_dict(raw: Mapping[str, Any]) -> RenderPlanSet:
     """Parse plain TOML data and strictly validate every supported set field."""
     _check_keys(
         raw,
-        {"format", "version", "variant", "profile_fingerprint", "producer", "book", "profile", "chapter"},
+        {
+            "format",
+            "version",
+            "variant",
+            "profile_fingerprint",
+            "producer",
+            "book",
+            "profile",
+            "chapter",
+        },
         "renderplan-set",
     )
     if raw.get("format") != RENDERPLAN_SET_FORMAT:
@@ -227,7 +236,9 @@ def load_renderplan_set(path: str | Path) -> RenderPlanSet:
     try:
         raw = tomlkit.parse(source.read_text(encoding="utf-8")).unwrap()
     except (OSError, UnicodeError, ParseError) as exc:
-        raise RenderPlanSetError(f"cannot read renderplan set {source}: {exc}", code="index.read_failed") from exc
+        raise RenderPlanSetError(
+            f"cannot read renderplan set {source}: {exc}", code="index.read_failed"
+        ) from exc
     if not isinstance(raw, Mapping):
         raise RenderPlanSetError("renderplan-set root must be a table")
     return renderplan_set_from_dict(raw)
@@ -300,7 +311,9 @@ def _check_keys(raw: Mapping[str, Any], allowed: set[str], label: str) -> None:
     if unknown:
         raise RenderPlanSetError(f"{label} contains unknown field(s): {', '.join(sorted(unknown))}")
     if missing:
-        raise RenderPlanSetError(f"{label} is missing required field(s): {', '.join(sorted(missing))}")
+        raise RenderPlanSetError(
+            f"{label} is missing required field(s): {', '.join(sorted(missing))}"
+        )
 
 
 def _table(value: Any, label: str) -> Mapping[str, Any]:
@@ -690,7 +703,10 @@ def _write_render_report(
         if outcome.error_message is not None:
             item["message"] = outcome.error_message
         items.append(item)
-    counts = {status: sum(outcome.status == status for outcome in outcomes) for status in ("written", "failed", "skipped")}
+    counts = {
+        status: sum(outcome.status == status for outcome in outcomes)
+        for status in ("written", "failed", "skipped")
+    }
     report = {
         "format": "utterplan-render-report",
         "version": 1,

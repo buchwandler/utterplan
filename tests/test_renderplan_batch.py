@@ -117,22 +117,19 @@ def test_renderplan_set_profile_and_snapshot_identity_are_verified(tmp_path: Pat
     value = _set(original_profile)
     identity = original_profile.profile_id or original_profile.computed_id()
 
-    assert validate_renderplan_set_profile(
-        value, snapshot, expected_profile_id=identity
-    ) == original_profile
+    assert (
+        validate_renderplan_set_profile(value, snapshot, expected_profile_id=identity)
+        == original_profile
+    )
 
     other_profile = _profile("other")
     other_identity = other_profile.profile_id or other_profile.computed_id()
     with pytest.raises(RenderPlanSetError, match="does not match the active"):
-        validate_renderplan_set_profile(
-            value, snapshot, expected_profile_id=other_identity
-        )
+        validate_renderplan_set_profile(value, snapshot, expected_profile_id=other_identity)
 
     other_set = _set(other_profile)
     with pytest.raises(RenderPlanSetError, match="snapshot identity"):
-        validate_renderplan_set_profile(
-            other_set, snapshot, expected_profile_id=other_identity
-        )
+        validate_renderplan_set_profile(other_set, snapshot, expected_profile_id=other_identity)
 
 
 def test_load_renderplan_set_fails_closed_on_malformed_toml(tmp_path: Path) -> None:
@@ -141,7 +138,6 @@ def test_load_renderplan_set_fails_closed_on_malformed_toml(tmp_path: Path) -> N
 
     with pytest.raises(RenderPlanSetError, match="cannot read renderplan set"):
         load_renderplan_set(path)
-
 
 
 def _request(root: Path, number: int, *, missing: bool = False) -> RenderRequest:
@@ -257,10 +253,9 @@ def test_render_batch_continues_or_skips_and_records_report(
     assert report["skipped"] == expected.count("skipped")
     assert report["item"][1]["stage"] == "load"
     assert report["item"][1]["code"] == "input.missing"
-    assert [chapter.id for chapter in load_renderplan_set(set_path).chapters] == ["chapter-0005"] + (
-        ["chapter-0007"] if not fail_fast else []
-    )
-
+    assert [chapter.id for chapter in load_renderplan_set(set_path).chapters] == [
+        "chapter-0005"
+    ] + (["chapter-0007"] if not fail_fast else [])
 
 
 def test_render_batch_protects_existing_output_unless_force_is_enabled(tmp_path: Path) -> None:
@@ -322,7 +317,9 @@ def test_render_batch_reports_invalid_utterplan_input(tmp_path: Path) -> None:
     assert load_renderplan_set(set_path).chapters == ()
 
 
-@pytest.mark.parametrize("unsafe_path", ["../manifest.json", "/tmp/plan.toml", "a/../b.toml", "a\\b.toml"])
+@pytest.mark.parametrize(
+    "unsafe_path", ["../manifest.json", "/tmp/plan.toml", "a/../b.toml", "a\\b.toml"]
+)
 def test_renderplan_set_rejects_renderplan_paths_outside_variant(unsafe_path: str) -> None:
     original = _set()
     chapter = replace(_chapter(), renderplan=unsafe_path)

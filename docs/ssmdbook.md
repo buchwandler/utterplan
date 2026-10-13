@@ -75,7 +75,6 @@ Compilation always uses paragraph-local flow units; `compile-book` has no render
 
 Chapter input is SSMD by contract, so `compile-book` deliberately has no `--input-format` option. When no `--language` is supplied, a selected chapter must declare its language in SSMD metadata.
 
-
 ## From semantic chapter plans to RenderPlan variants
 
 The complete file-based workflow keeps UtterPlans renderer-neutral while allowing

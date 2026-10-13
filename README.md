@@ -61,6 +61,7 @@ utterplan/
 ```
 
 Omit `--chapters` to compile all manifest chapters. Use comma-separated source-number selections for non-contiguous ranges, for example `utterplan compile-book chapters --chapters 1,3-5`. `--diagnostics warnings|all|none` defaults to warnings; failures are always shown and reports retain complete diagnostics. The book root itself is also accepted as input; see the [SSMDBook guide](docs/ssmdbook.md).
+
 ## From an SSMDBook to RenderPlans
 
 UtterPlan keeps one canonical semantic plan per chapter. A RenderProfile is a

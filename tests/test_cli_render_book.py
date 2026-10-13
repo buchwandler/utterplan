@@ -80,9 +80,7 @@ def _write_book(
 def _profile(path: Path, voice: str = "amy") -> RenderProfile:
     profile = RenderProfile(
         roles={
-            "narrator": RoleProfile(
-                language="en-US", binding={"engine": "fixture", "voice": voice}
-            )
+            "narrator": RoleProfile(language="en-US", binding={"engine": "fixture", "voice": voice})
         },
         default_role="narrator",
         planning=PlanningPolicy(split="sentence", capacity_fallback=("token",)),
@@ -169,7 +167,10 @@ def test_render_book_success_matches_single_file_projection(tmp_path: Path, caps
         plan_path = variant / chapter.renderplan
         plan = renderplan_codec.load_plan(plan_path)
         assert plan.render_profile_id == loaded_set.profile_id
-        assert chapter.source_plan_id == FlowPlan.load(root / "utterplan" / f"{chapter.id}.utterplan.toml").plan_id
+        assert (
+            chapter.source_plan_id
+            == FlowPlan.load(root / "utterplan" / f"{chapter.id}.utterplan.toml").plan_id
+        )
         assert chapter.render_plan_id == plan.plan_id
 
     report = _report(report_path)
@@ -183,9 +184,19 @@ def test_render_book_success_matches_single_file_projection(tmp_path: Path, caps
 
     source_plan = root / "utterplan/chapter-0005.utterplan.toml"
     single_output = tmp_path / "chapter-0005.single.renderplan.toml"
-    assert main(
-        ["render-plan", str(source_plan), "--profile", str(profile_path), "-o", str(single_output)]
-    ) == 0
+    assert (
+        main(
+            [
+                "render-plan",
+                str(source_plan),
+                "--profile",
+                str(profile_path),
+                "-o",
+                str(single_output),
+            ]
+        )
+        == 0
+    )
     batch_plan = renderplan_codec.load_plan(variant / "chapter-0005.renderplan.toml")
     single_plan = renderplan_codec.load_plan(single_output)
     assert batch_plan == single_plan
@@ -233,7 +244,10 @@ def test_different_profile_id_creates_independent_variant(tmp_path: Path, capsys
     assert amy_variant != joe_variant
     assert (amy_variant / "chapter-0005.renderplan.toml").read_bytes() == amy_plan_bytes
     assert load_renderplan_set(joe_variant / "renderplan-set.toml").profile_id == joe.profile_id
-    assert renderplan_codec.load_profile(joe_variant / "renderprofile.toml").profile_id == joe.profile_id
+    assert (
+        renderplan_codec.load_profile(joe_variant / "renderprofile.toml").profile_id
+        == joe.profile_id
+    )
 
 
 @pytest.mark.parametrize(
@@ -261,11 +275,15 @@ def test_render_book_missing_plan_continues_or_skips(
     variant = _variant(root, profile, "failfast" if fail_fast else "narration")
 
     assert result == 1
-    assert [item["status"] for item in _report(variant / "render-report.toml")["item"]] == expected_statuses
+    assert [
+        item["status"] for item in _report(variant / "render-report.toml")["item"]
+    ] == expected_statuses
     report = _report(variant / "render-report.toml")
     assert report["item"][1]["code"] == "input.missing"
     assert report["item"][1]["stage"] == "load"
-    assert [chapter.id for chapter in load_renderplan_set(variant / "renderplan-set.toml").chapters] == expected_set
+    assert [
+        chapter.id for chapter in load_renderplan_set(variant / "renderplan-set.toml").chapters
+    ] == expected_set
     if not fail_fast:
         assert "RenderPlans are already saved" in captured.err
 
@@ -301,7 +319,9 @@ def test_render_book_force_replaces_only_after_success(tmp_path: Path, capsys) -
     assert renderplan_codec.load_plan(output).speech[0].text == changed_text
 
 
-def test_render_book_supports_custom_roots_and_sanitizes_variant_label(tmp_path: Path, capsys) -> None:
+def test_render_book_supports_custom_roots_and_sanitizes_variant_label(
+    tmp_path: Path, capsys
+) -> None:
     root = _write_book(tmp_path / "custom.ssmdbook", (5,))
     custom_plans = tmp_path / "generated-plans"
     _write_book(root, (5,), utterplan_dir=custom_plans)
@@ -329,7 +349,10 @@ def test_render_book_supports_custom_roots_and_sanitizes_variant_label(tmp_path:
     expected_utterplan = Path(
         os.path.relpath(custom_plans / "chapter-0005.utterplan.toml", start=variant)
     ).as_posix()
-    assert load_renderplan_set(variant / "renderplan-set.toml").chapters[0].utterplan == expected_utterplan
+    assert (
+        load_renderplan_set(variant / "renderplan-set.toml").chapters[0].utterplan
+        == expected_utterplan
+    )
     assert not (tmp_path / "Book Audio").exists()
 
 
@@ -343,18 +366,23 @@ def test_invalid_profile_and_unsafe_paths_do_not_create_outputs(tmp_path: Path, 
 
     profile_path = root / "narration.renderprofile.toml"
     _profile(profile_path)
-    assert _render(
-        root,
-        profile_path,
-        "--chapters",
-        "5",
-        "--output-root",
-        str(root / "chapters" / "generated"),
-    ) == 2
+    assert (
+        _render(
+            root,
+            profile_path,
+            "--chapters",
+            "5",
+            "--output-root",
+            str(root / "chapters" / "generated"),
+        )
+        == 2
+    )
     capsys.readouterr()
     assert not (root / "chapters/generated").exists()
 
-    assert _render(root, profile_path, "--chapters", "5", "--report", str(root / "manifest.json")) == 2
+    assert (
+        _render(root, profile_path, "--chapters", "5", "--report", str(root / "manifest.json")) == 2
+    )
     capsys.readouterr()
     assert not (root / "renderplan").exists()
 
@@ -431,15 +459,11 @@ def test_existing_set_and_snapshot_mismatches_are_not_bypassed_by_force(
     variant_b = _variant(root, profile_b, "shared")
     shutil.copytree(variant_a, variant_b)
 
-    assert _render(
-        root, profile_b_path, "--chapters", "6", "--variant", "shared", "--force"
-    ) == 2
+    assert _render(root, profile_b_path, "--chapters", "6", "--variant", "shared", "--force") == 2
     assert "does not match the active RenderProfile" in capsys.readouterr().err
     assert not (variant_b / "chapter-0006.renderplan.toml").exists()
 
     renderplan_codec.save_profile(profile_b, variant_a / "renderprofile.toml")
-    assert _render(
-        root, profile_a_path, "--chapters", "6", "--variant", "shared", "--force"
-    ) == 2
+    assert _render(root, profile_a_path, "--chapters", "6", "--variant", "shared", "--force") == 2
     assert "snapshot identity" in capsys.readouterr().err
     assert not (variant_a / "chapter-0006.renderplan.toml").exists()

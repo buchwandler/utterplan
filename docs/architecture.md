@@ -89,7 +89,6 @@ Migration is not planning. Registered data-only steps cover the sequential v1 ->
 
 `compile-many` orchestrates independent source documents in order. Each successful FlowPlan is validated and atomically saved before the next source is processed; ordinary failures are reported and later inputs continue unless fail-fast is requested. Its TOML report is operational data, not a FlowPlan.
 
-
 ## Book-level RenderPlan projection boundary
 
 The SSMDBook workflow composes per-file operations without creating a combined
