@@ -187,6 +187,28 @@ from utterplan.renderplan_batch import RenderRequest, new_renderplan_set, render
 
 `render_to_files()` projects schema-v7 `FlowPlan` inputs; grouping, source mapping, export, and replan logic remain UtterPlan-owned.
 
+## Public SSMDBook services
+
+`compile_book()` and `render_book()` are the public Python counterparts of the `compile-book` and `render-book` commands. They take paths and keyword options directly; callers do not construct `argparse.Namespace`, spawn a subprocess, or reproduce chapter selection, path safety, variant naming, snapshot/set initialization, or report logic. The CLI delegates to these same services.
+
+```python
+from utterplan import compile_book, render_book
+
+compiled = compile_book(".", chapters="5-17")
+projected = render_book(
+    ".",
+    profile="narration.renderprofile.toml",
+    chapters="5-17",
+)
+
+assert compiled.exit_code == projected.exit_code == 0
+print(projected.variant)  # resolved <label>--<profile fingerprint>
+```
+
+`BookCompileRequest` / `BookRenderRequest` are immutable option records. Their corresponding result records expose the workspace, selector, selected chapter IDs, artifact and report paths, per-chapter outcomes, `failed`, and `exit_code`; the render result also includes `profile_id`, `variant`, `variant_dir`, snapshot, and set paths. `variant` is authoritative: do not duplicate the label normalization or profile fingerprint algorithm downstream.
+
+Optional `on_progress` callbacks receive the existing `CompileOutcome` or `RenderOutcome` for each chapter. Optional `on_start` callbacks receive a resolved book-start record before batch processing. Services do not print. They preserve schema-v7 output and CLI filesystem/report behavior; workspace/path safety errors raise `BookServiceError`, and chapter-level failures are returned as outcomes. Pass `language=` to provide the fallback/required-language override, or supply a `PlannerConfig` with `planner_config=`. See the [SSMDBook guide](ssmdbook) for layouts, safety rules, and CLI/Python examples.
+
 ## Planner progress callbacks
 
 `UtterancePlanner.plan`, `UtterancePlanner.compile`, and `compile_document` accept an optional keyword-only `on_progress` callback. It receives typed `PlannerProgressEvent` objects synchronously in the planner thread. Progress is operational only: it is not added to `PlannerConfig` or the plan, and enabling a callback does not change plan identity or serialization.

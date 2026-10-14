@@ -2,21 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import re
 import sys
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal, cast
 
 import tomlkit
-from renderplan import (
-    RenderPlanSet,
-    RenderPlanSetError,
-    load_renderplan_set,
-    save_renderplan_set,
-    validate_renderplan_set_profile,
-)
 from renderplan import codec as renderplan_codec
 from tomlkit.exceptions import ParseError
 
@@ -24,6 +15,13 @@ from . import __version__
 from .atomic_io import atomic_write_text
 from .attempts import PlanningAttempt
 from .batch import CompileOutcome, CompileRequest, compile_to_files
+from .book import (
+    BookCompileStart,
+    BookRenderStart,
+    BookServiceError,
+)
+from .book import compile_book as _compile_book_service
+from .book import render_book as _render_book_service
 from .compiler import InputFormat, PreparationTrace, compile_document
 from .config import LinguisticsConfig, PlannerConfig
 from .exceptions import PlanFormatError, PlanRenderabilityError, UtterPlanError
@@ -32,19 +30,8 @@ from .migration import MigrationResult, migrate_plan_data
 from .model import FlowPlan, PauseIntent
 from .preview import PreviewChunk, preview_plan
 from .renderability import format_renderability_error
-from .renderplan_batch import (
-    RenderOutcome,
-    RenderRequest,
-    new_renderplan_set,
-    render_to_files,
-)
+from .renderplan_batch import RenderOutcome
 from .renderplan_export import build_render_plan, format_render_plan_explanation
-from .ssmdbook import (
-    SSMDBookError,
-    load_ssmdbook_index,
-    select_ssmdbook_chapters,
-    selected_chapter_path,
-)
 from .trace_codec import loads_trace
 from .versioning import CURRENT_SCHEMA_VERSION, V5_SCHEMA_VERSION, V6_SCHEMA_VERSION
 
@@ -688,265 +675,116 @@ def _compile_many(args: argparse.Namespace) -> int:
     )
 
 
-def _path_is_within(path: Path, parent: Path) -> bool:
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
-
-
 def _compile_book(args: argparse.Namespace) -> int:
+    selected_ids: tuple[str, ...] = ()
+    written = 0
+
+    def start(progress: BookCompileStart) -> None:
+        nonlocal selected_ids
+        selected_ids = progress.selected_chapter_ids
+        print("UtterPlan book compile", file=sys.stderr)
+        print(f"  workspace: {progress.workspace}", file=sys.stderr)
+        print(f"  chapters:  {progress.chapter_selector}", file=sys.stderr)
+        print(f"  selected:  {len(selected_ids)}", file=sys.stderr)
+        print(f"  output:    {progress.output_dir}", file=sys.stderr)
+
+    def report_progress(outcome: CompileOutcome) -> None:
+        nonlocal written
+        total = outcome.total or len(selected_ids)
+        print(
+            f"[{outcome.index}/{total}] {outcome.id}  {outcome.source_label}",
+            file=sys.stderr,
+        )
+        if outcome.status == "written":
+            written += 1
+            mode = outcome.preparation_mode or "unknown"
+            linguistics = "degraded" if outcome.degraded_linguistics else "full"
+            print(f"       preparation: {mode}; linguistics: {linguistics}", file=sys.stderr)
+            _print_batch_diagnostics(outcome, verbosity=args.diagnostics)
+            print(f"       wrote {outcome.output}", file=sys.stderr)
+        elif outcome.status == "failed":
+            print("       FAILED", file=sys.stderr)
+            if outcome.error_message:
+                for line in outcome.error_message.splitlines():
+                    print(f"       {line}", file=sys.stderr)
+            if not args.fail_fast and outcome.index < total:
+                next_id = (
+                    selected_ids[outcome.index]
+                    if outcome.index < len(selected_ids)
+                    else "next chapter"
+                )
+                print(
+                    f"       continuing with {next_id}; {written} plans are already saved",
+                    file=sys.stderr,
+                )
+        else:
+            print("       skipped after an earlier failure", file=sys.stderr)
+
     try:
-        book = load_ssmdbook_index(args.input)
-        chapters = select_ssmdbook_chapters(book, args.chapters)
-        sources = [selected_chapter_path(book, chapter) for chapter in chapters]
-    except SSMDBookError as exc:
+        result = _compile_book_service(
+            args.input,
+            chapters=args.chapters,
+            output_dir=args.output_dir,
+            report=args.report,
+            language=args.language,
+            planner_config=_planner_config_from_batch_args(args),
+            force=args.force,
+            fail_fast=args.fail_fast,
+            diagnostics=args.diagnostics,
+            on_progress=report_progress,
+            on_start=start,
+        )
+    except BookServiceError as exc:
         raise _CliUsageError(str(exc)) from exc
 
-    output_dir = args.output_dir or (book.root / "utterplan")
-    chapters_dir = (book.root / "chapters").resolve()
-    resolved_output_dir = output_dir.resolve()
-    if _path_is_within(resolved_output_dir, chapters_dir):
-        raise _CliUsageError("book plan output must not be inside the source chapters/ directory")
-
-    outputs = [output_dir / _utterplan_output_name(source) for source in sources]
-    owners: dict[Path, Path] = {}
-    for source, output in zip(sources, outputs, strict=True):
-        key = output.resolve()
-        if _path_is_within(key, chapters_dir) or key == book.manifest_path.resolve():
-            raise _CliUsageError(
-                f"book plan output would overwrite source workspace content: {output}"
+    failed = [outcome for outcome in result.outcomes if outcome.status == "failed"]
+    skipped = sum(outcome.status == "skipped" for outcome in result.outcomes)
+    print("UtterPlan compile summary", file=sys.stderr)
+    print(f"  requested: {len(result.outcomes)}", file=sys.stderr)
+    print(f"  written:   {written}", file=sys.stderr)
+    print(f"  failed:    {len(failed)}", file=sys.stderr)
+    if skipped:
+        print(f"  skipped:   {skipped}", file=sys.stderr)
+    if failed:
+        print("\nFailed:", file=sys.stderr)
+        for outcome in failed:
+            location = (
+                f":{outcome.line}:{outcome.column}"
+                if outcome.line is not None and outcome.column is not None
+                else ""
             )
-        if key in owners:
-            raise _CliUsageError(
-                f"selected chapters {owners[key]} and {source} map to the same output {output}"
+            code = outcome.error_code or "unknown"
+            print(
+                f"  [{outcome.index}/{len(result.outcomes)}] {outcome.source_label}{location}  {code}",
+                file=sys.stderr,
             )
-        owners[key] = source
-
-    report_path = args.report or (output_dir / "compile-report.toml")
-    resolved_report = report_path.resolve()
-    if resolved_report in owners:
-        raise _CliUsageError(f"book report path collides with plan output: {report_path}")
-    if (
-        _path_is_within(resolved_report, chapters_dir)
-        or resolved_report == book.manifest_path.resolve()
-    ):
-        raise _CliUsageError(
-            f"book report path would overwrite source workspace content: {report_path}"
-        )
-
-    requests = [
-        CompileRequest(
-            id=chapter.id,
-            source=source,
-            output=output,
-            input_format="ssmd",
-            fallback_language=args.language,
-            source_label=str(source),
-            require_language=args.language is None,
-        )
-        for chapter, source, output in zip(chapters, sources, outputs, strict=True)
-    ]
-
-    print("UtterPlan book compile", file=sys.stderr)
-    print(f"  workspace: {book.root}", file=sys.stderr)
-    print(f"  chapters:  {args.chapters}", file=sys.stderr)
-    print(f"  selected:  {len(requests)}", file=sys.stderr)
-    print(f"  output:    {output_dir}", file=sys.stderr)
-    return _run_compile_requests(
-        requests,
-        config=_planner_config_from_batch_args(args),
-        fail_fast=args.fail_fast,
-        force=args.force,
-        report_path=report_path,
-        include_ids=True,
-        diagnostics=args.diagnostics,
-    )
+        if written:
+            print(f"\n{written} valid plan files were preserved.", file=sys.stderr)
+    return result.exit_code
 
 
 def _render_book(args: argparse.Namespace) -> int:
-    try:
-        book = load_ssmdbook_index(args.input)
-        chapters = select_ssmdbook_chapters(book, args.chapters)
-        sources = [selected_chapter_path(book, chapter) for chapter in chapters]
-    except SSMDBookError as exc:
-        raise _CliUsageError(str(exc)) from exc
-
-    utterplan_dir_arg = args.utterplan_dir or (book.root / "utterplan")
-    try:
-        utterplan_dir = utterplan_dir_arg.expanduser().resolve(strict=True)
-    except (OSError, RuntimeError) as exc:
-        raise _CliUsageError(
-            f"cannot resolve UtterPlan directory {utterplan_dir_arg}: {exc}"
-        ) from exc
-    if not utterplan_dir.is_dir():
-        raise _CliUsageError(
-            f"UtterPlan directory does not exist or is not a directory: {utterplan_dir}"
-        )
-
-    profile_input = args.profile.expanduser()
-    try:
-        profile = renderplan_codec.load_profile(profile_input)
-        profile_path = profile_input.resolve(strict=True)
-    except (OSError, RuntimeError, ValueError, TypeError) as exc:
-        raise _CliUsageError(f"invalid RenderProfile {profile_input}: {exc}") from exc
-    profile_id = profile.profile_id or profile.computed_id()
-    fingerprint = profile_id.removeprefix("sha256:")[:12]
-    label = _render_variant_label(profile_path, args.variant)
-    variant_name = f"{label}--{fingerprint}"
-
-    output_root_arg = args.output_root or (book.root / "renderplan")
-    output_root = output_root_arg.expanduser().resolve(strict=False)
-    variant_dir = (output_root / variant_name).resolve(strict=False)
-    snapshot_path = variant_dir / "renderprofile.toml"
-    set_path = variant_dir / "renderplan-set.toml"
-    report_arg = args.report or (variant_dir / "render-report.toml")
-    report_path = report_arg.expanduser().resolve(strict=False)
-    chapters_dir = (book.root / "chapters").resolve(strict=False)
-    manifest_path = book.manifest_path.resolve(strict=True)
-
-    source_plans = [utterplan_dir / _utterplan_output_name(source) for source in sources]
-    outputs = [variant_dir / _renderplan_output_name(source) for source in sources]
-    requests = [
-        RenderRequest(
-            id=chapter.id,
-            source_number=chapter.source_number,
-            source_plan=source_plan,
-            output=output,
-            source_chapter=source,
-        )
-        for chapter, source, source_plan, output in zip(
-            chapters, sources, source_plans, outputs, strict=True
-        )
-    ]
-
-    if output_root.exists() and not output_root.is_dir():
-        raise _CliUsageError(f"RenderPlan output root is not a directory: {output_root}")
-    if variant_dir.exists() and not variant_dir.is_dir():
-        raise _CliUsageError(f"RenderPlan variant path is not a directory: {variant_dir}")
-    if _path_is_within(output_root, chapters_dir) or _path_is_within(variant_dir, chapters_dir):
-        raise _CliUsageError(
-            "RenderPlan output root and variant must not be inside source chapters/"
-        )
-    if _path_is_within(variant_dir, utterplan_dir):
-        raise _CliUsageError("RenderPlan variant must not be inside the active UtterPlan directory")
-
-    write_paths = [*outputs, snapshot_path, set_path, report_path]
-    owners: dict[Path, Path] = {}
-    for path in write_paths:
-        key = path.resolve(strict=False)
-        if key in owners:
-            raise _CliUsageError(f"RenderPlan output paths collide: {owners[key]} and {path}")
-        owners[key] = path
-        if _path_is_within(key, chapters_dir):
-            raise _CliUsageError(f"RenderPlan output would write into source chapters/: {path}")
-    if len({path.resolve(strict=False) for path in outputs}) != len(outputs):
-        raise _CliUsageError("selected chapters map to duplicate RenderPlan output paths")
-
-    input_paths = [manifest_path, profile_path, *source_plans, *sources]
-    input_owners = {path.resolve(strict=False): path for path in input_paths}
-    for path in write_paths:
-        collision = input_owners.get(path.resolve(strict=False))
-        if collision is not None:
-            raise _CliUsageError(f"RenderPlan output path {path} collides with input {collision}")
-    for path in (snapshot_path, set_path, report_path):
-        if path.exists() and path.is_dir():
-            raise _CliUsageError(f"RenderPlan metadata output is a directory: {path}")
-
-    if variant_dir.exists():
-        if set_path.exists():
-            try:
-                renderplan_set = load_renderplan_set(set_path)
-            except RenderPlanSetError as exc:
-                raise _CliUsageError(f"invalid existing renderplan-set.toml: {exc}") from exc
-            if renderplan_set.variant != label:
-                raise _CliUsageError(
-                    "existing renderplan-set.toml variant does not match its directory"
-                )
-            if renderplan_set.snapshot != "renderprofile.toml":
-                raise _CliUsageError(
-                    "existing renderplan-set.toml does not use the canonical profile snapshot"
-                )
-            try:
-                validate_renderplan_set_profile(
-                    renderplan_set,
-                    variant_dir / renderplan_set.snapshot,
-                    expected_profile_id=profile_id,
-                )
-            except RenderPlanSetError as exc:
-                raise _CliUsageError(str(exc)) from exc
-            existing_owners = {
-                (variant_dir / chapter.renderplan).resolve(strict=False): chapter.id
-                for chapter in renderplan_set.chapters
-            }
-            for request in requests:
-                owner = existing_owners.get(request.output.resolve(strict=False))
-                if owner is not None and owner != request.id:
-                    raise _CliUsageError(
-                        f"RenderPlan output {request.output} is already assigned to chapter {owner}"
-                    )
-        else:
-            try:
-                nonempty = next(variant_dir.iterdir(), None) is not None
-            except OSError as exc:
-                raise _CliUsageError(
-                    f"cannot inspect RenderPlan variant {variant_dir}: {exc}"
-                ) from exc
-            if nonempty:
-                raise _CliUsageError(
-                    f"refusing to adopt non-empty RenderPlan variant without a valid set index: {variant_dir}"
-                )
-            renderplan_set = _new_renderplan_set(
-                label,
-                profile_id,
-                profile_path,
-                book.root,
-                utterplan_dir,
-                variant_dir,
-                manifest_path,
-            )
-    else:
-        renderplan_set = _new_renderplan_set(
-            label, profile_id, profile_path, book.root, utterplan_dir, variant_dir, manifest_path
-        )
-
-    # Validate every selected source plan before creating collection state.
-    for source_plan_path in source_plans:
-        if source_plan_path.is_file():
-            FlowPlan.load(source_plan_path)
-    if not variant_dir.exists():
-        try:
-            variant_dir.mkdir(parents=True)
-        except OSError as exc:
-            raise _CliUsageError(
-                f"cannot create RenderPlan variant directory {variant_dir}: {exc}"
-            ) from exc
-    if not set_path.exists():
-        try:
-            renderplan_codec.save_profile(profile, snapshot_path)
-            save_renderplan_set(set_path, renderplan_set)
-        except (OSError, ValueError, TypeError) as exc:
-            raise _CliUsageError(
-                f"cannot initialize RenderPlan variant {variant_dir}: {exc}"
-            ) from exc
-
-    print("UtterPlan book render", file=sys.stderr)
-    print(f"  workspace:  {book.root}", file=sys.stderr)
-    print(f"  chapters:   {args.chapters}", file=sys.stderr)
-    print(f"  selected:   {len(requests)}", file=sys.stderr)
-    print(f"  profile:    {profile_path}", file=sys.stderr)
-    print(f"  profile-id: {profile_id}", file=sys.stderr)
-    print(f"  variant:    {variant_name}", file=sys.stderr)
-    print(f"  utterplans: {utterplan_dir}", file=sys.stderr)
-    print(f"  output:     {variant_dir}", file=sys.stderr)
-
+    selected_ids: tuple[str, ...] = ()
     written = 0
+
+    def start(progress: BookRenderStart) -> None:
+        nonlocal selected_ids
+        selected_ids = progress.selected_chapter_ids
+        print("UtterPlan book render", file=sys.stderr)
+        print(f"  workspace:  {progress.workspace}", file=sys.stderr)
+        print(f"  chapters:   {progress.chapter_selector}", file=sys.stderr)
+        print(f"  selected:   {len(selected_ids)}", file=sys.stderr)
+        print(f"  profile:    {progress.profile_path}", file=sys.stderr)
+        print(f"  profile-id: {progress.profile_id}", file=sys.stderr)
+        print(f"  variant:    {progress.variant}", file=sys.stderr)
+        print(f"  utterplans: {progress.utterplan_dir}", file=sys.stderr)
+        print(f"  output:     {progress.variant_dir}", file=sys.stderr)
 
     def report_progress(outcome: RenderOutcome) -> None:
         nonlocal written
+        total = outcome.total or len(selected_ids)
         print(
-            f"[{outcome.index}/{len(requests)}] {outcome.id}  {outcome.source_plan}",
+            f"[{outcome.index}/{total}] {outcome.id}  {outcome.source_plan}",
             file=sys.stderr,
         )
         if outcome.status == "written":
@@ -955,85 +793,49 @@ def _render_book(args: argparse.Namespace) -> int:
         elif outcome.status == "failed":
             print("       FAILED", file=sys.stderr)
             print(
-                f"       {outcome.error_code or 'unknown'}: {outcome.error_message or 'projection failed'}",
+                f"       {outcome.error_code or 'unknown'}: "
+                f"{outcome.error_message or 'projection failed'}",
                 file=sys.stderr,
             )
-            if not args.fail_fast and outcome.index < len(requests):
+            if not args.fail_fast and outcome.index < total:
+                next_id = (
+                    selected_ids[outcome.index]
+                    if outcome.index < len(selected_ids)
+                    else "next chapter"
+                )
                 print(
-                    f"       continuing with {requests[outcome.index].id}; "
-                    f"{written} RenderPlans are already saved",
+                    f"       continuing with {next_id}; {written} RenderPlans are already saved",
                     file=sys.stderr,
                 )
         else:
             print("       skipped after an earlier failure", file=sys.stderr)
 
     try:
-        outcomes = render_to_files(
-            requests,
-            profile=profile,
-            renderplan_set=renderplan_set,
-            set_path=set_path,
-            report_path=report_path,
+        result = _render_book_service(
+            args.input,
+            profile=args.profile,
+            chapters=args.chapters,
+            variant=args.variant,
+            utterplan_dir=args.utterplan_dir,
+            output_root=args.output_root,
+            report=args.report,
             force=args.force,
             fail_fast=args.fail_fast,
-            chapter_order={chapter.id: index for index, chapter in enumerate(book.chapters)},
             on_progress=report_progress,
+            on_start=start,
         )
-    except RenderPlanSetError as exc:
+    except BookServiceError as exc:
         raise _CliUsageError(str(exc)) from exc
 
-    failed = sum(outcome.status == "failed" for outcome in outcomes)
-    skipped = sum(outcome.status == "skipped" for outcome in outcomes)
+    failed = sum(outcome.status == "failed" for outcome in result.outcomes)
+    skipped = sum(outcome.status == "skipped" for outcome in result.outcomes)
     print("UtterPlan render summary", file=sys.stderr)
-    print(f"  requested: {len(requests)}", file=sys.stderr)
+    print(f"  requested: {len(result.outcomes)}", file=sys.stderr)
     print(f"  written:   {written}", file=sys.stderr)
     print(f"  failed:    {failed}", file=sys.stderr)
     if skipped:
         print(f"  skipped:   {skipped}", file=sys.stderr)
-    return 1 if failed else 0
-
-
-def _new_renderplan_set(
-    label: str,
-    profile_id: str,
-    profile_path: Path,
-    book_root: Path,
-    utterplan_dir: Path,
-    variant_dir: Path,
-    manifest_path: Path,
-) -> RenderPlanSet:
-    profile_in_workspace = _path_is_within(profile_path, book_root) or _path_is_within(
-        profile_path, variant_dir.parent
-    )
-    profile_reference = (
-        _relative_path_reference(profile_path, variant_dir)
-        if profile_in_workspace
-        else str(profile_path)
-    )
-    return new_renderplan_set(
-        variant=label,
-        profile_id=profile_id,
-        manifest=_relative_path_reference(manifest_path, variant_dir),
-        utterplan_dir=_relative_path_reference(utterplan_dir, variant_dir),
-        source_profile=profile_reference,
-    )
-
-
-def _relative_path_reference(path: Path, base: Path) -> str:
-    return Path(
-        os.path.relpath(path.resolve(strict=False), start=base.resolve(strict=False))
-    ).as_posix()
-
-
-def _render_variant_label(profile_path: Path, override: str | None) -> str:
-    if override is not None:
-        raw_label = override
-    else:
-        name = profile_path.name
-        suffix = ".renderprofile.toml"
-        raw_label = name[: -len(suffix)] if name.lower().endswith(suffix) else profile_path.stem
-    label = re.sub(r"[^a-z0-9_.-]+", "-", raw_label.lower()).strip("._-")
-    return label or "profile"
+    return result.exit_code
 
 
 def _compile(args: argparse.Namespace) -> int:

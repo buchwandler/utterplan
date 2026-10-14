@@ -137,3 +137,33 @@ the collection's snapshot remains available for inspection and reproducible
 replanning. See the [CLI reference](cli.md#produce-renderplans-for-selected-ssmdbook-chapters),
 [RenderPlan](https://pypi.org/project/renderplan/), and
 [VoiceRender](https://pypi.org/project/voicerender/).
+
+## Python API for SSMDBook workspaces
+
+The Python API and CLI share the same book orchestration and artifact layout. The public services read the manifest for chapter discovery, select by original `source_number`, validate safe workspace paths, and write the same reports and per-chapter plans as the commands above. They do not print to the console or retain CLI argument objects.
+
+CLI:
+
+```bash
+utterplan compile-book . --chapters 5-17
+utterplan render-book . --profile narration.renderprofile.toml --chapters 5-17
+```
+
+Equivalent Python:
+
+```python
+from utterplan import compile_book, render_book
+
+compiled = compile_book(".", chapters="5-17")
+projected = render_book(
+    ".",
+    profile="narration.renderprofile.toml",
+    chapters="5-17",
+)
+
+print(projected.variant)  # exact profile-specific RenderPlan directory name
+```
+
+`BookCompileResult` and `BookRenderResult` expose the resolved workspace, selector, selected chapter IDs, artifact/report paths, per-chapter outcomes, `failed`, and `exit_code`. `BookRenderResult.variant` is the final sanitized label plus profile fingerprint; consumers should use it rather than reproduce the naming algorithm. Optional `on_progress` callbacks receive each compile or projection outcome, and `on_start` callbacks receive resolved selection and output metadata. A chapter must declare its language unless `language=` is explicitly supplied to `compile_book()`; compiler behavior can otherwise be configured with `planner_config=`. Invalid workspaces and unsafe paths raise `BookServiceError`, while ordinary per-chapter failures are represented in outcomes.
+
+The public request models `BookCompileRequest` and `BookRenderRequest` capture the corresponding service options. These APIs remain engine-independent: they neither inspect TTS engines nor synthesize or compose audio.

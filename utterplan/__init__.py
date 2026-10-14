@@ -1,6 +1,20 @@
 from ._version import __version__
 from .attempts import PlanDraft, PlanningAttempt, PlanningAttemptStatus
 from .batch import BatchProgressCallback, CompileOutcome, CompileRequest, compile_to_files
+from .book import (
+    BookCompileRequest,
+    BookCompileResult,
+    BookCompileStart,
+    BookCompileStartCallback,
+    BookRenderRequest,
+    BookRenderResult,
+    BookRenderStart,
+    BookRenderStartCallback,
+    BookServiceError,
+    RenderProgressCallback,
+    compile_book,
+    render_book,
+)
 from .boundaries import BoundaryKind
 from .compiler import (
     CompileResult,
@@ -100,6 +114,18 @@ from .versioning import (
 
 __all__ = [
     "__version__",
+    "BookCompileRequest",
+    "BookCompileResult",
+    "BookCompileStart",
+    "BookCompileStartCallback",
+    "BookRenderRequest",
+    "BookRenderResult",
+    "BookRenderStart",
+    "BookRenderStartCallback",
+    "BookServiceError",
+    "RenderProgressCallback",
+    "compile_book",
+    "render_book",
     "CompileResult",
     "BatchProgressCallback",
     "CompileOutcome",
