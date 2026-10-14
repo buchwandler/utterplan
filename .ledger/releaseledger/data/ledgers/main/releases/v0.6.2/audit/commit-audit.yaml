@@ -1,0 +1,115 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: v0.6.2
+git_base_ref: v0.6.1
+git_base_sha: 3f635a96bbbea54a3f88cba42613de7b18786e6c
+git_head_ref: HEAD
+git_head_sha: 70da4674e484cf44d8a5bd6adaeef62cfca56d5d
+git_range: 3f635a96bbbea54a3f88cba42613de7b18786e6c..70da4674e484cf44d8a5bd6adaeef62cfca56d5d
+commit_count: 2
+rows:
+  - sha: 98811e69589faf697e23b040d300a97267844736
+    source_ref: git:98811e69589faf697e23b040d300a97267844736
+    short_sha: 98811e6
+    changed_paths:
+      - .ledger/ledger.toml
+      - .ledger/memoryledger/.ledger-project.toml
+      - .ledger/memoryledger/config.toml
+      - .ledger/memoryledger/data/.ledger-project.toml
+      - .ledger/memoryledger/data/memories/memory-0001.md
+      - .ledger/memoryledger/data/memories/memory-0002.md
+      - .ledger/memoryledger/data/memories/memory-0003.md
+      - .ledger/memoryledger/data/memories/memory-0004.md
+      - .ledger/memoryledger/data/memories/memory-0005.md
+      - .ledger/memoryledger/data/memories/memory-0006.md
+      - .ledger/memoryledger/data/memories/memory-0007.md
+      - .ledger/memoryledger/data/memories/memory-0008.md
+      - .ledger/memoryledger/data/memories/memory-0009.md
+      - .ledger/memoryledger/data/memories/memory-0010.md
+      - .ledger/memoryledger/data/memories/memory-0011.md
+      - .ledger/memoryledger/data/memories/memory-0012.md
+      - .ledger/memoryledger/data/memories/memory-0013.md
+      - .ledger/memoryledger/data/memories/memory-0014.md
+      - .ledger/memoryledger/data/memories/memory-0015.md
+      - .ledger/memoryledger/data/memories/memory-0016.md
+      - .ledger/memoryledger/data/memories/memory-0017.md
+      - .ledger/memoryledger/data/memories/memory-0018.md
+      - .ledger/memoryledger/data/memories/memory-0019.md
+      - .ledger/memoryledger/data/storage.yaml
+      - AGENTS.md
+    stats:
+      files_changed: 25
+      insertions: 669
+      deletions: 19
+    inspected: true
+    inspected_paths:
+      - .ledger/ledger.toml
+      - .ledger/memoryledger/.ledger-project.toml
+      - .ledger/memoryledger/config.toml
+      - .ledger/memoryledger/data/.ledger-project.toml
+      - .ledger/memoryledger/data/memories/memory-0001.md
+      - .ledger/memoryledger/data/memories/memory-0002.md
+      - .ledger/memoryledger/data/memories/memory-0003.md
+      - .ledger/memoryledger/data/memories/memory-0004.md
+      - .ledger/memoryledger/data/memories/memory-0005.md
+      - .ledger/memoryledger/data/memories/memory-0006.md
+      - .ledger/memoryledger/data/memories/memory-0007.md
+      - .ledger/memoryledger/data/memories/memory-0008.md
+      - .ledger/memoryledger/data/memories/memory-0009.md
+      - .ledger/memoryledger/data/memories/memory-0010.md
+      - .ledger/memoryledger/data/memories/memory-0011.md
+      - .ledger/memoryledger/data/memories/memory-0012.md
+      - .ledger/memoryledger/data/memories/memory-0013.md
+      - .ledger/memoryledger/data/memories/memory-0014.md
+      - .ledger/memoryledger/data/memories/memory-0015.md
+      - .ledger/memoryledger/data/memories/memory-0016.md
+      - .ledger/memoryledger/data/memories/memory-0017.md
+      - .ledger/memoryledger/data/memories/memory-0018.md
+      - .ledger/memoryledger/data/memories/memory-0019.md
+      - .ledger/memoryledger/data/storage.yaml
+      - AGENTS.md
+    observed_behavior:
+      Updated project memoryledger records and AGENTS.md; no product/runtime
+      behavior changed.
+    public_impact: internal
+    decision: internal
+    stale: false
+    evidence_subject: "doc: update agents.md"
+    notes: Repository-memory maintenance only; excluded from public release notes.
+  - sha: 70da4674e484cf44d8a5bd6adaeef62cfca56d5d
+    source_ref: git:70da4674e484cf44d8a5bd6adaeef62cfca56d5d
+    short_sha: 70da467
+    changed_paths:
+      - docs/python-api.md
+      - docs/ssmdbook.md
+      - tests/test_book_api.py
+      - tests/test_renderplan_dependency_contract.py
+      - utterplan/__init__.py
+      - utterplan/book.py
+      - utterplan/cli.py
+    stats:
+      files_changed: 7
+      insertions: 1250
+      deletions: 323
+    inspected: true
+    inspected_paths:
+      - docs/python-api.md
+      - docs/ssmdbook.md
+      - tests/test_book_api.py
+      - tests/test_renderplan_dependency_contract.py
+      - utterplan/__init__.py
+      - utterplan/book.py
+      - utterplan/cli.py
+    observed_behavior:
+      Added public compile_book and render_book services for selecting
+      SSMDBook chapters, validating output ownership, and reporting per-chapter results;
+      CLI commands now delegate to the services.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: book api"
+    target_entry_id: entry-0001
+    notes: Reviewed implementation, documentation, and tests.

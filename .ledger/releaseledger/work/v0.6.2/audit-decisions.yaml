@@ -1,0 +1,53 @@
+rows:
+  - sha: 98811e69589faf697e23b040d300a97267844736
+    inspected: true
+    inspected_paths:
+      - .ledger/ledger.toml
+      - .ledger/memoryledger/.ledger-project.toml
+      - .ledger/memoryledger/config.toml
+      - .ledger/memoryledger/data/.ledger-project.toml
+      - .ledger/memoryledger/data/memories/memory-0001.md
+      - .ledger/memoryledger/data/memories/memory-0002.md
+      - .ledger/memoryledger/data/memories/memory-0003.md
+      - .ledger/memoryledger/data/memories/memory-0004.md
+      - .ledger/memoryledger/data/memories/memory-0005.md
+      - .ledger/memoryledger/data/memories/memory-0006.md
+      - .ledger/memoryledger/data/memories/memory-0007.md
+      - .ledger/memoryledger/data/memories/memory-0008.md
+      - .ledger/memoryledger/data/memories/memory-0009.md
+      - .ledger/memoryledger/data/memories/memory-0010.md
+      - .ledger/memoryledger/data/memories/memory-0011.md
+      - .ledger/memoryledger/data/memories/memory-0012.md
+      - .ledger/memoryledger/data/memories/memory-0013.md
+      - .ledger/memoryledger/data/memories/memory-0014.md
+      - .ledger/memoryledger/data/memories/memory-0015.md
+      - .ledger/memoryledger/data/memories/memory-0016.md
+      - .ledger/memoryledger/data/memories/memory-0017.md
+      - .ledger/memoryledger/data/memories/memory-0018.md
+      - .ledger/memoryledger/data/memories/memory-0019.md
+      - .ledger/memoryledger/data/storage.yaml
+      - AGENTS.md
+    observed_behavior: "Updated project memoryledger records and AGENTS.md; no product/runtime behavior changed."
+    public_impact: internal
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Repository-memory maintenance only; excluded from public release notes."
+    stale: false
+  - sha: 70da4674e484cf44d8a5bd6adaeef62cfca56d5d
+    inspected: true
+    inspected_paths:
+      - docs/python-api.md
+      - docs/ssmdbook.md
+      - tests/test_book_api.py
+      - tests/test_renderplan_dependency_contract.py
+      - utterplan/__init__.py
+      - utterplan/book.py
+      - utterplan/cli.py
+    observed_behavior: "Added public compile_book and render_book services for selecting SSMDBook chapters, validating output ownership, and reporting per-chapter results; CLI commands now delegate to the services."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Reviewed implementation, documentation, and tests."
+    stale: false

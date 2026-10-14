@@ -1,0 +1,43 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.6.1
+git_base_ref: 2fc73f5433873551bef86216260cc35f76a5b3b8
+git_base_sha: 2fc73f5433873551bef86216260cc35f76a5b3b8
+git_head_ref: 3f635a96bbbea54a3f88cba42613de7b18786e6c
+git_head_sha: 3f635a96bbbea54a3f88cba42613de7b18786e6c
+include_merges: nontrivial
+entries:
+  - kind: docs
+    summary: "Documented the arc42 system architecture, structure, and boundaries"
+    status: accepted
+    source_refs:
+      - git:9b5537be09c1c5fe560d87a3dee845f9786830bf
+    paths:
+      - .ledger/archledger/.ledger-project.toml
+      - .ledger/archledger/config.toml
+      - .ledger/archledger/data/.ledger-project.toml
+      - .ledger/archledger/data/document-state.json
+      - .ledger/archledger/data/profiles/arc42/sections/content-0001.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0002.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0003.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0004.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0005.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0006.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0007.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0008.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0009.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0010.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0011.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0012.md
+      - .ledger/archledger/data/source-state.json
+      - .ledger/archledger/data/storage.yaml
+      - .ledger/ledger.toml
+      - docs/architecture.md
+    sources:
+      - git:9b5537be09c1c5fe560d87a3dee845f9786830bf
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

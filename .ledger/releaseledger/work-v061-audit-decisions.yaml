@@ -1,0 +1,42 @@
+rows:
+  - sha: 9b5537be09c1c5fe560d87a3dee845f9786830bf
+    inspected: true
+    inspected_paths:
+      - .ledger/archledger/.ledger-project.toml
+      - .ledger/archledger/config.toml
+      - .ledger/archledger/data/.ledger-project.toml
+      - .ledger/archledger/data/document-state.json
+      - .ledger/archledger/data/profiles/arc42/sections/content-0001.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0002.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0003.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0004.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0005.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0006.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0007.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0008.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0009.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0010.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0011.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0012.md
+      - .ledger/archledger/data/source-state.json
+      - .ledger/archledger/data/storage.yaml
+      - .ledger/ledger.toml
+      - docs/architecture.md
+    observed_behavior: "Expanded the arc42 architecture documentation and its archledger source records, documenting system structure and boundaries in docs/architecture.md."
+    public_impact: docs
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Reviewed the generated architecture documentation and source records."
+    stale: false
+  - sha: 3f635a96bbbea54a3f88cba42613de7b18786e6c
+    inspected: true
+    inspected_paths:
+      - .github/workflows/python-publish.yml
+    observed_behavior: "Updated the package publishing workflow without changing runtime or public API behavior."
+    public_impact: internal
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: "CI-only maintenance; excluded from public release notes."
+    stale: false

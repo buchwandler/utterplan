@@ -1,0 +1,30 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.6.2
+git_base_ref: 3f635a96bbbea54a3f88cba42613de7b18786e6c
+git_base_sha: 3f635a96bbbea54a3f88cba42613de7b18786e6c
+git_head_ref: 70da4674e484cf44d8a5bd6adaeef62cfca56d5d
+git_head_sha: 70da4674e484cf44d8a5bd6adaeef62cfca56d5d
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: "Added public book compilation and RenderPlan projection services with safe chapter selection and per-chapter reporting"
+    status: accepted
+    source_refs:
+      - git:70da4674e484cf44d8a5bd6adaeef62cfca56d5d
+    paths:
+      - docs/python-api.md
+      - docs/ssmdbook.md
+      - tests/test_book_api.py
+      - tests/test_renderplan_dependency_contract.py
+      - utterplan/__init__.py
+      - utterplan/book.py
+      - utterplan/cli.py
+    sources:
+      - git:70da4674e484cf44d8a5bd6adaeef62cfca56d5d
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

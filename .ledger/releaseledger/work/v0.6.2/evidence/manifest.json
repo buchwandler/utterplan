@@ -1,0 +1,67 @@
+{
+  "candidate_count": 2,
+  "candidates": [
+    {
+      "additions": 669,
+      "deletions": 19,
+      "patch_file": "98811e6.patch",
+      "patch_sha256": "113cf8c13fa35a953c2f81d6d8d32a75785bd001e504820dc99bf757345bded4",
+      "paths": [
+        ".ledger/ledger.toml",
+        ".ledger/memoryledger/.ledger-project.toml",
+        ".ledger/memoryledger/config.toml",
+        ".ledger/memoryledger/data/.ledger-project.toml",
+        ".ledger/memoryledger/data/memories/memory-0001.md",
+        ".ledger/memoryledger/data/memories/memory-0002.md",
+        ".ledger/memoryledger/data/memories/memory-0003.md",
+        ".ledger/memoryledger/data/memories/memory-0004.md",
+        ".ledger/memoryledger/data/memories/memory-0005.md",
+        ".ledger/memoryledger/data/memories/memory-0006.md",
+        ".ledger/memoryledger/data/memories/memory-0007.md",
+        ".ledger/memoryledger/data/memories/memory-0008.md",
+        ".ledger/memoryledger/data/memories/memory-0009.md",
+        ".ledger/memoryledger/data/memories/memory-0010.md",
+        ".ledger/memoryledger/data/memories/memory-0011.md",
+        ".ledger/memoryledger/data/memories/memory-0012.md",
+        ".ledger/memoryledger/data/memories/memory-0013.md",
+        ".ledger/memoryledger/data/memories/memory-0014.md",
+        ".ledger/memoryledger/data/memories/memory-0015.md",
+        ".ledger/memoryledger/data/memories/memory-0016.md",
+        ".ledger/memoryledger/data/memories/memory-0017.md",
+        ".ledger/memoryledger/data/memories/memory-0018.md",
+        ".ledger/memoryledger/data/memories/memory-0019.md",
+        ".ledger/memoryledger/data/storage.yaml",
+        "AGENTS.md"
+      ],
+      "sha": "98811e69589faf697e23b040d300a97267844736",
+      "short_sha": "98811e6",
+      "source_ref": "git:98811e69589faf697e23b040d300a97267844736"
+    },
+    {
+      "additions": 1250,
+      "deletions": 323,
+      "patch_file": "70da467.patch",
+      "patch_sha256": "e089859441cbd5831898c1af0191c59f26465ace4b6156581ed44ed1d5b2ad73",
+      "paths": [
+        "docs/python-api.md",
+        "docs/ssmdbook.md",
+        "tests/test_book_api.py",
+        "tests/test_renderplan_dependency_contract.py",
+        "utterplan/__init__.py",
+        "utterplan/book.py",
+        "utterplan/cli.py"
+      ],
+      "sha": "70da4674e484cf44d8a5bd6adaeef62cfca56d5d",
+      "short_sha": "70da467",
+      "source_ref": "git:70da4674e484cf44d8a5bd6adaeef62cfca56d5d"
+    }
+  ],
+  "git_base_ref": "3f635a96bbbea54a3f88cba42613de7b18786e6c",
+  "git_base_sha": "3f635a96bbbea54a3f88cba42613de7b18786e6c",
+  "git_head_ref": "70da4674e484cf44d8a5bd6adaeef62cfca56d5d",
+  "git_head_sha": "70da4674e484cf44d8a5bd6adaeef62cfca56d5d",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "v0.6.2",
+  "schema_version": 1
+}
