@@ -703,7 +703,7 @@ def _write_replan_report(
         ):
             if value is not None:
                 item[key] = _report_path(value, base)
-        for key, value in (
+        for metadata_key, metadata_value in (
             ("previous_render_plan_id", outcome.previous_render_plan_id),
             ("render_plan_id", outcome.render_plan_id),
             ("replacement_count", outcome.replacement_count),
@@ -711,8 +711,8 @@ def _write_replan_report(
             ("code", outcome.error_code),
             ("message", outcome.error_message),
         ):
-            if value is not None:
-                item[key] = value
+            if metadata_value is not None:
+                item[metadata_key] = metadata_value
         items.append(item)
     data = {
         "format": "utterplan-replan-report",
