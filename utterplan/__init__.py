@@ -15,6 +15,17 @@ from .book import (
     compile_book,
     render_book,
 )
+from .book_replan import (
+    BookReplanError,
+    BookReplanRequest,
+    BookReplanResult,
+    BookReplanStart,
+    BookReplanStartCallback,
+    ReplanOutcome,
+    ReplanProgressCallback,
+    ReplanStatus,
+    replan_book,
+)
 from .boundaries import BoundaryKind
 from .compiler import (
     CompileResult,
@@ -123,6 +134,15 @@ __all__ = [
     "BookRenderStart",
     "BookRenderStartCallback",
     "BookServiceError",
+    "BookReplanError",
+    "BookReplanRequest",
+    "BookReplanResult",
+    "BookReplanStart",
+    "BookReplanStartCallback",
+    "ReplanOutcome",
+    "ReplanProgressCallback",
+    "ReplanStatus",
+    "replan_book",
     "RenderProgressCallback",
     "compile_book",
     "render_book",

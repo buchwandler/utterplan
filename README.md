@@ -109,6 +109,41 @@ creates or refreshes engine-backed profiles, then preflights and renders the
 resulting RenderPlans. The single-file `utterplan render-plan` command remains the
 low-level projection and deterministic replan primitive.
 
+When VoiceRender reports `preflight.replan`, use the new `replan-book` command to
+refine the exact active chapter plan. The operation reads the RenderProfile snapshot
+from the selected variant, writes a fingerprinted child RenderPlan, and updates only
+that chapter's active set entry. It does not replace the parent plan or rerun initial
+projection:
+
+```bash
+# VoiceRender measures the active plans; suppose chapter 5 returns preflight.replan.
+voicerender render-book . \
+  --variant narration4--28f616b6fe3b \
+  --chapters 5 \
+  --emphasis-policy defer-to-compose
+
+utterplan replan-book . \
+  --variant narration4--28f616b6fe3b \
+  --chapters 5
+
+# Measure/render the newly active child. Repeat these last two commands if it
+# still reports preflight.replan; each cycle must use feedback for the active plan.
+voicerender render-book . \
+  --variant narration4--28f616b6fe3b \
+  --chapters 5 \
+  --emphasis-policy defer-to-compose
+```
+
+Use the exact variant directory name (including its profile fingerprint). `replan-book`
+searches `preflight-recheck.toml` before `preflight.toml` and refuses stale feedback,
+so a report for a parent can never be applied to its child. The single-file
+`render-plan --previous ... --preflight ...` operation remains available for
+low-level replanning.
+
+This orchestration does not add a splitter, renderer-specific capacity estimate, or
+engine dependency. VoiceRender supplies preflight measurements and remains responsible
+for synthesis and audio composition.
+
 Related packages: [RenderPlan](https://pypi.org/project/renderplan/) defines the
 shared profile and plan contracts; [VoiceRender](https://pypi.org/project/voicerender/)
 creates engine-backed profiles and performs preflight and synthesis.

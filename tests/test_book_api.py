@@ -16,9 +16,15 @@ from utterplan import (
     BookCompileResult,
     BookRenderRequest,
     BookRenderResult,
+    BookReplanError,
+    BookReplanRequest,
+    BookReplanResult,
+    BookReplanStart,
     BookServiceError,
+    ReplanOutcome,
     compile_book,
     render_book,
+    replan_book,
 )
 from utterplan.config import LinguisticsConfig, PlannerConfig
 from utterplan.model import FlowPlan
@@ -95,9 +101,47 @@ def test_public_request_and_result_models_are_available_at_package_root() -> Non
         selected_chapter_ids=(),
         outcomes=(),
     )
+    replan_request = BookReplanRequest(Path("book"), variant="narration--abc")
+    replan_outcome = ReplanOutcome(
+        index=1,
+        id="chapter-0005",
+        source_number=5,
+        status="failed",
+        utterplan=None,
+        previous_renderplan=None,
+        previous_render_plan_id=None,
+        preflight=None,
+    )
+    replan_result = BookReplanResult(
+        workspace=Path("book"),
+        variant="narration--abc",
+        variant_dir=Path("book/renderplan/narration--abc"),
+        set_path=Path("book/renderplan/narration--abc/renderplan-set.toml"),
+        profile_path=Path("book/renderplan/narration--abc/renderprofile.toml"),
+        report_path=Path("book/renderplan/narration--abc/replan-report.toml"),
+        selected_chapter_ids=("chapter-0005",),
+        dry_run=False,
+        outcomes=(replan_outcome,),
+    )
+    replan_start = BookReplanStart(
+        workspace=Path("book"),
+        chapter_selector="5",
+        selected_chapter_ids=("chapter-0005",),
+        variant="narration--abc",
+        variant_dir=replan_result.variant_dir,
+        set_path=replan_result.set_path,
+        profile_path=replan_result.profile_path,
+        voicerender_dir=Path("book/voicerender/narration--abc"),
+        report_path=replan_result.report_path,
+    )
     assert compile_request.book == Path("book")
     assert render_request.profile == Path("profile.renderprofile.toml")
     assert compile_result.exit_code == render_result.exit_code == 0
+    assert replan_request.book == Path("book")
+    assert replan_result.exit_code == 1 and replan_result.failed == 1
+    assert replan_start.variant == replan_request.variant
+    assert callable(replan_book)
+    assert issubclass(BookReplanError, BookServiceError)
     assert compile_result.failed == render_result.failed == 0
 
 

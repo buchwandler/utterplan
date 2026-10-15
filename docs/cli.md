@@ -205,6 +205,76 @@ are rejected before chapter processing. Exit status is 0 when all selected
 chapters succeed, 1 when any chapter fails, and 2 for usage or shared-configuration
 errors. See the [SSMDBook workflow guide](ssmdbook.md) for end-to-end and multi-voice examples.
 
+## Replan active RenderPlans for selected chapters
+
+`replan-book` is the book/variant orchestration for VoiceRender's capacity feedback.
+It loads the profile snapshot owned by the existing RenderPlanSet; callers must select
+the exact variant directory, not supply another profile:
+
+VoiceRender supplies capacity feedback: UtterPlan does not add renderer-specific
+metrics, a splitter, engine selection, synthesis, or audio composition.
+
+```text
+utterplan replan-book INPUT --variant VARIANT [--chapters SELECTOR]
+  [--renderplan-root PATH] [--voicerender-root PATH] [--report PATH]
+  [--dry-run] [--fail-fast] [--explain] [--json]
+```
+
+Example repeatable lifecycle:
+
+```bash
+# Initial projection and exact renderer preflight/render
+utterplan render-book . --profile narration4.renderprofile.toml --variant narration4 --chapters 5
+voicerender render-book . --variant narration4--28f616b6fe3b --chapters 5 \
+  --emphasis-policy defer-to-compose
+
+# If VoiceRender returns preflight.replan, refine only the active chapter plan
+utterplan replan-book . --variant narration4--28f616b6fe3b --chapters 5
+
+# Preflight/render the new active plan; repeat replan-book and this command if needed
+voicerender render-book . --variant narration4--28f616b6fe3b --chapters 5 \
+  --emphasis-policy defer-to-compose
+```
+
+`INPUT` is an SSMDBook root or its canonical `chapters/` directory. Chapter selectors
+use manifest source numbers and retain manifest order. The default RenderPlan root is
+`<book-root>/renderplan`; the default VoiceRender root is `<book-root>/voicerender`.
+The command reads `<variant>/renderprofile.toml` and the selected active plan paths
+from `renderplan-set.toml`. It discovers reports under
+`<voicerender-root>/<variant>/<chapter-id>/`, preferring `preflight-recheck.toml`
+over `preflight.toml` when both fully validate against the exact active RenderPlan.
+
+Only a matching `status="replan"` report is accepted. Missing reports, stale parent
+reports, mismatched profile/plan identities, and `ok`/`reject` statuses fail that
+chapter; the command never falls back to an initial RenderPlan projection. A successful
+replan writes a deterministic immutable child plan first, then atomically changes only
+the selected chapter's active set entry. Parent plans, source UtterPlans, profile
+identity, and unselected set entries remain unchanged. Run VoiceRender again after
+each replan; repeat the two feedback steps until preflight is `ok`.
+
+Defaults and behavior:
+
+- `--variant` is required and must name the existing full variant directory, including
+  its profile fingerprint. The profile snapshot is loaded from that collection.
+- `--chapters`: `all`, one source number, an inclusive range, or comma-separated
+  selections; default is `all`.
+- `--renderplan-root` and `--voicerender-root` override the collection/data roots,
+  not the selected variant or chapter paths recorded by the contracts.
+- `--report`: defaults to `<variant-dir>/replan-report.toml`; progress is persisted
+  after each chapter and the final report is marked complete.
+- `--dry-run`: validates and plans children without writing child RenderPlans or
+  changing the set index. It writes the operational report and reports successful
+  items as `planned`.
+- `--fail-fast`: later chapters are recorded as skipped after the first failure;
+  without it, later selected chapters continue.
+- `--explain` uses the existing per-request RenderPlan explanation; `--json` emits
+  structured outcome paths, identities, replacement counts, errors, and optional
+  explanations.
+
+Re-running with a stale report after activating a child fails with
+`renderplan.replan.book.preflight_stale`. VoiceRender must first measure the active
+child to produce its own matching feedback report.
+
 ## Explain a plan
 
 Explain an existing compiled plan as a human-readable speech narrative:

@@ -22,6 +22,8 @@ from .book import (
 )
 from .book import compile_book as _compile_book_service
 from .book import render_book as _render_book_service
+from .book_replan import BookReplanStart, ReplanOutcome
+from .book_replan import replan_book as _replan_book_service
 from .compiler import InputFormat, PreparationTrace, compile_document
 from .config import LinguisticsConfig, PlannerConfig
 from .exceptions import PlanFormatError, PlanRenderabilityError, UtterPlanError
@@ -347,6 +349,53 @@ def build_parser() -> argparse.ArgumentParser:
         "--fail-fast", action="store_true", help="skip later chapters after the first item failure"
     )
     render_book_parser.add_argument("--report", type=Path, help="TOML operational report path")
+    replan_book_parser = commands.add_parser(
+        "replan-book",
+        help="refine selected active RenderPlans from matching VoiceRender preflight feedback",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  utterplan replan-book novel.ssmdbook --variant narration--28f616b6fe3b --chapters 5\n"
+            "  utterplan replan-book chapters --variant narration--28f616b6fe3b --chapters 5-17"
+        ),
+    )
+    replan_book_parser.add_argument(
+        "input", type=Path, help=".ssmdbook directory or its canonical chapters/ directory"
+    )
+    replan_book_parser.add_argument(
+        "--variant", required=True, help="exact existing RenderPlan variant directory name"
+    )
+    replan_book_parser.add_argument(
+        "--chapters",
+        default="all",
+        metavar="SELECTOR",
+        help="source chapter selection: all, N, N-M, or comma-separated ranges (default: all)",
+    )
+    replan_book_parser.add_argument(
+        "--renderplan-root",
+        type=Path,
+        help="RenderPlan collection root (default: <ssmdbook>/renderplan)",
+    )
+    replan_book_parser.add_argument(
+        "--voicerender-root",
+        type=Path,
+        help="VoiceRender data root (default: <ssmdbook>/voicerender)",
+    )
+    replan_book_parser.add_argument("--report", type=Path, help="TOML operational report path")
+    replan_book_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate and plan children without writing plans or set entries",
+    )
+    replan_book_parser.add_argument(
+        "--fail-fast", action="store_true", help="skip later chapters after the first item failure"
+    )
+    replan_book_parser.add_argument(
+        "--explain", action="store_true", help="include existing per-request planning explanations"
+    )
+    replan_book_parser.add_argument(
+        "--json", action="store_true", help="emit structured book replan results as JSON"
+    )
     inspect_parser = commands.add_parser("inspect", help="inspect a saved TTS plan")
     inspect_parser.add_argument("input", type=Path)
     inspect_parser.add_argument("--unit", type=int)
@@ -838,6 +887,159 @@ def _render_book(args: argparse.Namespace) -> int:
     return result.exit_code
 
 
+def _replan_book(args: argparse.Namespace) -> int:
+    start_info: BookReplanStart | None = None
+    selected_count = 0
+    explanations: dict[int, str] = {}
+
+    def start(progress: BookReplanStart) -> None:
+        nonlocal start_info, selected_count
+        start_info = progress
+        selected_count = len(progress.selected_chapter_ids)
+        if args.json:
+            return
+        print("UtterPlan book replan", file=sys.stderr)
+        print(f"  workspace:   {progress.workspace}", file=sys.stderr)
+        print(f"  variant:     {progress.variant}", file=sys.stderr)
+        print(f"  renderplans: {progress.variant_dir}", file=sys.stderr)
+        print(f"  preflights:  {progress.voicerender_dir}", file=sys.stderr)
+        print(f"  chapters:    {progress.chapter_selector}", file=sys.stderr)
+        print(f"  selected:    {selected_count}", file=sys.stderr)
+
+    def report_progress(outcome: ReplanOutcome) -> None:
+        if args.json:
+            if args.explain and outcome.status in {"written", "planned"} and start_info is not None:
+                explanations[outcome.index] = _replan_explanation(outcome, start_info.profile_path)
+            return
+        print(f"[{outcome.index}/{selected_count}] {outcome.id}", file=sys.stderr)
+        if outcome.previous_render_plan_id is not None:
+            print(f"       previous: {outcome.previous_render_plan_id}", file=sys.stderr)
+        if outcome.preflight is not None:
+            print(f"       preflight: {outcome.preflight.name}", file=sys.stderr)
+        if outcome.replacement_count:
+            print(f"       replacements: {outcome.replacement_count}", file=sys.stderr)
+        if outcome.status == "written":
+            print(f"       written: {outcome.renderplan}", file=sys.stderr)
+            print(f"       active: {outcome.render_plan_id}", file=sys.stderr)
+        elif outcome.status == "planned":
+            print(f"       planned: {outcome.renderplan}", file=sys.stderr)
+            print(f"       would be active: {outcome.render_plan_id}", file=sys.stderr)
+        elif outcome.status == "failed":
+            print(
+                f"       FAILED {outcome.error_code or 'unknown'}: "
+                f"{outcome.error_message or 'replan failed'}",
+                file=sys.stderr,
+            )
+        else:
+            print("       skipped after an earlier failure", file=sys.stderr)
+        if args.explain and start_info is not None and outcome.status in {"written", "planned"}:
+            explanation = _replan_explanation(outcome, start_info.profile_path)
+            explanations[outcome.index] = explanation
+            print(f"       explanation:\n{explanation}", end="", file=sys.stderr)
+
+    try:
+        result = _replan_book_service(
+            args.input,
+            variant=args.variant,
+            chapters=args.chapters,
+            renderplan_root=args.renderplan_root,
+            voicerender_root=args.voicerender_root,
+            report=args.report,
+            dry_run=args.dry_run,
+            fail_fast=args.fail_fast,
+            on_progress=report_progress,
+            on_start=start,
+        )
+    except BookServiceError as exc:
+        raise _CliUsageError(str(exc)) from exc
+
+    if args.json:
+        outcomes: list[dict[str, object]] = []
+        for outcome in result.outcomes:
+            item: dict[str, object] = {
+                "index": outcome.index,
+                "id": outcome.id,
+                "source_number": outcome.source_number,
+                "status": outcome.status,
+                "utterplan": str(outcome.utterplan) if outcome.utterplan is not None else None,
+                "previous_renderplan": (
+                    str(outcome.previous_renderplan)
+                    if outcome.previous_renderplan is not None
+                    else None
+                ),
+                "previous_render_plan_id": outcome.previous_render_plan_id,
+                "preflight": str(outcome.preflight) if outcome.preflight is not None else None,
+                "renderplan": str(outcome.renderplan) if outcome.renderplan is not None else None,
+                "render_plan_id": outcome.render_plan_id,
+                "replacement_count": outcome.replacement_count,
+                "stage": outcome.stage,
+                "error_code": outcome.error_code,
+                "error_message": outcome.error_message,
+            }
+            if args.explain and outcome.index in explanations:
+                item["explanation"] = explanations[outcome.index]
+            outcomes.append(item)
+        print(
+            json.dumps(
+                {
+                    "format": "utterplan-replan-book",
+                    "version": 1,
+                    "workspace": str(result.workspace),
+                    "variant": result.variant,
+                    "variant_dir": str(result.variant_dir),
+                    "set_path": str(result.set_path),
+                    "profile_path": str(result.profile_path),
+                    "report_path": str(result.report_path),
+                    "selected_chapter_ids": list(result.selected_chapter_ids),
+                    "dry_run": result.dry_run,
+                    "written": result.written,
+                    "planned": result.planned,
+                    "failed": result.failed,
+                    "skipped": result.skipped,
+                    "outcomes": outcomes,
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return result.exit_code
+
+    print("UtterPlan replan summary", file=sys.stderr)
+    print(f"  requested: {len(result.outcomes)}", file=sys.stderr)
+    print(f"  written:   {result.written}", file=sys.stderr)
+    if result.dry_run:
+        print(
+            f"  planned:   {result.planned} (dry run; no plans or set entries written)",
+            file=sys.stderr,
+        )
+    print(f"  failed:    {result.failed}", file=sys.stderr)
+    if result.skipped:
+        print(f"  skipped:   {result.skipped}", file=sys.stderr)
+    print(f"  report:    {result.report_path}", file=sys.stderr)
+    return result.exit_code
+
+
+def _replan_explanation(outcome: ReplanOutcome, profile_path: Path) -> str:
+    if (
+        outcome.utterplan is None
+        or outcome.previous_renderplan is None
+        or outcome.preflight is None
+    ):
+        return ""
+    source_plan = FlowPlan.load(outcome.utterplan)
+    profile = renderplan_codec.load_profile(profile_path)
+    previous = renderplan_codec.load_plan(outcome.previous_renderplan)
+    preflight = renderplan_codec.load_preflight(outcome.preflight)
+    plan = build_render_plan(
+        source_plan,
+        profile,
+        previous_plan=previous,
+        preflight=preflight,
+    ).with_identity()
+    return format_render_plan_explanation(plan, previous_plan=previous, preflight=preflight)
+
+
 def _compile(args: argparse.Namespace) -> int:
     source, input_format = _read_compile_input(args)
     trace_path: Path | None = args.trace
@@ -1092,6 +1294,8 @@ def main(argv: list[str] | None = None) -> int:
             return _compile_book(args)
         if args.command == "render-book":
             return _render_book(args)
+        if args.command == "replan-book":
+            return _replan_book(args)
         if args.command == "migrate":
             return _migrate(args)
         if args.command == "validate":
