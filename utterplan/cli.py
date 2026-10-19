@@ -28,11 +28,11 @@ from .compiler import InputFormat, PreparationTrace, compile_document
 from .config import LinguisticsConfig, PlannerConfig
 from .document_workspace import (
     DocumentCompileStart,
+    DocumentRenderStart,
     DocumentWorkspaceServiceError,
 )
-from .document_workspace import (
-    compile_ssmdoc as _compile_ssmdoc_service,
-)
+from .document_workspace import compile_ssmdoc as _compile_ssmdoc_service
+from .document_workspace import render_ssmdoc as _render_ssmdoc_service
 from .exceptions import PlanFormatError, PlanRenderabilityError, UtterPlanError
 from .explain import format_explanation
 from .migration import MigrationResult, migrate_plan_data
@@ -362,6 +362,15 @@ def build_parser() -> argparse.ArgumentParser:
     render_plan_parser.add_argument(
         "--json", action="store_true", help="emit the generated plan as machine-readable JSON"
     )
+    render_document_parser = commands.add_parser("render-document", help="project one compiled SSMDDoc FlowPlan")
+    render_document_parser.add_argument("input", type=Path, help="SSMDDoc workspace root")
+    render_document_parser.add_argument("--profile", type=Path, required=True)
+    render_document_parser.add_argument("--variant", help="human label override")
+    render_document_parser.add_argument("--utterplan-dir", type=Path)
+    render_document_parser.add_argument("--output-root", type=Path)
+    render_document_parser.add_argument("--report", type=Path)
+    render_document_parser.add_argument("--force", action="store_true")
+
     render_book_parser = commands.add_parser(
         "render-book",
         help="project selected SSMDBook UtterPlans into a profile-specific RenderPlan set",
@@ -900,6 +909,25 @@ def _compile_document(args: argparse.Namespace) -> int:
     return result.exit_code
 
 
+def _render_document(args: argparse.Namespace) -> int:
+    def start(info: DocumentRenderStart) -> None:
+        print("UtterPlan document render", file=sys.stderr)
+        print(f"  workspace:  {info.workspace}", file=sys.stderr)
+        print(f"  document:   {info.document_id}", file=sys.stderr)
+        print(f"  profile:    {info.profile_path}", file=sys.stderr)
+        print(f"  profile-id: {info.profile_id}", file=sys.stderr)
+        print(f"  variant:    {info.variant}", file=sys.stderr)
+        print(f"  renderplan: {info.output_path}", file=sys.stderr)
+        print(f"  report:     {info.report_path}", file=sys.stderr)
+    try:
+        _render_ssmdoc_service(args.input, profile=args.profile, variant=args.variant,
+            utterplan_dir=args.utterplan_dir, output_root=args.output_root, report=args.report,
+            force=args.force, on_start=start)
+    except DocumentWorkspaceServiceError as exc:
+        raise _CliUsageError(str(exc)) from exc
+    return 0
+
+
 def _render_book(args: argparse.Namespace) -> int:
     selected_ids: tuple[str, ...] = ()
     written = 0
@@ -1384,6 +1412,8 @@ def main(argv: list[str] | None = None) -> int:
             return _compile_book(args)
         if args.command == "compile-document":
             return _compile_document(args)
+        if args.command == "render-document":
+            return _render_document(args)
         if args.command == "render-book":
             return _render_book(args)
         if args.command == "replan-book":

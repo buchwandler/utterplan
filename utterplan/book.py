@@ -8,7 +8,6 @@ write to the console; callers may observe batch outcomes through callbacks.
 from __future__ import annotations
 
 import os
-import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -572,15 +571,9 @@ def _relative_path_reference(path: Path, base: Path) -> str:
 
 
 def _render_variant_label(profile_path: Path, override: str | None) -> str:
-    if override is not None:
-        raw_label = override
-    else:
-        name = profile_path.name
-        suffix = ".renderprofile.toml"
-        raw_label = name[: -len(suffix)] if name.lower().endswith(suffix) else profile_path.stem
-    label = re.sub(r"[^a-z0-9_.-]+", "-", raw_label.lower()).strip("._-")
-    return label or "profile"
+    from .renderplan_workspace import render_variant_label
 
+    return render_variant_label(profile_path, override)
 
 __all__ = [
     "BookCompileRequest",

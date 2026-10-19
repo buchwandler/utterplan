@@ -62,3 +62,13 @@ The result provides the workspace and source paths, output and report paths, and
 An SSMDDoc contains one editable document and produces one canonical FlowPlan. An SSMDBook manifest discovers multiple independent chapter documents; `compile-book` writes one plan per selected chapter and never builds a book-level combined plan. Use [SSMDBook workflows](ssmdbook.md) for book compilation and RenderPlan projection.
 
 Neither workspace workflow changes its source manifest or source documents. UtterPlan stops at semantic FlowPlans; engine selection, G2P, synthesis, and audio remain downstream.
+
+## Projecting a document RenderPlan
+
+After `utterplan compile-document .`, project the existing canonical FlowPlan without recompiling it:
+
+```bash
+utterplan render-document . --profile narration.renderprofile.toml
+```
+
+This writes `.readio/renderplan/<label>--<profile-fingerprint>/renderprofile.toml`, `document-0001.renderplan.toml`, and `render-report.toml`. The printed exact variant can be passed to `voicerender render-document`. A document is never wrapped in a one-chapter book or a RenderPlanSet. Re-run `compile-document` and this projection after source edits; VoiceRender intentionally renders only the selected explicit RenderPlan.

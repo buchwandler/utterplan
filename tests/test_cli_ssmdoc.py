@@ -260,6 +260,17 @@ def test_compile_document_parser_exposes_only_single_document_options() -> None:
         parser.parse_args(["compile-document", "story.ssmdoc", "--input-format", "ssmd"])
 
 
+def test_render_document_parser_has_single_document_options() -> None:
+    args = build_parser().parse_args([
+        "render-document", "story.ssmdoc", "--profile", "voice.renderprofile.toml",
+        "--variant", "narration", "--force",
+    ])
+    assert args.input == Path("story.ssmdoc")
+    assert args.profile == Path("voice.renderprofile.toml")
+    assert args.variant == "narration"
+    assert args.force is True
+
+
 def test_public_workspace_api_does_not_shadow_core_compile_document() -> None:
     from utterplan import (
         DocumentCompileRequest,
