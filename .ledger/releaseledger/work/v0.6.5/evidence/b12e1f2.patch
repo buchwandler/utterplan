@@ -1,0 +1,1550 @@
+ README.md                         |  52 +++++++++++++++
+ docs/architecture.md              |  12 ----
+ docs/cli.md                       |  19 +++++-
+ docs/python-api.md                |  23 +++++++
+ docs/ssmdbook.md                  |   2 +
+ docs/ssmdoc.md                    |   6 ++
+ tests/test_book_api.py            |  27 +++++++-
+ tests/test_cli_render_book.py     |  61 ++++++++++++++++-
+ tests/test_cli_render_document.py | 137 +++++++++++++++++++++++++++++++++-----
+ tests/test_cli_ssmdoc.py          |  20 ++++--
+ tests/test_document_render.py     |  90 ++++++++++++++++++++++---
+ tests/test_document_workspace.py  |   1 +
+ tests/test_renderplan_export.py   | 133 ++++++++++++++++++++++++++++++++++++
+ tests/test_role_coverage.py       | 126 +++++++++++++++++++++++++++++++++++
+ tests/test_ssmdoc.py              |   2 +-
+ utterplan/__init__.py             |  12 ++++
+ utterplan/book.py                 |  35 ++++++++--
+ utterplan/cli.py                  |  68 ++++++++++++++++---
+ utterplan/document_workspace.py   |  20 +++++-
+ utterplan/renderplan_export.py    |   5 +-
+ utterplan/renderplan_workspace.py |   1 +
+ utterplan/role_coverage.py        |  99 +++++++++++++++++++++++++++
+ utterplan/ssmdoc.py               |   4 +-
+ 23 files changed, 882 insertions(+), 73 deletions(-)
+
+diff --git a/README.md b/README.md
+index 7b330e0..1e2a52e 100644
+--- a/README.md
++++ b/README.md
+@@ -80,6 +80,58 @@ utterplan/
+
+ Omit `--chapters` to compile all manifest chapters. Use comma-separated source-number selections for non-contiguous ranges, for example `utterplan compile-book chapters --chapters 1,3-5`. `--diagnostics warnings|all|none` defaults to warnings; failures are always shown and reports retain complete diagnostics. The book root itself is also accepted as input; see the [SSMDBook guide](docs/ssmdbook.md).
+
++## Logical roles and complete RenderProfiles
++
++An SSMD `voice` reference is a **logical role**: a renderer-independent name such as `narrator`, `host`, or `guest`. A **role binding** is the concrete renderer configuration for that name in a RenderProfile. One RenderProfile is the complete cast for one render variant, together with shared planning and pause policy; it may bind different roles to different engines. UtterPlan accepts one `--profile` per projection, not one profile per role, and does not discover engines or voices.
++
++A profile can define a default for speech without an explicit role reference and explicit bindings for other roles:
++
++In SSMD, the source remains renderer-independent; for example:
++
++```markdown
++:::{voice="host"}
++Host line.
++:::
++```
++
++```toml
++default_role = "narrator"
++
++[roles.narrator]
++language = "en-US"
++
++[roles.narrator.binding]
++renderer = "kokoro"
++target_id = "v1.0"
++voice = "af_heart"
++
++[roles.host]
++language = "en-US"
++
++[roles.host.binding]
++renderer = "kitten"
++target_id = "mini-0.8"
++voice = "Jasper"
++
++[roles.guest]
++language = "en-US"
++
++[roles.guest.binding]
++renderer = "piper"
++target_id = "en_US-amy-medium"
++voice = "en_US-amy-medium"
++```
++
++Inspect symbolic role usage without a profile, then project a document or selected book chapters with the same complete cast:
++
++```bash
++utterplan inspect story.utterplan.toml --roles
++utterplan render-document story.ssmdoc --profile printer-cast.renderprofile.toml
++utterplan render-book novel.ssmdbook --profile novel-cast.renderprofile.toml
++```
++
++Projection reports required and available roles and rejects incomplete coverage before writing the RenderPlan variant. The profile and its concrete role bindings remain separate from the source SSMD.
++
+ ## From an SSMDBook to RenderPlans
+
+ UtterPlan keeps one canonical semantic plan per chapter. A RenderProfile is a
+diff --git a/docs/architecture.md b/docs/architecture.md
+index ce6910a..25116d4 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -174,8 +174,6 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
+ - The workspace remains one document to one FlowPlan. Manifest digests are provenance only for editable directories: UtterPlan compiles current content and never refreshes the manifest or edits the source.
+ - `compile-document` is single-document convenience, not book orchestration. ZIP bundles, fake chapters, and an `ssmdconvert` runtime dependency are outside the contract.
+
+-
+-
+ ## Business Context
+
+ <!-- archledger: no accepted records for this section yet -->
+@@ -269,8 +267,6 @@ TOML.
+
+ `ssmdoc.py` performs read-only manifest discovery and canonical path safety checks; `source_input.py` centralizes standalone-file and `.ssmdoc` source loading; and `document_workspace.py` delegates one stable `document-0001` CompileRequest to the existing batch persistence/report path. The CLI and public package API expose `compile-document` and `compile_ssmdoc()` without shadowing the in-memory `compile_document()` compiler.
+
+-
+-
+ <!-- archledger: no accepted records for this section yet -->
+
+ # Runtime View
+@@ -367,8 +363,6 @@ saved FlowPlan + explicit RenderProfile
+
+ The command projects the existing plan without compiling source or invoking a renderer. Profile identity is embedded in the variant path, and a mismatched or ambiguous profile snapshot is rejected; source files and the SSMDDoc manifest remain unchanged.
+
+-
+-
+ <!-- archledger: no accepted records for this section yet -->
+
+ # Deployment View
+@@ -399,8 +393,6 @@ or audio dependencies:
+
+ - **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes semantic plans and its report directly under `<workspace>/utterplan/`; `render-document` writes profile-specific artifacts directly under `<workspace>/renderplan/` without changing source files.
+
+-
+-
+ <!-- archledger: no accepted records for this section yet -->
+
+ # Cross-cutting Concepts
+@@ -483,8 +475,6 @@ semantic blockers. Blocked planning outcomes may be reviewed through the separat
+ `utterplan.planning-attempt.v1` inspect-only artifact; such candidates remain
+ drafts and never become canonical plans.
+
+-
+-
+ <!-- archledger: no accepted records for this section yet -->
+
+ # Architecture Decisions
+@@ -572,8 +562,6 @@ drafts and never become canonical plans.
+   batch and book reports retain every diagnostic; typed progress callbacks expose
+   long-running planning without changing the plan.
+
+-
+-
+ ## Quality Requirements Overview
+
+ <!-- archledger: no accepted records for this section yet -->
+diff --git a/docs/cli.md b/docs/cli.md
+index 5c8a3ae..c51712d 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -50,6 +50,18 @@ require `--force`. `--explain` formats the generated plan and replan decisions;
+ does not invoke planning a second time. `--json` emits a versioned JSON wrapper to
+ stdout while the RenderPlan artifact remains TOML at `--output`.
+
++## Logical roles and complete-profile coverage
++
++Role coverage is validated before grouping or replanning. The selected profile must contain every explicit speech role and, when any speech omits a role reference, its `default_role`. Missing roles are reported together as `renderplan.role.missing`; extra profile roles are allowed. The check is renderer-independent and does not add role data to the RenderPlan schema.
++
++Use source-only role inspection without loading a RenderProfile:
++
++```bash
++utterplan inspect chapter.utterplan.toml --roles
++```
++
++The human `render-plan` summary reports required roles and `coverage: complete`. With `--json`, the versioned CLI wrapper includes a `role_coverage` object (`default_role`, `required`, `available`, `missing`, and `uses_default_role`) alongside, but outside, the RenderPlan payload.
++
+ ## Input resolution
+
+ The rules are deterministic:
+@@ -151,6 +163,8 @@ utterplan render-document INPUT --profile PROFILE
+
+ By default it reads `<workspace>/utterplan/document.utterplan.toml` and writes a profile-fingerprinted variant under `<workspace>/renderplan/<label>--<profile-id-prefix>/`, containing `renderprofile.toml`, `document.renderplan.toml`, and `render-report.toml`. `--variant` changes only the readable label; the profile fingerprint remains part of the directory identity. A profile mismatch or ambiguous existing snapshot is rejected even with `--force`. This is a one-document projection, not a book-set workflow. See the [SSMDDoc guide](ssmdoc.md).
+
++The start summary also lists the document's required roles and coverage. Coverage is checked before a new variant directory, profile snapshot, or RenderPlan is written; a missing role leaves no partial variant.
++
+ ## Compile chapters from an SSMDBook workspace
+
+ `compile-book` discovers selected SSMD chapters from an editable `.ssmdbook` manifest and compiles each chapter independently through the batch compiler. Pass either the book directory or its canonical `chapters/` directory:
+@@ -197,8 +211,9 @@ utterplan render-book INPUT --profile PROFILE [--chapters SELECTOR]
+ `chapters/` directory. `--chapters` uses the same manifest `source_number`
+ selector as `compile-book`: `all` (default), one number, an inclusive range, or
+ comma-separated selections such as `1,3-5,9`. Chapters remain in manifest order.
+-`--profile` is required and is loaded once through the shared RenderPlan codec;
+-UtterPlan does not call VoiceRender or probe engines.
++`--profile` is required and is loaded once through the shared RenderPlan codec; UtterPlan does not call VoiceRender or probe engines.
++
++Before initializing a new variant, `render-book` checks role coverage across all readable selected chapter plans. A single incomplete chapter fails the projection with the missing role names and affected chapter IDs; no new profile snapshot or `renderplan-set.toml` is written. The start summary lists the aggregate required roles and complete coverage. Other missing/invalid source-plan behavior is unchanged.
+
+ Defaults and behavior:
+
+diff --git a/docs/python-api.md b/docs/python-api.md
+index 38c5a95..a2a8946 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -79,6 +79,29 @@ prior partitions and replaces only exact failed speech occurrences. Backend metr
+ remain diagnostics supplied by preflight; UtterPlan does not estimate them. Use
+ `utterplan render-plan --explain` to format the already-built decisions.
+
++### Inspect logical role coverage
++
++The public role-coverage helpers expose source inventory independently of projection or renderer bindings. `logical_role_inventory()` counts explicit role references and speech using the profile default; `profile_role_coverage()` compares those requirements with one complete RenderProfile, preserving first-occurrence order for required roles and deterministic sorting for available roles. The returned `LogicalRoleInventory` and `ProfileRoleCoverage` types separate source inventory from profile coverage. Both functions are available from the package root:
++
++```python
++from renderplan.codec import load_profile
++from utterplan import (
++    FlowPlan,
++    logical_role_inventory,
++    profile_role_coverage,
++    assert_profile_role_coverage,
++)
++
++source = FlowPlan.load("chapter.utterplan.toml")
++inventory = logical_role_inventory(source)
++profile = load_profile("cast.renderprofile.toml")
++coverage = assert_profile_role_coverage(source, profile)
++print(inventory.explicit_roles, inventory.explicit_occurrences)
++print(coverage.required_roles, coverage.available_roles, coverage.missing_roles)
++```
++
++Empty and audio-only segments do not require a role. `assert_profile_role_coverage()` raises the normal `renderplan.role.missing` projection error with all missing role names; `build_render_plan()` performs this check before grouping or replanning.
++
+ ## Persistable planning attempts
+
+ `compile_attempt` and `UtterancePlanner.compile_attempt` expose a finalized planning
+diff --git a/docs/ssmdbook.md b/docs/ssmdbook.md
+index a64813c..c34400c 100644
+--- a/docs/ssmdbook.md
++++ b/docs/ssmdbook.md
+@@ -102,6 +102,8 @@ utterplan render-book . --profile amy.renderprofile.toml --chapters 5-17
+ utterplan render-book . --profile joe.renderprofile.toml --chapters 5-17
+ ```
+
++One RenderProfile is the complete cast shared by every selected chapter, not a profile per character or role. Logical role names live in SSMD; the profile's role bindings can target different renderers. Before creating a new variant, `render-book` checks all readable selected UtterPlans together and reports every uncovered role with the affected chapter IDs. See the [README role example](../README.md#logical-roles-and-complete-renderprofiles).
++
+ The result has one shared semantic collection and distinct renderer-specific
+ variants, for example:
+
+diff --git a/docs/ssmdoc.md b/docs/ssmdoc.md
+index fe59efe..85e0160 100644
+--- a/docs/ssmdoc.md
++++ b/docs/ssmdoc.md
+@@ -72,3 +72,9 @@ utterplan render-document . --profile narration.renderprofile.toml
+ ```
+
+ This writes `renderplan/<label>--<profile-fingerprint>/renderprofile.toml`, `document.renderplan.toml`, and `render-report.toml` directly under the workspace. The printed exact variant can be passed to `voicerender render-document`. A document is never wrapped in a one-chapter book or a RenderPlanSet. Re-run `compile-document` and this projection after source edits; VoiceRender intentionally renders only the selected explicit RenderPlan.
++
++### Logical roles and profile coverage
++
++A source-level `voice` name such as `narrator`, `host`, or `guest` is a **logical role**; it does not name an engine voice. The selected RenderProfile's **role binding** supplies the concrete renderer configuration. Treat one RenderProfile as the complete cast for a rendering variant, including its default role and shared planning/pause policy. UtterPlan accepts exactly one profile for this projection; it does not accept one profile per role or discover engines.
++
++Use `utterplan inspect <plan> --roles` to see explicit speech-role counts and whether unqualified speech needs the selected profile's default. `render-document` reports required roles and complete coverage, and rejects any missing roles before creating a new variant directory. The same multi-role RenderProfile format and example are documented in the [README](../README.md#logical-roles-and-complete-renderprofiles).
+diff --git a/tests/test_book_api.py b/tests/test_book_api.py
+index 3f10e28..470b242 100644
+--- a/tests/test_book_api.py
++++ b/tests/test_book_api.py
+@@ -27,7 +27,7 @@ from utterplan import (
+     replan_book,
+ )
+ from utterplan.config import LinguisticsConfig, PlannerConfig
+-from utterplan.model import FlowPlan
++from utterplan.model import FlowPlan, FlowSegment, FlowUnit, SegmentDirectives, VoiceDirective
+
+
+ def _ssmd(text: str) -> str:
+@@ -481,3 +481,28 @@ def test_public_book_services_refuse_outputs_inside_source_chapters(tmp_path: Pa
+     with pytest.raises(BookServiceError, match="inside source chapters"):
+         render_book(root, profile=profile_path, output_root=root / "chapters" / "renderplans")
+     assert not (root / "chapters/renderplans").exists()
++
++
++def test_render_book_aggregates_missing_roles_before_variant_initialization(tmp_path: Path) -> None:
++    root = _book(tmp_path / "role-coverage.ssmdbook", (5, 6, 7))
++    utterplan_dir = root / "utterplan"
++    utterplan_dir.mkdir()
++    for number, role in ((5, None), (6, "host"), (7, "guest")):
++        text = f"Chapter {number}."
++        directives = (
++            SegmentDirectives(voice=VoiceDirective(reference=role)) if role else SegmentDirectives()
++        )
++        FlowPlan(
++            language="en-US",
++            flow=(FlowUnit((FlowSegment(text, "en-US", directives=directives),)),),
++        ).save(utterplan_dir / f"chapter-{number:04d}.utterplan.toml")
++    profile_path = root / "narration.renderprofile.toml"
++    _profile(profile_path)
++
++    with pytest.raises(BookServiceError) as raised:
++        render_book(root, profile=profile_path)
++
++    message = str(raised.value)
++    assert "host: chapter-0006" in message
++    assert "guest: chapter-0007" in message
++    assert not (root / "renderplan").exists()
+diff --git a/tests/test_cli_render_book.py b/tests/test_cli_render_book.py
+index 14ab465..a464780 100644
+--- a/tests/test_cli_render_book.py
++++ b/tests/test_cli_render_book.py
+@@ -16,7 +16,14 @@ from renderplan import (
+ )
+ from renderplan import codec as renderplan_codec
+
+-from utterplan import FlowPlan, FlowSegment, FlowUnit, TokenView
++from utterplan import (
++    FlowPlan,
++    FlowSegment,
++    FlowUnit,
++    SegmentDirectives,
++    TokenView,
++    VoiceDirective,
++)
+ from utterplan.cli import build_parser, main
+
+
+@@ -95,6 +102,32 @@ def _profile(path: Path, voice: str = "amy") -> RenderProfile:
+     return renderplan_codec.load_profile(path)
+
+
++def _write_role_plan(root: Path, chapter: int, role: str | None) -> None:
++    text = f"Chapter {chapter} {role or 'narration'}."
++    directives = (
++        SegmentDirectives(voice=VoiceDirective(reference=role)) if role else SegmentDirectives()
++    )
++    FlowPlan(
++        language="en-US",
++        flow=(FlowUnit((FlowSegment(text, "en-US", directives=directives),)),),
++    ).save(root / "utterplan" / f"chapter-{chapter:04d}.utterplan.toml")
++
++
++def _multi_role_profile(path: Path) -> RenderProfile:
++    profile = RenderProfile(
++        roles={
++            "narrator": RoleProfile(language="en-US", binding={"engine": "kokoro"}),
++            "host": RoleProfile(language="en-US", binding={"engine": "kitten"}),
++            "guest": RoleProfile(language="en-US", binding={"engine": "piper"}),
++        },
++        default_role="narrator",
++        planning=PlanningPolicy(split="sentence"),
++        pauses=PausePolicy(mode="manual"),
++    )
++    renderplan_codec.save_profile(profile, path)
++    return renderplan_codec.load_profile(path)
++
++
+ def _render(
+     root: Path,
+     profile_path: Path,
+@@ -208,6 +241,32 @@ def test_render_book_success_matches_single_file_projection(tmp_path: Path, caps
+     assert batch_plan.plan_id == single_plan.plan_id
+
+
++def test_render_book_reports_multi_role_coverage(tmp_path: Path, capsys) -> None:
++    root = _write_book(tmp_path / "multi-role.ssmdbook", (5, 6, 7))
++    _write_role_plan(root, 5, "host")
++    _write_role_plan(root, 6, "guest")
++    _write_role_plan(root, 7, None)
++    profile_path = root / "cast.renderprofile.toml"
++    profile = _multi_role_profile(profile_path)
++
++    assert _render(root, profile_path) == 0
++
++    output = capsys.readouterr().err
++    assert "roles:      host, guest, narrator" in output
++    assert "coverage:   complete" in output
++    variant = _variant(root, profile, label="cast")
++    collection = load_renderplan_set(variant / "renderplan-set.toml")
++    assert len(collection.chapters) == 3
++    plans = [
++        renderplan_codec.load_plan(variant / chapter.renderplan) for chapter in collection.chapters
++    ]
++    assert {speech.role for plan in plans for speech in plan.speech} == {
++        "host",
++        "guest",
++        "narrator",
++    }
++
++
+ def test_render_book_accumulates_successful_chapters_and_replaces_latest_report(
+     tmp_path: Path, capsys
+ ) -> None:
+diff --git a/tests/test_cli_render_document.py b/tests/test_cli_render_document.py
+index 2fc9c9e..7001907 100644
+--- a/tests/test_cli_render_document.py
++++ b/tests/test_cli_render_document.py
+@@ -9,7 +9,7 @@ from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
+ from renderplan import codec as renderplan_codec
+
+ from utterplan.cli import build_parser, main
+-from utterplan.model import FlowPlan
++from utterplan.model import FlowPlan, FlowSegment, FlowUnit, SegmentDirectives, VoiceDirective
+
+ FIXTURE = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
+ SSMD = '---\nssmd_version: "0.9"\nlanguage: en-US\n---\n\nHello there.\n'
+@@ -37,9 +37,7 @@ def _workspace(tmp_path: Path, *, compile_plan: bool = True) -> Path:
+ def _profile(path: Path, *, voice: str = "amy") -> RenderProfile:
+     profile = RenderProfile(
+         roles={
+-            "narrator": RoleProfile(
+-                language="en-US", binding={"engine": "test", "voice": voice}
+-            )
++            "narrator": RoleProfile(language="en-US", binding={"engine": "test", "voice": voice})
+         },
+         default_role="narrator",
+         planning=PlanningPolicy(split="sentence", capacity_fallback=("token",)),
+@@ -49,6 +47,50 @@ def _profile(path: Path, *, voice: str = "amy") -> RenderProfile:
+     return profile
+
+
++def _multi_role_plan() -> FlowPlan:
++    return FlowPlan(
++        language="en-US",
++        flow=(
++            FlowUnit(
++                (
++                    FlowSegment(
++                        "Host line.",
++                        "en-US",
++                        directives=SegmentDirectives(voice=VoiceDirective(reference="host")),
++                    ),
++                    FlowSegment(
++                        "Guest line.",
++                        "en-US",
++                        directives=SegmentDirectives(voice=VoiceDirective(reference="guest")),
++                    ),
++                    FlowSegment("Narration line.", "en-US"),
++                )
++            ),
++        ),
++    )
++
++
++def _multi_role_profile(path: Path, *, include_cast: bool) -> RenderProfile:
++    roles = {
++        "narrator": RoleProfile(language="en-US", binding={"engine": "test-narrator"}),
++    }
++    if include_cast:
++        roles.update(
++            {
++                "host": RoleProfile(language="en-US", binding={"engine": "test-host"}),
++                "guest": RoleProfile(language="en-US", binding={"engine": "test-guest"}),
++            }
++        )
++    profile = RenderProfile(
++        roles=roles,
++        default_role="narrator",
++        planning=PlanningPolicy(split="sentence"),
++        pauses=PausePolicy(mode="manual"),
++    )
++    renderplan_codec.save_profile(profile, path)
++    return profile
++
++
+ def _variant_dir(root: Path, profile_path: Path, *, label: str = "narration") -> Path:
+     profile = renderplan_codec.load_profile(profile_path)
+     profile_id = profile.profile_id or profile.computed_id()
+@@ -87,7 +129,10 @@ def test_render_document_writes_profile_specific_direct_variant_and_report(
+     plan = renderplan_codec.load_plan(renderplan_path)
+     plan.validate_against_profile(profile)
+     assert plan.source_plan_id == FlowPlan.load(source_plan).plan_id
+-    assert renderplan_codec.load_profile(snapshot_path).profile_id == renderplan_codec.load_profile(profile_path).profile_id
++    assert (
++        renderplan_codec.load_profile(snapshot_path).profile_id
++        == renderplan_codec.load_profile(profile_path).profile_id
++    )
+     report = tomlkit.parse(report_path.read_text(encoding="utf-8"))
+     assert report["format"] == "utterplan.render-document-report"
+     assert report["status"] == "ok"
+@@ -191,16 +236,19 @@ def test_custom_variant_and_output_root_keep_identity_fingerprint(
+     output_root = tmp_path / "custom-render-output"
+     report_path = tmp_path / "custom-render-report.toml"
+
+-    assert _render(
+-        root,
+-        profile_path,
+-        "--variant",
+-        "warm",
+-        "--output-root",
+-        str(output_root),
+-        "--report",
+-        str(report_path),
+-    ) == 0
++    assert (
++        _render(
++            root,
++            profile_path,
++            "--variant",
++            "warm",
++            "--output-root",
++            str(output_root),
++            "--report",
++            str(report_path),
++        )
++        == 0
++    )
+     capsys.readouterr()
+     profile_id = renderplan_codec.load_profile(profile_path).profile_id
+     assert profile_id is not None
+@@ -211,7 +259,10 @@ def test_custom_variant_and_output_root_keep_identity_fingerprint(
+     assert not (variant_dir / "render-report.toml").exists()
+     assert not (root / "renderplan").exists()
+
+-def test_unsafe_variant_labels_are_rejected(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
++
++def test_unsafe_variant_labels_are_rejected(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
+     root = _workspace(tmp_path)
+     profile_path = tmp_path / "narration.renderprofile.toml"
+     _profile(profile_path)
+@@ -241,13 +292,63 @@ def test_failed_projection_does_not_initialize_variant(
+     assert not (root / "renderplan").exists()
+
+
++def test_render_document_reports_complete_multi_role_coverage(tmp_path: Path, capsys) -> None:
++    root = _workspace(tmp_path)
++    source_plan = root / "utterplan" / "document.utterplan.toml"
++    _multi_role_plan().save(source_plan)
++    profile_path = tmp_path / "cast.renderprofile.toml"
++    _multi_role_profile(profile_path, include_cast=True)
++
++    assert _render(root, profile_path) == 0
++
++    output = capsys.readouterr().err
++    assert "roles:      host, guest, narrator" in output
++    assert "coverage:   complete" in output
++    renderplan_path = _variant_dir(root, profile_path, label="cast") / "document.renderplan.toml"
++    plan = renderplan_codec.load_plan(renderplan_path)
++    assert {speech.role for speech in plan.speech} == {"host", "guest", "narrator"}
++    assert {speech.binding["engine"] for speech in plan.speech} == {
++        "test-host",
++        "test-guest",
++        "test-narrator",
++    }
++
++
++def test_render_document_missing_role_fails_before_variant_creation(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    source_plan = root / "utterplan" / "document.utterplan.toml"
++    _multi_role_plan().save(source_plan)
++    profile_path = tmp_path / "partial.renderprofile.toml"
++    _multi_role_profile(profile_path, include_cast=False)
++
++    assert _render(root, profile_path) == 2
++
++    assert "host, guest" in capsys.readouterr().err
++    assert not (root / "renderplan").exists()
++
++
+ def test_render_document_parser_has_no_book_selection_options() -> None:
+     parser = build_parser()
+     with pytest.raises(SystemExit):
+         parser.parse_args(
+-            ["render-document", "story.ssmdoc", "--profile", "voice.renderprofile.toml", "--chapters", "1"]
++            [
++                "render-document",
++                "story.ssmdoc",
++                "--profile",
++                "voice.renderprofile.toml",
++                "--chapters",
++                "1",
++            ]
+         )
+     with pytest.raises(SystemExit):
+         parser.parse_args(
+-            ["render-document", "story.ssmdoc", "--profile", "voice.renderprofile.toml", "--fail-fast"]
++            [
++                "render-document",
++                "story.ssmdoc",
++                "--profile",
++                "voice.renderprofile.toml",
++                "--fail-fast",
++            ]
+         )
+diff --git a/tests/test_cli_ssmdoc.py b/tests/test_cli_ssmdoc.py
+index 183863c..1ab72d1 100644
+--- a/tests/test_cli_ssmdoc.py
++++ b/tests/test_cli_ssmdoc.py
+@@ -103,9 +103,7 @@ def test_compile_document_uses_dirty_current_content_without_refreshing_manifest
+
+     assert result == 0
+     capsys.readouterr()
+-    assert "Edited current content." in _plan_text(
+-        root / "utterplan/document.utterplan.toml"
+-    )
++    assert "Edited current content." in _plan_text(root / "utterplan/document.utterplan.toml")
+     assert manifest.read_bytes() == manifest_before
+     assert "Edited current content." in source.read_text(encoding="utf-8")
+
+@@ -123,6 +121,7 @@ def test_compile_document_missing_source_fails_before_output_creation(
+     assert "document is missing" in captured.err
+     assert not (root / "utterplan").exists()
+
++
+ def test_compile_document_invalid_workspace_fails_before_output_creation(
+     tmp_path: Path, capsys: pytest.CaptureFixture[str]
+ ) -> None:
+@@ -263,10 +262,17 @@ def test_compile_document_parser_exposes_only_single_document_options() -> None:
+
+
+ def test_render_document_parser_has_single_document_options() -> None:
+-    args = build_parser().parse_args([
+-        "render-document", "story.ssmdoc", "--profile", "voice.renderprofile.toml",
+-        "--variant", "narration", "--force",
+-    ])
++    args = build_parser().parse_args(
++        [
++            "render-document",
++            "story.ssmdoc",
++            "--profile",
++            "voice.renderprofile.toml",
++            "--variant",
++            "narration",
++            "--force",
++        ]
++    )
+     assert args.input == Path("story.ssmdoc")
+     assert args.profile == Path("voice.renderprofile.toml")
+     assert args.variant == "narration"
+diff --git a/tests/test_document_render.py b/tests/test_document_render.py
+index 59d6904..8461c18 100644
+--- a/tests/test_document_render.py
++++ b/tests/test_document_render.py
+@@ -9,7 +9,7 @@ from renderplan import codec as renderplan_codec
+
+ from utterplan.config import LinguisticsConfig, PlannerConfig
+ from utterplan.document_workspace import compile_ssmdoc, render_ssmdoc
+-from utterplan.model import FlowPlan
++from utterplan.model import FlowPlan, FlowSegment, FlowUnit, SegmentDirectives, VoiceDirective
+
+ FIXTURE = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
+
+@@ -18,15 +18,24 @@ def test_render_ssmdoc_projects_canonical_flowplan_without_book_index(tmp_path:
+     root = tmp_path / "story.ssmdoc"
+     shutil.copytree(FIXTURE, root)
+     source = root / "document.ssmd.md"
+-    source.write_text('---\nssmd_version: "0.9"\nlanguage: en-US\n---\nHello there.\n', encoding="utf-8")
+-    compile_ssmdoc(root, planner_config=PlannerConfig(
+-        language="en-US", text_preparation="identity",
+-        linguistics=LinguisticsConfig(use_spacy=False),
+-    ))
++    source.write_text(
++        '---\nssmd_version: "0.9"\nlanguage: en-US\n---\nHello there.\n', encoding="utf-8"
++    )
++    compile_ssmdoc(
++        root,
++        planner_config=PlannerConfig(
++            language="en-US",
++            text_preparation="identity",
++            linguistics=LinguisticsConfig(use_spacy=False),
++        ),
++    )
+     profile_path = tmp_path / "narration.renderprofile.toml"
+     profile = RenderProfile(
+-        roles={"narrator": RoleProfile(language="en-US", binding={"engine": "test", "voice": "amy"})},
+-        default_role="narrator", planning=PlanningPolicy(split="sentence", capacity_fallback=("token",)),
++        roles={
++            "narrator": RoleProfile(language="en-US", binding={"engine": "test", "voice": "amy"})
++        },
++        default_role="narrator",
++        planning=PlanningPolicy(split="sentence", capacity_fallback=("token",)),
+         pauses=PausePolicy(mode="manual", durations_ms={"sentence": 250}),
+     )
+     renderplan_codec.save_profile(profile, profile_path)
+@@ -44,4 +53,67 @@ def test_render_ssmdoc_projects_canonical_flowplan_without_book_index(tmp_path:
+     assert plan.render_profile_id == result.profile_id
+     assert not (result.variant_dir / "renderplan-set.toml").exists()
+     assert source.read_text(encoding="utf-8").startswith("---")
+-    assert json.loads((root / "manifest.json").read_text(encoding="utf-8"))["format"] == "ssmdconvert.document"
++    assert (
++        json.loads((root / "manifest.json").read_text(encoding="utf-8"))["format"]
++        == "ssmdconvert.document"
++    )
++
++
++def test_render_ssmdoc_returns_multi_role_coverage_and_bindings(tmp_path: Path) -> None:
++    root = tmp_path / "multi-role.ssmdoc"
++    shutil.copytree(FIXTURE, root)
++    (root / "document.ssmd.md").write_text(
++        '---\nssmd_version: "0.9"\nlanguage: en-US\n---\nHost, guest, and narrator.\n',
++        encoding="utf-8",
++    )
++    compile_ssmdoc(
++        root,
++        planner_config=PlannerConfig(
++            language="en-US",
++            text_preparation="identity",
++            linguistics=LinguisticsConfig(use_spacy=False),
++        ),
++    )
++    source_plan_path = root / "utterplan" / "document.utterplan.toml"
++    FlowPlan(
++        language="en-US",
++        flow=(
++            FlowUnit(
++                (
++                    FlowSegment(
++                        "Host.",
++                        "en-US",
++                        directives=SegmentDirectives(voice=VoiceDirective(reference="host")),
++                    ),
++                    FlowSegment(
++                        "Guest.",
++                        "en-US",
++                        directives=SegmentDirectives(voice=VoiceDirective(reference="guest")),
++                    ),
++                    FlowSegment("Narrator.", "en-US"),
++                )
++            ),
++        ),
++    ).save(source_plan_path)
++
++    profile_path = tmp_path / "multi-role.renderprofile.toml"
++    profile = RenderProfile(
++        roles={
++            "narrator": RoleProfile(language="en-US", binding={"engine": "kokoro"}),
++            "host": RoleProfile(language="en-US", binding={"engine": "kitten"}),
++            "guest": RoleProfile(language="en-US", binding={"engine": "piper"}),
++        },
++        default_role="narrator",
++        planning=PlanningPolicy(split="sentence"),
++        pauses=PausePolicy(mode="manual"),
++    )
++    renderplan_codec.save_profile(profile, profile_path)
++
++    result = render_ssmdoc(root, profile=profile_path)
++
++    assert result.required_roles == ("host", "guest", "narrator")
++    assert result.available_roles == ("guest", "host", "narrator")
++    assert result.uses_default_role is True
++    plan = renderplan_codec.load_plan(result.renderplan_path)
++    assert {speech.role for speech in plan.speech} == {"host", "guest", "narrator"}
++    assert {speech.binding["engine"] for speech in plan.speech} == {"kokoro", "kitten", "piper"}
+diff --git a/tests/test_document_workspace.py b/tests/test_document_workspace.py
+index 371eb42..4c64bdf 100644
+--- a/tests/test_document_workspace.py
++++ b/tests/test_document_workspace.py
+@@ -116,6 +116,7 @@ def test_missing_document_fails_before_creating_derived_outputs(tmp_path: Path)
+
+     assert not (root / "utterplan").exists()
+
++
+ def test_invalid_ssmd_is_a_reported_compile_failure_without_plan(tmp_path: Path) -> None:
+     root = _workspace(tmp_path)
+     source = root / "document.ssmd.md"
+diff --git a/tests/test_renderplan_export.py b/tests/test_renderplan_export.py
+index 225bd5a..06bdaf0 100644
+--- a/tests/test_renderplan_export.py
++++ b/tests/test_renderplan_export.py
+@@ -20,7 +20,9 @@ from utterplan import (
+     FlowUnit,
+     LinguisticsConfig,
+     PlannerConfig,
++    SegmentDirectives,
+     TokenView,
++    VoiceDirective,
+     build_render_plan,
+     compile_document,
+ )
+@@ -262,3 +264,134 @@ def test_render_plan_cli_requires_previous_and_preflight_as_a_pair(tmp_path: Pat
+
+     assert result == 2
+     assert "--previous and --preflight must be supplied together" in capsys.readouterr().err
++
++
++def _multi_role_source() -> FlowPlan:
++    return FlowPlan(
++        language="en-US",
++        flow=(
++            FlowUnit(
++                (
++                    FlowSegment(
++                        "Host line.",
++                        "en-US",
++                        directives=SegmentDirectives(voice=VoiceDirective(reference="host")),
++                    ),
++                    FlowSegment(
++                        "Guest line.",
++                        "en-US",
++                        directives=SegmentDirectives(voice=VoiceDirective(reference="guest")),
++                    ),
++                    FlowSegment("Narration line.", "en-US"),
++                )
++            ),
++        ),
++    )
++
++
++def _multi_role_profile(*, include_cast: bool = True) -> RenderProfile:
++    roles = {
++        "narrator": RoleProfile(language="en-US", binding={"renderer": "kokoro"}),
++    }
++    if include_cast:
++        roles.update(
++            {
++                "host": RoleProfile(language="en-US", binding={"renderer": "kitten"}),
++                "guest": RoleProfile(language="en-US", binding={"renderer": "piper"}),
++            }
++        )
++    return RenderProfile(
++        roles=roles,
++        default_role="narrator",
++        planning=PlanningPolicy(split="sentence"),
++        pauses=PausePolicy(mode="manual"),
++    )
++
++
++def test_render_plan_json_reports_role_coverage_metadata(tmp_path: Path, capsys) -> None:
++    source_path = tmp_path / "roles.utterplan.toml"
++    profile_path = tmp_path / "cast.renderprofile.toml"
++    output_path = tmp_path / "roles.renderplan.toml"
++    _multi_role_source().save(source_path)
++    renderplan_codec.save_profile(_multi_role_profile(), profile_path)
++
++    assert (
++        main(
++            [
++                "render-plan",
++                str(source_path),
++                "--profile",
++                str(profile_path),
++                "--output",
++                str(output_path),
++                "--json",
++            ]
++        )
++        == 0
++    )
++
++    payload = json.loads(capsys.readouterr().out)
++    assert payload["role_coverage"] == {
++        "default_role": "narrator",
++        "required": ["host", "guest", "narrator"],
++        "available": ["guest", "host", "narrator"],
++        "missing": [],
++        "uses_default_role": True,
++    }
++    assert output_path.is_file()
++
++    human_output_path = tmp_path / "roles-human.renderplan.toml"
++    assert (
++        main(
++            [
++                "render-plan",
++                str(source_path),
++                "--profile",
++                str(profile_path),
++                "--output",
++                str(human_output_path),
++            ]
++        )
++        == 0
++    )
++    human_output = capsys.readouterr()
++    assert "roles: host, guest, narrator" in human_output.err
++    assert "coverage: complete" in human_output.err
++    assert f"wrote {human_output_path}" in human_output.err
++
++
++def test_render_plan_missing_roles_fail_before_output_creation(tmp_path: Path, capsys) -> None:
++    source_path = tmp_path / "roles.utterplan.toml"
++    profile_path = tmp_path / "partial.renderprofile.toml"
++    output_path = tmp_path / "must-not-exist.renderplan.toml"
++    _multi_role_source().save(source_path)
++    renderplan_codec.save_profile(_multi_role_profile(include_cast=False), profile_path)
++
++    assert (
++        main(
++            [
++                "render-plan",
++                str(source_path),
++                "--profile",
++                str(profile_path),
++                "--output",
++                str(output_path),
++            ]
++        )
++        == 1
++    )
++
++    assert "host, guest" in capsys.readouterr().err
++    assert not output_path.exists()
++
++
++def test_inspect_roles_reports_source_inventory_without_profile(tmp_path: Path, capsys) -> None:
++    source_path = tmp_path / "roles.utterplan.toml"
++    _multi_role_source().save(source_path)
++
++    assert main(["inspect", str(source_path), "--roles"]) == 0
++
++    output = capsys.readouterr().out
++    assert "host  1 speech segments" in output
++    assert "guest  1 speech segments" in output
++    assert "required by 1 speech segments" in output
+diff --git a/tests/test_role_coverage.py b/tests/test_role_coverage.py
+new file mode 100644
+index 0000000..63246fb
+--- /dev/null
++++ b/tests/test_role_coverage.py
+@@ -0,0 +1,126 @@
++from __future__ import annotations
++
++import pytest
++from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
++
++from utterplan import (
++    AudioDirective,
++    FlowPlan,
++    FlowSegment,
++    FlowUnit,
++    SegmentDirectives,
++    VoiceDirective,
++    assert_profile_role_coverage,
++    logical_role_inventory,
++    profile_role_coverage,
++)
++from utterplan.renderplan_projection import RenderPlanProjectionError
++
++
++def _plan(*segments: FlowSegment) -> FlowPlan:
++    return FlowPlan(language="en-US", flow=(FlowUnit(tuple(segments)),))
++
++
++def _profile(roles: dict[str, RoleProfile], *, default_role: str = "narrator") -> RenderProfile:
++    return RenderProfile(
++        roles=roles,
++        default_role=default_role,
++        planning=PlanningPolicy(split="sentence"),
++        pauses=PausePolicy(mode="manual"),
++    )
++
++
++def _role(reference: str) -> SegmentDirectives:
++    return SegmentDirectives(voice=VoiceDirective(reference=reference))
++
++
++def test_inventory_counts_explicit_roles_in_first_occurrence_order_and_skips_non_speech() -> None:
++    plan = _plan(
++        FlowSegment("Narration.", "en-US", directives=_role("narrator")),
++        FlowSegment("Host.", "en-US", directives=_role("host")),
++        FlowSegment("Guest.", "en-US", directives=_role("guest")),
++        FlowSegment("Host again.", "en-US", directives=_role("host")),
++        FlowSegment("Default.", "en-US"),
++        FlowSegment("", "en-US", directives=_role("empty")),
++        FlowSegment(
++            "audio alternative",
++            "en-US",
++            directives=SegmentDirectives(audio=AudioDirective(src="music.wav")),
++        ),
++    )
++
++    inventory = logical_role_inventory(plan)
++
++    assert inventory.explicit_roles == ("narrator", "host", "guest")
++    assert dict(inventory.explicit_occurrences) == {"narrator": 1, "host": 2, "guest": 1}
++    assert inventory.uses_default_role is True
++    assert inventory.implicit_occurrences == 1
++
++
++def test_profile_coverage_uses_first_occurrence_and_default_role_and_allows_extra_roles() -> None:
++    plan = _plan(
++        FlowSegment("Host.", "en-US", directives=_role("host")),
++        FlowSegment("Guest.", "en-US", directives=_role("guest")),
++        FlowSegment("Narration.", "en-US"),
++    )
++    profile = _profile(
++        {
++            "narrator": RoleProfile(language="en-US", binding={"renderer": "kokoro"}),
++            "host": RoleProfile(language="en-US", binding={"renderer": "kitten"}),
++            "guest": RoleProfile(language="en-US", binding={"renderer": "piper"}),
++            "unused": RoleProfile(language="en-US", binding={"renderer": "other"}),
++        }
++    )
++
++    coverage = assert_profile_role_coverage(plan, profile)
++
++    assert coverage.default_role == "narrator"
++    assert coverage.explicit_roles == ("host", "guest")
++    assert coverage.required_roles == ("host", "guest", "narrator")
++    assert coverage.available_roles == ("guest", "host", "narrator", "unused")
++    assert coverage.missing_roles == ()
++    assert coverage.uses_default_role is True
++
++
++def test_explicit_roles_do_not_require_unused_profile_default() -> None:
++    plan = _plan(
++        FlowSegment("Host.", "en-US", directives=_role("host")),
++        FlowSegment("Guest.", "en-US", directives=_role("guest")),
++    )
++    profile = _profile(
++        {
++            "narrator": RoleProfile(language="en-US", binding={"renderer": "kokoro"}),
++            "host": RoleProfile(language="en-US", binding={"renderer": "kitten"}),
++            "guest": RoleProfile(language="en-US", binding={"renderer": "piper"}),
++        }
++    )
++
++    coverage = profile_role_coverage(plan, profile)
++
++    assert coverage.required_roles == ("host", "guest")
++    assert coverage.available_roles == ("guest", "host", "narrator")
++    assert coverage.missing_roles == ()
++    assert coverage.uses_default_role is False
++
++
++def test_missing_explicit_roles_are_aggregated_in_one_error() -> None:
++    plan = _plan(
++        FlowSegment("Guest.", "en-US", directives=_role("guest")),
++        FlowSegment("Host.", "en-US", directives=_role("host")),
++        FlowSegment("Default.", "en-US"),
++    )
++    profile = _profile(
++        {
++            "narrator": RoleProfile(language="en-US", binding={"renderer": "fixture"}),
++            "extra": RoleProfile(language="en-US", binding={"renderer": "fixture"}),
++        }
++    )
++
++    coverage = profile_role_coverage(plan, profile)
++    with pytest.raises(RenderPlanProjectionError) as raised:
++        assert_profile_role_coverage(plan, profile)
++
++    assert coverage.required_roles == ("guest", "host", "narrator")
++    assert coverage.missing_roles == ("guest", "host")
++    assert raised.value.code == "renderplan.role.missing"
++    assert "guest, host" in str(raised.value)
+diff --git a/tests/test_ssmdoc.py b/tests/test_ssmdoc.py
+index 1886a9a..2d4ce07 100644
+--- a/tests/test_ssmdoc.py
++++ b/tests/test_ssmdoc.py
+@@ -77,7 +77,6 @@ def test_resolves_ssmdoc_root_and_canonical_document_file(tmp_path: Path) -> Non
+     assert load_ssmdoc_index(root / "document.ssmd.md").root == root.resolve()
+
+
+-
+ def test_supports_manifest_declared_nested_source_and_optional_fields(tmp_path: Path) -> None:
+     root = tmp_path / "workspace"
+     source = root / "content" / "document.ssmd.md"
+@@ -259,6 +258,7 @@ def test_rejects_missing_manifest_referenced_document(tmp_path: Path) -> None:
+     with pytest.raises(SSMDDocError, match="document is missing"):
+         ssmdoc_document_path(load_ssmdoc_index(root))
+
++
+ def test_rejects_existing_non_file_document(tmp_path: Path) -> None:
+     root = tmp_path / "directory-document"
+     _write_manifest(root, _manifest())
+diff --git a/utterplan/__init__.py b/utterplan/__init__.py
+index c982ca1..edcfa28 100644
+--- a/utterplan/__init__.py
++++ b/utterplan/__init__.py
+@@ -127,6 +127,13 @@ from .renderability import (
+     preflight_renderability,
+ )
+ from .renderplan_export import build_render_plan
++from .role_coverage import (
++    LogicalRoleInventory,
++    ProfileRoleCoverage,
++    assert_profile_role_coverage,
++    logical_role_inventory,
++    profile_role_coverage,
++)
+ from .versioning import (
+     CURRENT_SCHEMA_VERSION,
+     FORMAT,
+@@ -266,4 +273,9 @@ __all__ = [
+     "MigrationResult",
+     "MigrationStep",
+     "migrate_plan_data",
++    "LogicalRoleInventory",
++    "ProfileRoleCoverage",
++    "logical_role_inventory",
++    "profile_role_coverage",
++    "assert_profile_role_coverage",
+ ]
+diff --git a/utterplan/book.py b/utterplan/book.py
+index 6f36905..2146b4a 100644
+--- a/utterplan/book.py
++++ b/utterplan/book.py
+@@ -26,6 +26,7 @@ from .batch import BatchProgressCallback, CompileOutcome, CompileRequest, compil
+ from .config import PlannerConfig
+ from .model import FlowPlan
+ from .renderplan_batch import RenderOutcome, RenderRequest, new_renderplan_set, render_to_files
++from .role_coverage import profile_role_coverage
+ from .ssmdbook import (
+     SSMDBookError,
+     load_ssmdbook_index,
+@@ -88,6 +89,10 @@ class BookRenderStart:
+     utterplan_dir: Path
+     selected_chapter_ids: tuple[str, ...]
+
++    required_roles: tuple[str, ...] = ()
++    available_roles: tuple[str, ...] = ()
++    uses_default_role: bool = False
++
+
+ @dataclass(frozen=True, slots=True)
+ class BookCompileResult:
+@@ -450,10 +455,28 @@ def render_book(
+             label, profile_id, profile_path, index.root, utterplan_dir, variant_dir, manifest_path
+         )
+
+-    # Validate existing source plans before creating collection state.
+-    for source_plan_path in source_plans:
++    # Validate readable source plans and aggregate role coverage before creating collection state.
++    required_roles_in_order: list[str] = []
++    missing_roles_by_chapter: dict[str, list[str]] = {}
++    uses_default_role = False
++    for chapter, source_plan_path in zip(chapters_selected, source_plans, strict=True):
+         if source_plan_path.is_file():
+-            FlowPlan.load(source_plan_path)
++            source_plan = FlowPlan.load(source_plan_path)
++            coverage = profile_role_coverage(source_plan, active_profile)
++            uses_default_role = uses_default_role or coverage.uses_default_role
++            for role in coverage.required_roles:
++                if role not in required_roles_in_order:
++                    required_roles_in_order.append(role)
++            for role in coverage.missing_roles:
++                missing_roles_by_chapter.setdefault(role, []).append(chapter.id)
++    if missing_roles_by_chapter:
++        details = "\n".join(
++            f"  {role}: {', '.join(chapter_ids)}"
++            for role, chapter_ids in missing_roles_by_chapter.items()
++        )
++        raise BookServiceError("RenderProfile does not cover selected book roles:\n" + details)
++    required_roles = tuple(required_roles_in_order)
++    available_roles = tuple(sorted(active_profile.roles))
+     if not variant_dir.exists():
+         try:
+             variant_dir.mkdir(parents=True)
+@@ -481,6 +504,9 @@ def render_book(
+                 variant_dir=variant_dir,
+                 utterplan_dir=utterplan_dir,
+                 selected_chapter_ids=tuple(chapter.id for chapter in chapters_selected),
++                required_roles=required_roles,
++                available_roles=available_roles,
++                uses_default_role=uses_default_role,
+             )
+         )
+
+@@ -542,8 +568,6 @@ def _new_book_renderplan_set(
+     )
+
+
+-
+-
+ def _path_is_within(path: Path, parent: Path) -> bool:
+     try:
+         path.relative_to(parent)
+@@ -563,6 +587,7 @@ def _render_variant_label(profile_path: Path, override: str | None) -> str:
+
+     return render_variant_label(profile_path, override)
+
++
+ __all__ = [
+     "BookCompileRequest",
+     "BookCompileResult",
+diff --git a/utterplan/cli.py b/utterplan/cli.py
+index ff44ef2..355f955 100644
+--- a/utterplan/cli.py
++++ b/utterplan/cli.py
+@@ -41,6 +41,7 @@ from .preview import PreviewChunk, preview_plan
+ from .renderability import format_renderability_error
+ from .renderplan_batch import RenderOutcome
+ from .renderplan_export import build_render_plan, format_render_plan_explanation
++from .role_coverage import logical_role_inventory, profile_role_coverage
+ from .source_input import _format_for_path as _format_source_path
+ from .source_input import load_source_path
+ from .trace_codec import loads_trace
+@@ -377,9 +378,12 @@ def build_parser() -> argparse.ArgumentParser:
+     render_document_parser.add_argument(
+         "input", type=Path, help="SSMDoc workspace root or its manifest-declared source file"
+     )
+-    render_document_parser.add_argument("--profile", type=Path, required=True, help="RenderProfile TOML file")
+     render_document_parser.add_argument(
+-        "--variant", help="safe human-readable variant label; profile fingerprint is always appended"
++        "--profile", type=Path, required=True, help="RenderProfile TOML file"
++    )
++    render_document_parser.add_argument(
++        "--variant",
++        help="safe human-readable variant label; profile fingerprint is always appended",
+     )
+     render_document_parser.add_argument(
+         "--utterplan-dir", type=Path, help="directory containing the saved document UtterPlan"
+@@ -388,7 +392,9 @@ def build_parser() -> argparse.ArgumentParser:
+         "--output-root", type=Path, help="RenderPlan variant root (default: <workspace>/renderplan)"
+     )
+     render_document_parser.add_argument("--report", type=Path, help="TOML operational report path")
+-    render_document_parser.add_argument("--force", action="store_true", help="replace the existing RenderPlan")
++    render_document_parser.add_argument(
++        "--force", action="store_true", help="replace the existing RenderPlan"
++    )
+     render_book_parser = commands.add_parser(
+         "render-book",
+         help="project selected SSMDBook UtterPlans into a profile-specific RenderPlan set",
+@@ -485,6 +491,11 @@ def build_parser() -> argparse.ArgumentParser:
+     inspect_parser.add_argument("--warnings", action="store_true")
+     inspect_parser.add_argument("--boundaries", action="store_true")
+     inspect_parser.add_argument("--tokens", action="store_true")
++    inspect_parser.add_argument(
++        "--roles",
++        action="store_true",
++        help="show logical voice roles referenced by speech segments",
++    )
+     inspect_parser.add_argument(
+         "--semantic-boundaries",
+         action="store_true",
+@@ -600,8 +611,6 @@ def _linguistics_config(policy: str) -> LinguisticsConfig:
+     )
+
+
+-
+-
+ def _planner_config_from_batch_args(args: argparse.Namespace) -> PlannerConfig:
+     return PlannerConfig(
+         language=args.language or "en-US",
+@@ -920,13 +929,23 @@ def _render_document(args: argparse.Namespace) -> int:
+         print(f"  document:   {info.document_id}", file=sys.stderr)
+         print(f"  profile:    {info.profile_path}", file=sys.stderr)
+         print(f"  profile-id: {info.profile_id}", file=sys.stderr)
++        print(f"  roles:      {', '.join(info.required_roles) or 'none'}", file=sys.stderr)
++        print("  coverage:   complete", file=sys.stderr)
+         print(f"  variant:    {info.variant}", file=sys.stderr)
+         print(f"  renderplan: {info.output_path}", file=sys.stderr)
+         print(f"  report:     {info.report_path}", file=sys.stderr)
++
+     try:
+-        _render_ssmdoc_service(args.input, profile=args.profile, variant=args.variant,
+-            utterplan_dir=args.utterplan_dir, output_root=args.output_root, report=args.report,
+-            force=args.force, on_start=start)
++        _render_ssmdoc_service(
++            args.input,
++            profile=args.profile,
++            variant=args.variant,
++            utterplan_dir=args.utterplan_dir,
++            output_root=args.output_root,
++            report=args.report,
++            force=args.force,
++            on_start=start,
++        )
+     except DocumentWorkspaceServiceError as exc:
+         raise _CliUsageError(str(exc)) from exc
+     return 0
+@@ -945,6 +964,8 @@ def _render_book(args: argparse.Namespace) -> int:
+         print(f"  selected:   {len(selected_ids)}", file=sys.stderr)
+         print(f"  profile:    {progress.profile_path}", file=sys.stderr)
+         print(f"  profile-id: {progress.profile_id}", file=sys.stderr)
++        print(f"  roles:      {', '.join(progress.required_roles) or 'none'}", file=sys.stderr)
++        print("  coverage:   complete", file=sys.stderr)
+         print(f"  variant:    {progress.variant}", file=sys.stderr)
+         print(f"  utterplans: {progress.utterplan_dir}", file=sys.stderr)
+         print(f"  output:     {progress.variant_dir}", file=sys.stderr)
+@@ -1371,6 +1392,7 @@ def _render_plan_command(args: argparse.Namespace) -> int:
+
+     source = _load_plan_file(args.input)
+     profile = renderplan_codec.load_profile(args.profile)
++    coverage = profile_role_coverage(source, profile)
+     previous = renderplan_codec.load_plan(args.previous) if args.previous is not None else None
+     preflight = (
+         renderplan_codec.load_preflight(args.preflight) if args.preflight is not None else None
+@@ -1393,15 +1415,25 @@ def _render_plan_command(args: argparse.Namespace) -> int:
+             "format": "utterplan-render-plan",
+             "version": 1,
+             "output": str(args.output),
++            "role_coverage": {
++                "default_role": coverage.default_role,
++                "required": list(coverage.required_roles),
++                "available": list(coverage.available_roles),
++                "missing": list(coverage.missing_roles),
++                "uses_default_role": coverage.uses_default_role,
++            },
+             "plan": renderplan_codec.plan_to_dict(plan),
+         }
+         if explanation is not None:
+             payload["explanation"] = explanation
+         print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+-    elif explanation is not None:
+-        print(explanation, end="")
+     else:
+-        print(f"wrote {args.output}", file=sys.stderr)
++        print(f"roles: {', '.join(coverage.required_roles) or 'none'}", file=sys.stderr)
++        print("coverage: complete", file=sys.stderr)
++        if explanation is not None:
++            print(explanation, end="")
++        else:
++            print(f"wrote {args.output}", file=sys.stderr)
+     return 0
+
+
+@@ -1591,6 +1623,20 @@ def _inspect(plan: FlowPlan, args: argparse.Namespace) -> None:
+     print(f"Linguistic provenance: {len(plan.linguistics)}")
+     print(f"Warnings: {len(plan.warnings)}")
+
++    if args.roles:
++        inventory = logical_role_inventory(plan)
++        print("\nLogical voice roles")
++        print("  explicit:")
++        if inventory.explicit_occurrences:
++            for role, count in inventory.explicit_occurrences.items():
++                print(f"    {role}  {count} speech segments")
++        else:
++            print("    None.")
++        print("  default role:")
++        if inventory.uses_default_role:
++            print(f"    required by {inventory.implicit_occurrences} speech segments")
++        else:
++            print("    not required")
+     if args.warnings:
+         if not plan.warnings:
+             print("No warnings.")
+diff --git a/utterplan/document_workspace.py b/utterplan/document_workspace.py
+index a07e4e6..792833a 100644
+--- a/utterplan/document_workspace.py
++++ b/utterplan/document_workspace.py
+@@ -16,6 +16,7 @@ from .config import PlannerConfig
+ from .model import FlowPlan
+ from .renderplan_export import build_render_plan
+ from .renderplan_workspace import profile_fingerprint, render_variant_label
++from .role_coverage import assert_profile_role_coverage
+ from .ssmdoc import SSMDDocError, load_ssmdoc_index, ssmdoc_document_path
+ from .workspace_paths import renderplan_output_name, utterplan_output_name
+
+@@ -188,6 +189,9 @@ class DocumentRenderStart:
+     variant_dir: Path
+     output_path: Path
+     report_path: Path
++    required_roles: tuple[str, ...] = ()
++    available_roles: tuple[str, ...] = ()
++    uses_default_role: bool = False
+
+
+ @dataclass(frozen=True, slots=True)
+@@ -205,6 +209,10 @@ class DocumentRenderResult:
+     render_plan_id: str
+     report_path: Path
+
++    required_roles: tuple[str, ...] = ()
++    available_roles: tuple[str, ...] = ()
++    uses_default_role: bool = False
++
+
+ DocumentRenderStartCallback = Callable[[DocumentRenderStart], None]
+
+@@ -246,6 +254,7 @@ def render_ssmdoc(
+
+         profile_path = Path(profile).expanduser().resolve(strict=True)
+         active_profile = renderplan_codec.load_profile(profile_path)
++        coverage = assert_profile_role_coverage(source_plan, active_profile)
+         profile_id = active_profile.profile_id or active_profile.computed_id()
+         variant_name = (
+             f"{render_variant_label(profile_path, variant)}--{profile_fingerprint(profile_id)}"
+@@ -347,6 +356,9 @@ def render_ssmdoc(
+                     variant_dir,
+                     renderplan_path,
+                     report_path,
++                    coverage.required_roles,
++                    coverage.available_roles,
++                    coverage.uses_default_role,
+                 )
+             )
+
+@@ -382,6 +394,9 @@ def render_ssmdoc(
+             renderplan_path,
+             plan.plan_id,
+             report_path,
++            coverage.required_roles,
++            coverage.available_roles,
++            coverage.uses_default_role,
+         )
+     except (SSMDDocError, OSError, RuntimeError, ValueError, TypeError) as exc:
+         if isinstance(exc, DocumentWorkspaceServiceError):
+@@ -422,7 +437,9 @@ def _preflight_outputs(
+             raise DocumentWorkspaceServiceError(
+                 f"document output path collides with output directory: {output}"
+             )
+-        if any(output == protected or protected in output.parents for protected in protected_inputs):
++        if any(
++            output == protected or protected in output.parents for protected in protected_inputs
++        ):
+             raise DocumentWorkspaceServiceError(
+                 f"document output would overwrite source workspace content: {output}"
+             )
+@@ -432,6 +449,7 @@ def _preflight_outputs(
+                 f"document output path is a directory when a file is expected: {output_path}"
+             )
+
++
+ __all__ = [
+     "DocumentCompileRequest",
+     "DocumentCompileResult",
+diff --git a/utterplan/renderplan_export.py b/utterplan/renderplan_export.py
+index 8351881..3bce5c3 100644
+--- a/utterplan/renderplan_export.py
++++ b/utterplan/renderplan_export.py
+@@ -20,6 +20,7 @@ from .model import FlowPlan
+ from .renderplan_grouping import group_initial_plan
+ from .renderplan_projection import RenderPlanProjectionError, build_source_index
+ from .renderplan_replan import replan_flow
++from .role_coverage import assert_profile_role_coverage
+
+
+ def build_render_plan(
+@@ -30,18 +31,18 @@ def build_render_plan(
+     preflight: PreflightReport | None = None,
+ ) -> RenderPlan:
+     """Project a schema-v7 FlowPlan or refine its matching prior RenderPlan."""
+-    index = build_source_index(utterplan)
+     if not isinstance(profile, RenderProfile):
+         raise RenderPlanProjectionError(
+             "RenderPlan construction requires a RenderProfile",
+             code="renderplan.profile.type",
+         )
++    index = build_source_index(utterplan)
+     if (previous_plan is None) != (preflight is None):
+         raise RenderPlanProjectionError(
+             "replanning requires both previous_plan and preflight; omit both for an initial build",
+             code="renderplan.replan.inputs",
+         )
+-
++    assert_profile_role_coverage(utterplan, profile)
+     profile_id = profile.profile_id or profile.computed_id()
+     if previous_plan is None:
+         flow = group_initial_plan(index, profile)
+diff --git a/utterplan/renderplan_workspace.py b/utterplan/renderplan_workspace.py
+index 44a7096..48fbea4 100644
+--- a/utterplan/renderplan_workspace.py
++++ b/utterplan/renderplan_workspace.py
+@@ -1,4 +1,5 @@
+ """Shared profile variant naming for workspace RenderPlan projections."""
++
+ from __future__ import annotations
+
+ import re
+diff --git a/utterplan/role_coverage.py b/utterplan/role_coverage.py
+new file mode 100644
+index 0000000..f0b98f9
+--- /dev/null
++++ b/utterplan/role_coverage.py
+@@ -0,0 +1,99 @@
++"""Renderer-independent logical voice-role inventory and profile coverage."""
++
++from __future__ import annotations
++
++from collections.abc import Mapping
++from dataclasses import dataclass
++from types import MappingProxyType
++
++from renderplan import RenderProfile
++
++from .model import FlowPlan
++from .renderplan_projection import RenderPlanProjectionError
++
++
++@dataclass(frozen=True, slots=True)
++class LogicalRoleInventory:
++    """Logical roles explicitly used by speech and speech using the profile default."""
++
++    explicit_roles: tuple[str, ...]
++    uses_default_role: bool
++    explicit_occurrences: Mapping[str, int]
++    implicit_occurrences: int
++
++
++@dataclass(frozen=True, slots=True)
++class ProfileRoleCoverage:
++    """Required logical roles compared with the roles in one RenderProfile."""
++
++    default_role: str
++    required_roles: tuple[str, ...]
++    available_roles: tuple[str, ...]
++    missing_roles: tuple[str, ...]
++    explicit_roles: tuple[str, ...]
++    uses_default_role: bool
++
++
++def logical_role_inventory(plan: FlowPlan) -> LogicalRoleInventory:
++    """Inspect speech segments in source order without resolving any concrete voices."""
++    occurrences: dict[str, int] = {}
++    implicit_occurrences = 0
++
++    for unit in plan.flow:
++        for segment in unit.segments:
++            if not segment.text or segment.directives.audio is not None:
++                continue
++            voice = segment.directives.voice
++            role = voice.reference if voice is not None else None
++            if role:
++                occurrences[role] = occurrences.get(role, 0) + 1
++            else:
++                implicit_occurrences += 1
++
++    return LogicalRoleInventory(
++        explicit_roles=tuple(occurrences),
++        uses_default_role=implicit_occurrences > 0,
++        explicit_occurrences=MappingProxyType(occurrences),
++        implicit_occurrences=implicit_occurrences,
++    )
++
++
++def profile_role_coverage(plan: FlowPlan, profile: RenderProfile) -> ProfileRoleCoverage:
++    """Return deterministic required/available/missing roles for a source and profile."""
++    inventory = logical_role_inventory(plan)
++    required = list(inventory.explicit_roles)
++    if inventory.uses_default_role and profile.default_role not in required:
++        required.append(profile.default_role)
++
++    available = tuple(sorted(profile.roles))
++    available_set = set(available)
++    required_roles = tuple(required)
++    return ProfileRoleCoverage(
++        default_role=profile.default_role,
++        required_roles=required_roles,
++        available_roles=available,
++        missing_roles=tuple(role for role in required_roles if role not in available_set),
++        explicit_roles=inventory.explicit_roles,
++        uses_default_role=inventory.uses_default_role,
++    )
++
++
++def assert_profile_role_coverage(plan: FlowPlan, profile: RenderProfile) -> ProfileRoleCoverage:
++    """Return complete profile coverage or raise one aggregate projection error."""
++    coverage = profile_role_coverage(plan, profile)
++    if coverage.missing_roles:
++        raise RenderPlanProjectionError(
++            "RenderProfile does not cover logical voice roles: "
++            + ", ".join(coverage.missing_roles),
++            code="renderplan.role.missing",
++        )
++    return coverage
++
++
++__all__ = [
++    "LogicalRoleInventory",
++    "ProfileRoleCoverage",
++    "assert_profile_role_coverage",
++    "logical_role_inventory",
++    "profile_role_coverage",
++]
+diff --git a/utterplan/ssmdoc.py b/utterplan/ssmdoc.py
+index bdee071..50321a5 100644
+--- a/utterplan/ssmdoc.py
++++ b/utterplan/ssmdoc.py
+@@ -146,9 +146,7 @@ def ssmdoc_document_path(index: SSMDDocIndex) -> Path:
+         if resolved.stat().st_size > _MAX_DOCUMENT_BYTES:
+             raise SSMDDocError("ssmdoc document exceeds the 64 MiB size limit")
+     except OSError as exc:
+-        raise SSMDDocError(
+-            f"cannot inspect ssmdoc document {index.relative_path}: {exc}"
+-        ) from exc
++        raise SSMDDocError(f"cannot inspect ssmdoc document {index.relative_path}: {exc}") from exc
+     return source

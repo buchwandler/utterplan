@@ -1,0 +1,199 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: v0.6.5
+git_base_ref: v0.6.4
+git_base_sha: 2ede8b2a5ac1a7de26236e1909c8ef2defd4ed21
+git_head_ref: HEAD
+git_head_sha: 6955399abed0c84dbfa9d589cccac79f44d9652f
+git_range: 2ede8b2a5ac1a7de26236e1909c8ef2defd4ed21..6955399abed0c84dbfa9d589cccac79f44d9652f
+commit_count: 4
+rows:
+  - sha: afed223c482a9421b0fa38d3d6aa6a35bd00df63
+    source_ref: git:afed223c482a9421b0fa38d3d6aa6a35bd00df63
+    short_sha: afed223
+    changed_paths:
+      - docs/ssmdoc.md
+      - tests/test_cli_ssmdoc.py
+      - tests/test_document_render.py
+      - utterplan/__init__.py
+      - utterplan/book.py
+      - utterplan/cli.py
+      - utterplan/document_workspace.py
+      - utterplan/renderplan_workspace.py
+    stats:
+      files_changed: 8
+      insertions: 249
+      deletions: 13
+    inspected: true
+    inspected_paths:
+      - docs/ssmdoc.md
+      - tests/test_cli_ssmdoc.py
+      - tests/test_document_render.py
+      - utterplan/__init__.py
+      - utterplan/book.py
+      - utterplan/cli.py
+      - utterplan/document_workspace.py
+      - utterplan/renderplan_workspace.py
+    observed_behavior:
+      Added the render-document service, CLI command, public API, profile-specific
+      artifact projection, and safety tests for compiled SSMDDoc workspaces.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: add missing document render commands"
+    target_entry_id: entry-0001
+    notes: ""
+  - sha: a0edfc00862bcbc77a3746c963d6e9d23436c002
+    source_ref: git:a0edfc00862bcbc77a3746c963d6e9d23436c002
+    short_sha: a0edfc0
+    changed_paths:
+      - .ledger/archledger/data/document-state.json
+      - .ledger/archledger/data/profiles/arc42/sections/content-0001.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0003.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0006.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0007.md
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/ssmdoc.md
+      - tests/test_cli_render_document.py
+      - tests/test_cli_ssmdoc.py
+      - tests/test_document_render.py
+      - tests/test_document_workspace.py
+      - tests/test_import_boundaries.py
+      - tests/test_ssmdoc.py
+      - utterplan/book.py
+      - utterplan/cli.py
+      - utterplan/document_workspace.py
+      - utterplan/source_input.py
+      - utterplan/ssmdoc.py
+      - utterplan/workspace_paths.py
+    stats:
+      files_changed: 21
+      insertions: 744
+      deletions: 203
+    inspected: true
+    inspected_paths:
+      - .ledger/archledger/data/document-state.json
+      - .ledger/archledger/data/profiles/arc42/sections/content-0001.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0003.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0006.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0007.md
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/ssmdoc.md
+      - tests/test_cli_render_document.py
+      - tests/test_cli_ssmdoc.py
+      - tests/test_document_render.py
+      - tests/test_document_workspace.py
+      - tests/test_import_boundaries.py
+      - tests/test_ssmdoc.py
+      - utterplan/book.py
+      - utterplan/cli.py
+      - utterplan/document_workspace.py
+      - utterplan/source_input.py
+      - utterplan/ssmdoc.py
+      - utterplan/workspace_paths.py
+    observed_behavior:
+      Changed editable SSMDDoc compilation and projection to stable
+      workspace-local utterplan and renderplan directories, with updated documentation
+      and tests.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: remove readio dir structure"
+    target_entry_id: entry-0002
+    notes: ""
+  - sha: b12e1f24350c6974f6710f942fad601db8252b0e
+    source_ref: git:b12e1f24350c6974f6710f942fad601db8252b0e
+    short_sha: b12e1f2
+    changed_paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/python-api.md
+      - docs/ssmdbook.md
+      - docs/ssmdoc.md
+      - tests/test_book_api.py
+      - tests/test_cli_render_book.py
+      - tests/test_cli_render_document.py
+      - tests/test_cli_ssmdoc.py
+      - tests/test_document_render.py
+      - tests/test_document_workspace.py
+      - tests/test_renderplan_export.py
+      - tests/test_role_coverage.py
+      - tests/test_ssmdoc.py
+      - utterplan/__init__.py
+      - utterplan/book.py
+      - utterplan/cli.py
+      - utterplan/document_workspace.py
+      - utterplan/renderplan_export.py
+      - utterplan/renderplan_workspace.py
+      - utterplan/role_coverage.py
+      - utterplan/ssmdoc.py
+    stats:
+      files_changed: 23
+      insertions: 882
+      deletions: 73
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/python-api.md
+      - docs/ssmdbook.md
+      - docs/ssmdoc.md
+      - tests/test_book_api.py
+      - tests/test_cli_render_book.py
+      - tests/test_cli_render_document.py
+      - tests/test_cli_ssmdoc.py
+      - tests/test_document_render.py
+      - tests/test_document_workspace.py
+      - tests/test_renderplan_export.py
+      - tests/test_role_coverage.py
+      - tests/test_ssmdoc.py
+      - utterplan/__init__.py
+      - utterplan/book.py
+      - utterplan/cli.py
+      - utterplan/document_workspace.py
+      - utterplan/renderplan_export.py
+      - utterplan/renderplan_workspace.py
+      - utterplan/role_coverage.py
+      - utterplan/ssmdoc.py
+    observed_behavior:
+      Added renderer-independent logical role inventory and complete
+      RenderProfile coverage checks for document and book projections, with CLI, API,
+      documentation, and tests.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: improved document flow"
+    target_entry_id: entry-0003
+    notes: ""
+  - sha: 6955399abed0c84dbfa9d589cccac79f44d9652f
+    source_ref: git:6955399abed0c84dbfa9d589cccac79f44d9652f
+    short_sha: "6955399"
+    changed_paths:
+      - docs/ssmdbook.md
+      - docs/ssmdoc.md
+    stats:
+      files_changed: 2
+      insertions: 2
+      deletions: 2
+    inspected: true
+    inspected_paths:
+      - docs/ssmdbook.md
+      - docs/ssmdoc.md
+    observed_behavior:
+      Corrected role-coverage documentation links to the repository
+      README for stable navigation.
+    public_impact: docs
+    decision: accepted
+    stale: false
+    evidence_subject: "fix: doc"
+    target_entry_id: entry-0004
+    notes: ""

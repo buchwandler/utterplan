@@ -1,0 +1,113 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.6.5
+git_base_ref: 2ede8b2a5ac1a7de26236e1909c8ef2defd4ed21
+git_base_sha: 2ede8b2a5ac1a7de26236e1909c8ef2defd4ed21
+git_head_ref: 6955399abed0c84dbfa9d589cccac79f44d9652f
+git_head_sha: 6955399abed0c84dbfa9d589cccac79f44d9652f
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: "Added render-document for projecting compiled SSMDDoc FlowPlans into profile-specific RenderPlans"
+    status: accepted
+    source_refs:
+      - git:afed223c482a9421b0fa38d3d6aa6a35bd00df63
+    paths:
+      - docs/ssmdoc.md
+      - tests/test_cli_ssmdoc.py
+      - tests/test_document_render.py
+      - utterplan/__init__.py
+      - utterplan/book.py
+      - utterplan/cli.py
+      - utterplan/document_workspace.py
+      - utterplan/renderplan_workspace.py
+    sources:
+      - git:afed223c482a9421b0fa38d3d6aa6a35bd00df63
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: changed
+    summary: "Changed editable SSMDDoc workspaces to use stable utterplan and renderplan output directories"
+    status: accepted
+    source_refs:
+      - git:a0edfc00862bcbc77a3746c963d6e9d23436c002
+    paths:
+      - .ledger/archledger/data/document-state.json
+      - .ledger/archledger/data/profiles/arc42/sections/content-0001.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0003.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0006.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0007.md
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/ssmdoc.md
+      - tests/test_cli_render_document.py
+      - tests/test_cli_ssmdoc.py
+      - tests/test_document_render.py
+      - tests/test_document_workspace.py
+      - tests/test_import_boundaries.py
+      - tests/test_ssmdoc.py
+      - utterplan/book.py
+      - utterplan/cli.py
+      - utterplan/document_workspace.py
+      - utterplan/source_input.py
+      - utterplan/ssmdoc.py
+      - utterplan/workspace_paths.py
+    sources:
+      - git:a0edfc00862bcbc77a3746c963d6e9d23436c002
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added logical role coverage inspection and complete-profile validation for document and book rendering"
+    status: accepted
+    source_refs:
+      - git:b12e1f24350c6974f6710f942fad601db8252b0e
+    paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/python-api.md
+      - docs/ssmdbook.md
+      - docs/ssmdoc.md
+      - tests/test_book_api.py
+      - tests/test_cli_render_book.py
+      - tests/test_cli_render_document.py
+      - tests/test_cli_ssmdoc.py
+      - tests/test_document_render.py
+      - tests/test_document_workspace.py
+      - tests/test_renderplan_export.py
+      - tests/test_role_coverage.py
+      - tests/test_ssmdoc.py
+      - utterplan/__init__.py
+      - utterplan/book.py
+      - utterplan/cli.py
+      - utterplan/document_workspace.py
+      - utterplan/renderplan_export.py
+      - utterplan/renderplan_workspace.py
+      - utterplan/role_coverage.py
+      - utterplan/ssmdoc.py
+    sources:
+      - git:b12e1f24350c6974f6710f942fad601db8252b0e
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: fixed
+    summary: "Fixed documentation links for logical role and profile coverage guidance"
+    status: accepted
+    source_refs:
+      - git:6955399abed0c84dbfa9d589cccac79f44d9652f
+    paths:
+      - docs/ssmdbook.md
+      - docs/ssmdoc.md
+    sources:
+      - git:6955399abed0c84dbfa9d589cccac79f44d9652f
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

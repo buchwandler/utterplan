@@ -1,0 +1,1642 @@
+ .ledger/archledger/data/document-state.json        |   4 +-
+ .../data/profiles/arc42/sections/content-0001.md   |   6 +-
+ .../data/profiles/arc42/sections/content-0003.md   |  10 +-
+ .../data/profiles/arc42/sections/content-0006.md   |  15 +-
+ .../data/profiles/arc42/sections/content-0007.md   |  14 +-
+ README.md                                          |  12 +-
+ docs/architecture.md                               |  51 +++--
+ docs/cli.md                                        |  14 +-
+ docs/ssmdoc.md                                     |  10 +-
+ tests/test_cli_render_document.py                  | 253 +++++++++++++++++++++
+ tests/test_cli_ssmdoc.py                           |  34 +--
+ tests/test_document_render.py                      |   4 +
+ tests/test_document_workspace.py                   |  32 +--
+ tests/test_import_boundaries.py                    |   2 +-
+ tests/test_ssmdoc.py                               |  61 ++++-
+ utterplan/book.py                                  |  16 +-
+ utterplan/cli.py                                   |  56 ++---
+ utterplan/document_workspace.py                    | 225 ++++++++++++++----
+ utterplan/source_input.py                          |   2 +
+ utterplan/ssmdoc.py                                |  99 ++++----
+ utterplan/workspace_paths.py                       |  27 +++
+ 21 files changed, 744 insertions(+), 203 deletions(-)
+
+diff --git a/.ledger/archledger/data/document-state.json b/.ledger/archledger/data/document-state.json
+index eb9de79..f905a81 100644
+--- a/.ledger/archledger/data/document-state.json
++++ b/.ledger/archledger/data/document-state.json
+@@ -1,9 +1,9 @@
+ {
+   "documents": {
+     "arc42:markdown:draft=false:superseded=false": {
+-      "fingerprint": "sha256:06567b86685f55098f7473ab4eb1d3952cf1cd9e1464a7b17e7bc77430f2a1b9",
++      "fingerprint": "sha256:07e8e22f08c53afa35480f5450e236e8cfb9e850a60e9dab3f43e41261931ac2",
+       "input_count": 12,
+-      "version": 2
++      "version": 3
+     }
+   },
+   "schema": "archledger.document-state.v1"
+diff --git a/.ledger/archledger/data/profiles/arc42/sections/content-0001.md b/.ledger/archledger/data/profiles/arc42/sections/content-0001.md
+index c09328e..f09401f 100644
+--- a/.ledger/archledger/data/profiles/arc42/sections/content-0001.md
++++ b/.ledger/archledger/data/profiles/arc42/sections/content-0001.md
+@@ -7,7 +7,7 @@ section: introduction_and_goals
+ title: Introduction and Goals
+ order: 10
+ status: accepted
+-version: 3
++version: 4
+ body_format: markdown
+ ---
+
+@@ -50,7 +50,7 @@ FlowPlan v7 (paragraph-local units, segments, boundaries, authored pauses)
+ Downstream chunking / token-budget / pause choices
+        |
+        v
+-Readio / VoiceRender / other FlowPlan consumers
++Downstream FlowPlan consumers
+        |
+        v
+ G2P / synthesis / audio (downstream)
+@@ -62,4 +62,4 @@ workspaces without changing book content.
+
+ ## Document workspaces
+
+-An editable `ssmdconvert.document` v1 workspace (`.ssmdoc`) is another source path for the one-document compiler. `compile-document` discovers its canonical current SSMD document and writes one FlowPlan plus an operational report under `.readio/utterplan/`; it does not create a book or alter workspace source material.
++An editable `ssmdconvert.document` v1 workspace (`.ssmdoc`) is another source path for the one-document compiler. `compile-document` discovers its canonical current SSMD document and writes one FlowPlan plus an operational report under `<workspace>/utterplan/`; `render-document` projects that saved plan with an explicit profile into `<workspace>/renderplan/<label>--<profile-id-prefix>/`. Neither command creates book-set semantics or alters workspace source material.
+diff --git a/.ledger/archledger/data/profiles/arc42/sections/content-0003.md b/.ledger/archledger/data/profiles/arc42/sections/content-0003.md
+index 34045aa..15859d0 100644
+--- a/.ledger/archledger/data/profiles/arc42/sections/content-0003.md
++++ b/.ledger/archledger/data/profiles/arc42/sections/content-0003.md
+@@ -7,7 +7,7 @@ section: context_and_scope
+ title: Context and Scope
+ order: 30
+ status: accepted
+-version: 3
++version: 4
+ body_format: markdown
+ ---
+
+@@ -22,7 +22,7 @@ TTSReady
+     ^
+ UtterPlan
+     ^
+-Readio / VoiceRender / other FlowPlan consumers
++Downstream FlowPlan consumers
+ ```
+
+ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
+@@ -37,9 +37,9 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
+ - **spaCy** optionally enriches tokens (best effort, `sm`/`md`/`lg`/`trf` preference;
+   UtterPlan never downloads models and falls back to deterministic tokens).
+ - **RenderPlan** defines the shared profile/plan contract used by the optional
+-  projection; **VoiceRender** creates engine-backed profiles and owns runtime
+-  validation, preflight, and speech execution; **Readio** and other consumers
+-  consume FlowPlan downstream.
++  projection; downstream renderers consume portable RenderProfiles and RenderPlans,
++  while other downstream consumers consume FlowPlans. Engine selection, preflight,
++  and speech execution are outside UtterPlan.
+
+ ## In scope
+
+diff --git a/.ledger/archledger/data/profiles/arc42/sections/content-0006.md b/.ledger/archledger/data/profiles/arc42/sections/content-0006.md
+index f3e4146..1561133 100644
+--- a/.ledger/archledger/data/profiles/arc42/sections/content-0006.md
++++ b/.ledger/archledger/data/profiles/arc42/sections/content-0006.md
+@@ -7,7 +7,7 @@ section: runtime_view
+ title: Runtime View
+ order: 60
+ status: accepted
+-version: 3
++version: 4
+ body_format: markdown
+ ---
+
+@@ -86,8 +86,19 @@ not calculate renderer-specific metrics.
+ ```text
+ ssmdconvert.document v1 manifest + current document.ssmd.md
+     -> utterplan compile-document
+-    -> one FlowPlan at .readio/utterplan/document-0001.utterplan.toml
++    -> one FlowPlan at utterplan/document.utterplan.toml
+        + one compile-report.toml
+ ```
+
+ The manifest validates the workspace contract and safe canonical path; SSMD 0.9 content is compiled by the existing single-document path. A stale stored digest does not block editable-directory compilation, and UtterPlan does not modify source material or model the document as a chapter.
++
++## Scenario: project a RenderPlan from an editable SSMDDoc workspace
++
++```text
++saved FlowPlan + explicit RenderProfile
++    -> utterplan render-document
++    -> one profile-specific RenderPlan at renderplan/<label>--<profile-id-prefix>/document.renderplan.toml
++       + canonical renderprofile.toml snapshot + render-report.toml
++```
++
++The command projects the existing plan without compiling source or invoking a renderer. Profile identity is embedded in the variant path, and a mismatched or ambiguous profile snapshot is rejected; source files and the SSMDDoc manifest remain unchanged.
+diff --git a/.ledger/archledger/data/profiles/arc42/sections/content-0007.md b/.ledger/archledger/data/profiles/arc42/sections/content-0007.md
+index f8b57fe..3bf1e30 100644
+--- a/.ledger/archledger/data/profiles/arc42/sections/content-0007.md
++++ b/.ledger/archledger/data/profiles/arc42/sections/content-0007.md
+@@ -7,7 +7,7 @@ section: deployment_view
+ title: Deployment View
+ order: 70
+ status: accepted
+-version: 3
++version: 4
+ body_format: markdown
+ ---
+
+@@ -18,8 +18,8 @@ or audio dependencies:
+   dynamically derived from Git tags by setuptools-scm and is independent of the
+   plan schema version.
+ - **Installation shapes.** Installed as a library (`pip install utterplan`) for
+-  consumer pipelines such as Readio, or with the `utterplan` CLI for direct SSMDBook
+-  workflows. Development installs use `pip install -e '.[dev,docs]'`.
++  downstream FlowPlan consumers, or with the `utterplan` CLI for direct SSMDBook and
++  SSMDDoc workflows. Development installs use `pip install -e '.[dev,docs]'`.
+ - **Optional linguistic enrichment.** spaCy models are preferred in `sm`, `md`,
+   `lg`, `trf` order when already installed; UtterPlan never downloads models and
+   continues with deterministic fallback tokens when spaCy or every compatible local
+@@ -27,12 +27,12 @@ or audio dependencies:
+ - **No runtime services.** Everything runs in-process; there is no server, daemon,
+   network fetch, or audio device access. Media references and extension names in
+   plans are data only.
+-- **Downstream placement.** Consumers (Readio, VoiceRender, PyKokoro-based
+-  renderers) import UtterPlan, never the reverse. Renderers add engines, model
+-  runtimes, G2P, synthesis, and audio on their side of the boundary.
++- **Downstream placement.** Consumers of UtterPlan's portable FlowPlan and optional
++  RenderPlan contracts add engines, model runtimes, G2P, synthesis, and audio on their
++  side of the boundary; UtterPlan does not import those packages.
+ - **Documentation.** Sphinx docs build from `docs/` with
+   `sphinx-build -W --keep-going -b html docs docs/_build/html`.
+ - **Quality gate.** `python -m pytest -q`, `ruff check .`, and `mypy utterplan` run
+   against the self-contained repository test suite.
+
+-- **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes derived plans under the reserved `.readio/utterplan/` directory without changing source files.
++- **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes semantic plans and its report directly under `<workspace>/utterplan/`; `render-document` writes profile-specific artifacts directly under `<workspace>/renderplan/` without changing source files.
+diff --git a/README.md b/README.md
+index de4e98e..7b330e0 100644
+--- a/README.md
++++ b/README.md
+@@ -9,7 +9,7 @@ UtterPlan is the canonical, engine-independent semantic compiler from one SSMD
+ document (or explicitly selected plain-text document) to an executable speech
+ plan. It produces deterministic prepared text, paragraph-local flow units, safe boundary opportunities, authored pause intents, and segment-local
+ semantics, portable document metadata, and typed directives for
+-independent downstream consumers such as Readio, VoiceRender, and other FlowPlan users. Its book commands read the SSMDBook manifest only for chapter discovery, never modify the manifest or source chapters, and write derived plans to separate directories. It uses TTSReady for written-to-spoken preparation and stops before G2P, synthesis, and audio.
++independent downstream FlowPlan consumers. Its book commands read the SSMDBook manifest only for chapter discovery, never modify the manifest or source chapters, and write derived plans to separate directories. It uses TTSReady for written-to-spoken preparation and stops before G2P, synthesis, and audio.
+
+ ## CLI
+
+@@ -49,7 +49,15 @@ Compile one editable `.ssmdoc` directory as one SSMD document and one FlowPlan:
+ utterplan compile-document story.ssmdoc
+ ```
+
+-By default this writes `story.ssmdoc/.readio/utterplan/document-0001.utterplan.toml` and a `compile-report.toml`. The current `document.ssmd.md` is authoritative even if its manifest digest is stale; UtterPlan leaves the source and manifest untouched. This is separate from the multi-chapter SSMDBook workflow below. See the [SSMDDoc workspace guide](docs/ssmdoc.md) for manifest safety, output options, and the Python API.
++By default this writes `story.ssmdoc/utterplan/document.utterplan.toml` and `story.ssmdoc/utterplan/compile-report.toml`. The current `document.ssmd.md` is authoritative even if its manifest digest is stale; UtterPlan leaves the source and manifest untouched. This is separate from the multi-chapter SSMDBook workflow below. See the [SSMDDoc workspace guide](docs/ssmdoc.md) for manifest safety, output options, and the Python API.
++
++Project the saved plan with an explicit RenderProfile:
++
++```bash
++utterplan render-document story.ssmdoc --profile narration.renderprofile.toml
++```
++
++The profile-specific RenderPlan is written to a matching variant directly under `story.ssmdoc/renderplan/`.
+
+ Compile a selected chapter range directly from an editable SSMDBook workspace:
+
+diff --git a/docs/architecture.md b/docs/architecture.md
+index e60e411..ce6910a 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -1,6 +1,6 @@
+ ---
+ title: "Architecture Documentation"
+-version: 2
++version: 3
+ generator: "archledger 0.4.0"
+ arc42_template_version: "9.0-EN"
+ ---
+@@ -50,7 +50,7 @@ FlowPlan v7 (paragraph-local units, segments, boundaries, authored pauses)
+ Downstream chunking / token-budget / pause choices
+        |
+        v
+-Readio / VoiceRender / other FlowPlan consumers
++Downstream FlowPlan consumers
+        |
+        v
+ G2P / synthesis / audio (downstream)
+@@ -62,7 +62,7 @@ workspaces without changing book content.
+
+ ## Document workspaces
+
+-An editable `ssmdconvert.document` v1 workspace (`.ssmdoc`) is another source path for the one-document compiler. `compile-document` discovers its canonical current SSMD document and writes one FlowPlan plus an operational report under `.readio/utterplan/`; it does not create a book or alter workspace source material.
++An editable `ssmdconvert.document` v1 workspace (`.ssmdoc`) is another source path for the one-document compiler. `compile-document` discovers its canonical current SSMD document and writes one FlowPlan plus an operational report under `<workspace>/utterplan/`; `render-document` projects that saved plan with an explicit profile into `<workspace>/renderplan/<label>--<profile-id-prefix>/`. Neither command creates book-set semantics or alters workspace source material.
+
+ ## Requirements Overview
+
+@@ -125,7 +125,7 @@ TTSReady
+     ^
+ UtterPlan
+     ^
+-Readio / VoiceRender / other FlowPlan consumers
++Downstream FlowPlan consumers
+ ```
+
+ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
+@@ -140,9 +140,9 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
+ - **spaCy** optionally enriches tokens (best effort, `sm`/`md`/`lg`/`trf` preference;
+   UtterPlan never downloads models and falls back to deterministic tokens).
+ - **RenderPlan** defines the shared profile/plan contract used by the optional
+-  projection; **VoiceRender** creates engine-backed profiles and owns runtime
+-  validation, preflight, and speech execution; **Readio** and other consumers
+-  consume FlowPlan downstream.
++  projection; downstream renderers consume portable RenderProfiles and RenderPlans,
++  while other downstream consumers consume FlowPlans. Engine selection, preflight,
++  and speech execution are outside UtterPlan.
+
+ ## In scope
+
+@@ -174,6 +174,8 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
+ - The workspace remains one document to one FlowPlan. Manifest digests are provenance only for editable directories: UtterPlan compiles current content and never refreshes the manifest or edits the source.
+ - `compile-document` is single-document convenience, not book orchestration. ZIP bundles, fake chapters, and an `ssmdconvert` runtime dependency are outside the contract.
+
++
++
+ ## Business Context
+
+ <!-- archledger: no accepted records for this section yet -->
+@@ -267,6 +269,8 @@ TOML.
+
+ `ssmdoc.py` performs read-only manifest discovery and canonical path safety checks; `source_input.py` centralizes standalone-file and `.ssmdoc` source loading; and `document_workspace.py` delegates one stable `document-0001` CompileRequest to the existing batch persistence/report path. The CLI and public package API expose `compile-document` and `compile_ssmdoc()` without shadowing the in-memory `compile_document()` compiler.
+
++
++
+ <!-- archledger: no accepted records for this section yet -->
+
+ # Runtime View
+@@ -346,12 +350,25 @@ not calculate renderer-specific metrics.
+ ```text
+ ssmdconvert.document v1 manifest + current document.ssmd.md
+     -> utterplan compile-document
+-    -> one FlowPlan at .readio/utterplan/document-0001.utterplan.toml
++    -> one FlowPlan at utterplan/document.utterplan.toml
+        + one compile-report.toml
+ ```
+
+ The manifest validates the workspace contract and safe canonical path; SSMD 0.9 content is compiled by the existing single-document path. A stale stored digest does not block editable-directory compilation, and UtterPlan does not modify source material or model the document as a chapter.
+
++## Scenario: project a RenderPlan from an editable SSMDDoc workspace
++
++```text
++saved FlowPlan + explicit RenderProfile
++    -> utterplan render-document
++    -> one profile-specific RenderPlan at renderplan/<label>--<profile-id-prefix>/document.renderplan.toml
++       + canonical renderprofile.toml snapshot + render-report.toml
++```
++
++The command projects the existing plan without compiling source or invoking a renderer. Profile identity is embedded in the variant path, and a mismatched or ambiguous profile snapshot is rejected; source files and the SSMDDoc manifest remain unchanged.
++
++
++
+ <!-- archledger: no accepted records for this section yet -->
+
+ # Deployment View
+@@ -363,8 +380,8 @@ or audio dependencies:
+   dynamically derived from Git tags by setuptools-scm and is independent of the
+   plan schema version.
+ - **Installation shapes.** Installed as a library (`pip install utterplan`) for
+-  consumer pipelines such as Readio, or with the `utterplan` CLI for direct SSMDBook
+-  workflows. Development installs use `pip install -e '.[dev,docs]'`.
++  downstream FlowPlan consumers, or with the `utterplan` CLI for direct SSMDBook and
++  SSMDDoc workflows. Development installs use `pip install -e '.[dev,docs]'`.
+ - **Optional linguistic enrichment.** spaCy models are preferred in `sm`, `md`,
+   `lg`, `trf` order when already installed; UtterPlan never downloads models and
+   continues with deterministic fallback tokens when spaCy or every compatible local
+@@ -372,15 +389,17 @@ or audio dependencies:
+ - **No runtime services.** Everything runs in-process; there is no server, daemon,
+   network fetch, or audio device access. Media references and extension names in
+   plans are data only.
+-- **Downstream placement.** Consumers (Readio, VoiceRender, PyKokoro-based
+-  renderers) import UtterPlan, never the reverse. Renderers add engines, model
+-  runtimes, G2P, synthesis, and audio on their side of the boundary.
++- **Downstream placement.** Consumers of UtterPlan's portable FlowPlan and optional
++  RenderPlan contracts add engines, model runtimes, G2P, synthesis, and audio on their
++  side of the boundary; UtterPlan does not import those packages.
+ - **Documentation.** Sphinx docs build from `docs/` with
+   `sphinx-build -W --keep-going -b html docs docs/_build/html`.
+ - **Quality gate.** `python -m pytest -q`, `ruff check .`, and `mypy utterplan` run
+   against the self-contained repository test suite.
+
+-- **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes derived plans under the reserved `.readio/utterplan/` directory without changing source files.
++- **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes semantic plans and its report directly under `<workspace>/utterplan/`; `render-document` writes profile-specific artifacts directly under `<workspace>/renderplan/` without changing source files.
++
++
+
+ <!-- archledger: no accepted records for this section yet -->
+
+@@ -464,6 +483,8 @@ semantic blockers. Blocked planning outcomes may be reviewed through the separat
+ `utterplan.planning-attempt.v1` inspect-only artifact; such candidates remain
+ drafts and never become canonical plans.
+
++
++
+ <!-- archledger: no accepted records for this section yet -->
+
+ # Architecture Decisions
+@@ -551,6 +572,8 @@ drafts and never become canonical plans.
+   batch and book reports retain every diagnostic; typed progress callbacks expose
+   long-running planning without changing the plan.
+
++
++
+ ## Quality Requirements Overview
+
+ <!-- archledger: no accepted records for this section yet -->
+diff --git a/docs/cli.md b/docs/cli.md
+index da8fc99..5c8a3ae 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -135,10 +135,22 @@ utterplan compile-document INPUT [--output-dir PATH] [--language LANGUAGE]
+   [--force] [--report PATH] [--diagnostics {warnings,all,none}]
+ ```
+
+-The default output directory is `<workspace>/.readio/utterplan/`, containing `document-0001.utterplan.toml` and `compile-report.toml`. `--output-dir` and `--report` override those locations. Existing plan files require `--force`; output collisions with the source or manifest are rejected. A document header's language is authoritative; `--language`/`--lang` is a fallback when it is absent.
++The default output directory is `<workspace>/utterplan/`, containing `document.utterplan.toml` and `compile-report.toml`. `--output-dir` and `--report` override those locations. Existing plan files require `--force`; output collisions with the source or manifest are rejected. A document header's language is authoritative; `--language`/`--lang` is a fallback when it is absent.
+
+ Editable content wins over the stored manifest digest: compilation reads the current `document.ssmd.md` but never modifies the manifest or source. The command has no `--input-format`, chapter selection, or `--fail-fast`; it handles one document. The existing `compile` and `validate` commands also accept the workspace root or canonical document path, while `compile` retains its normal stdout/`-o` behavior. This is not `compile-book`: an SSMDDoc creates one plan, while an SSMDBook orchestrates independent chapter plans. ZIP bundles are not supported and `ssmdconvert` is not a runtime dependency. See the [SSMDDoc guide](ssmdoc.md) for format validation and the `compile_ssmdoc()` Python API.
+
++## Project an SSMDDoc RenderPlan
++
++`render-document` projects the already-saved single-document UtterPlan through an explicit RenderProfile. It never compiles implicitly:
++
++```text
++utterplan render-document INPUT --profile PROFILE
++  [--utterplan-dir PATH] [--output-root PATH] [--variant LABEL]
++  [--force] [--report PATH]
++```
++
++By default it reads `<workspace>/utterplan/document.utterplan.toml` and writes a profile-fingerprinted variant under `<workspace>/renderplan/<label>--<profile-id-prefix>/`, containing `renderprofile.toml`, `document.renderplan.toml`, and `render-report.toml`. `--variant` changes only the readable label; the profile fingerprint remains part of the directory identity. A profile mismatch or ambiguous existing snapshot is rejected even with `--force`. This is a one-document projection, not a book-set workflow. See the [SSMDDoc guide](ssmdoc.md).
++
+ ## Compile chapters from an SSMDBook workspace
+
+ `compile-book` discovers selected SSMD chapters from an editable `.ssmdbook` manifest and compiles each chapter independently through the batch compiler. Pass either the book directory or its canonical `chapters/` directory:
+diff --git a/docs/ssmdoc.md b/docs/ssmdoc.md
+index faee787..fe59efe 100644
+--- a/docs/ssmdoc.md
++++ b/docs/ssmdoc.md
+@@ -6,7 +6,7 @@ UtterPlan can compile an editable `.ssmdoc` workspace as one SSMD 0.9 document.
+
+ A workspace is identified by a `manifest.json` whose `format` is `ssmdconvert.document` and whose `schema_version` is `1`. UtterPlan supports the v1 contract and expects the canonical document entry to identify `document-0001` at the normalized relative path `document.ssmd.md`. The source is SSMD 0.9.
+
+-The current `document.ssmd.md` is authoritative. Its manifest digest and character count are metadata, not a lock: if you edit the document and its recorded digest becomes stale, UtterPlan compiles the current file. It never rewrites the manifest, refreshes hashes, or edits source content. The `.readio/utterplan/` directory is reserved for derived UtterPlan artifacts.
++The current `document.ssmd.md` is authoritative. Its manifest digest and character count are metadata, not a lock: if you edit the document and its recorded digest becomes stale, UtterPlan compiles the current file. It never rewrites the manifest, refreshes hashes, or edits source content. Semantic plans and reports are written directly under the workspace's visible `utterplan/` directory; profile-specific RenderPlans are written directly under `renderplan/`. These are derived artifacts, not manifest members.
+
+ Discovery and path handling are deliberately strict. The manifest must be valid UTF-8 JSON within the 2 MiB limit, and the document is limited to 64 MiB. UtterPlan checks the canonical path and workspace containment, rejects unsupported manifest versions and unsafe paths, and does not follow a document path outside the workspace. It reads no source-media files. `ssmdconvert` is not a runtime dependency: UtterPlan consumes the published file-format contract directly.
+
+@@ -23,8 +23,8 @@ utterplan compile-document story.ssmdoc
+ It writes one plan and one operational report by default:
+
+ ```text
+-story.ssmdoc/.readio/utterplan/
+-├── document-0001.utterplan.toml
++story.ssmdoc/utterplan/
++├── document.utterplan.toml
+ └── compile-report.toml
+ ```
+
+@@ -55,7 +55,7 @@ if result.failed:
+ print(result.plan_path)
+ ```
+
+-The result provides the workspace and source paths, output and report paths, and the one-item batch outcome. Options include `output_dir`, `report`, `language`, `planner_config`, `force`, `diagnostics`, and progress/start callbacks. The default artifacts match the CLI: `.readio/utterplan/document-0001.utterplan.toml` and `compile-report.toml`.
++The result provides the workspace and source paths, output and report paths, and the one-item batch outcome. Options include `output_dir`, `report`, `language`, `planner_config`, `force`, `diagnostics`, and progress/start callbacks. The default artifacts match the CLI: `utterplan/document.utterplan.toml` and `utterplan/compile-report.toml`.
+
+ ## SSMDDoc is not SSMDBook
+
+@@ -71,4 +71,4 @@ After `utterplan compile-document .`, project the existing canonical FlowPlan wi
+ utterplan render-document . --profile narration.renderprofile.toml
+ ```
+
+-This writes `.readio/renderplan/<label>--<profile-fingerprint>/renderprofile.toml`, `document-0001.renderplan.toml`, and `render-report.toml`. The printed exact variant can be passed to `voicerender render-document`. A document is never wrapped in a one-chapter book or a RenderPlanSet. Re-run `compile-document` and this projection after source edits; VoiceRender intentionally renders only the selected explicit RenderPlan.
++This writes `renderplan/<label>--<profile-fingerprint>/renderprofile.toml`, `document.renderplan.toml`, and `render-report.toml` directly under the workspace. The printed exact variant can be passed to `voicerender render-document`. A document is never wrapped in a one-chapter book or a RenderPlanSet. Re-run `compile-document` and this projection after source edits; VoiceRender intentionally renders only the selected explicit RenderPlan.
+diff --git a/tests/test_cli_render_document.py b/tests/test_cli_render_document.py
+new file mode 100644
+index 0000000..2fc9c9e
+--- /dev/null
++++ b/tests/test_cli_render_document.py
+@@ -0,0 +1,253 @@
++from __future__ import annotations
++
++import shutil
++from pathlib import Path
++
++import pytest
++import tomlkit
++from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
++from renderplan import codec as renderplan_codec
++
++from utterplan.cli import build_parser, main
++from utterplan.model import FlowPlan
++
++FIXTURE = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
++SSMD = '---\nssmd_version: "0.9"\nlanguage: en-US\n---\n\nHello there.\n'
++
++
++def _workspace(tmp_path: Path, *, compile_plan: bool = True) -> Path:
++    root = tmp_path / "workspace"
++    shutil.copytree(FIXTURE, root)
++    (root / "document.ssmd.md").write_text(SSMD, encoding="utf-8")
++    if compile_plan:
++        result = main(
++            [
++                "compile-document",
++                str(root),
++                "--text-preparation",
++                "identity",
++                "--spacy",
++                "off",
++            ]
++        )
++        assert result == 0
++    return root
++
++
++def _profile(path: Path, *, voice: str = "amy") -> RenderProfile:
++    profile = RenderProfile(
++        roles={
++            "narrator": RoleProfile(
++                language="en-US", binding={"engine": "test", "voice": voice}
++            )
++        },
++        default_role="narrator",
++        planning=PlanningPolicy(split="sentence", capacity_fallback=("token",)),
++        pauses=PausePolicy(mode="manual", durations_ms={"sentence": 250}),
++    )
++    renderplan_codec.save_profile(profile, path)
++    return profile
++
++
++def _variant_dir(root: Path, profile_path: Path, *, label: str = "narration") -> Path:
++    profile = renderplan_codec.load_profile(profile_path)
++    profile_id = profile.profile_id or profile.computed_id()
++    return root / "renderplan" / f"{label}--{profile_id.removeprefix('sha256:')[:12]}"
++
++
++def _render(root: Path, profile_path: Path, *options: str) -> int:
++    return main(["render-document", str(root), "--profile", str(profile_path), *options])
++
++
++def test_render_document_writes_profile_specific_direct_variant_and_report(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    source_plan = root / "utterplan" / "document.utterplan.toml"
++    source_plan_before = source_plan.read_bytes()
++    profile_path = tmp_path / "narration.renderprofile.toml"
++    profile = _profile(profile_path)
++
++    assert _render(root, profile_path) == 0
++    capsys.readouterr()
++
++    variant_dir = _variant_dir(root, profile_path)
++    renderplan_path = variant_dir / "document.renderplan.toml"
++    snapshot_path = variant_dir / "renderprofile.toml"
++    report_path = variant_dir / "render-report.toml"
++    assert {path.name for path in variant_dir.iterdir()} == {
++        "document.renderplan.toml",
++        "renderprofile.toml",
++        "render-report.toml",
++    }
++    assert renderplan_path.is_file()
++    assert snapshot_path.is_file()
++    assert report_path.is_file()
++    assert not (root / "renderplan-set.toml").exists()
++    plan = renderplan_codec.load_plan(renderplan_path)
++    plan.validate_against_profile(profile)
++    assert plan.source_plan_id == FlowPlan.load(source_plan).plan_id
++    assert renderplan_codec.load_profile(snapshot_path).profile_id == renderplan_codec.load_profile(profile_path).profile_id
++    report = tomlkit.parse(report_path.read_text(encoding="utf-8"))
++    assert report["format"] == "utterplan.render-document-report"
++    assert report["status"] == "ok"
++    assert report["source_plan_id"] == plan.source_plan_id
++    assert report["render_plan_id"] == plan.plan_id
++    assert source_plan.read_bytes() == source_plan_before
++    assert {path.name for path in root.iterdir()} == {
++        "manifest.json",
++        "document.ssmd.md",
++        "utterplan",
++        "renderplan",
++    }
++
++
++def test_missing_utterplan_fails_actionably_without_partial_variant(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path, compile_plan=False)
++    profile_path = tmp_path / "narration.renderprofile.toml"
++    _profile(profile_path)
++
++    assert _render(root, profile_path) == 2
++    captured = capsys.readouterr()
++    assert "No UtterPlan found at" in captured.err
++    assert "utterplan compile-document" in captured.err
++    assert not (root / "renderplan").exists()
++
++
++def test_distinct_profiles_coexist_and_same_profile_reuses_variant(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    first_profile = tmp_path / "narration.renderprofile.toml"
++    second_profile = tmp_path / "alternate.renderprofile.toml"
++    _profile(first_profile, voice="amy")
++    _profile(second_profile, voice="joe")
++    first_variant = _variant_dir(root, first_profile)
++    second_variant = _variant_dir(root, second_profile, label="alternate")
++
++    assert first_variant != second_variant
++    assert _render(root, first_profile) == 0
++    capsys.readouterr()
++    snapshot_before = (first_variant / "renderprofile.toml").read_bytes()
++    assert _render(root, first_profile, "--force") == 0
++    capsys.readouterr()
++    assert (first_variant / "renderprofile.toml").read_bytes() == snapshot_before
++    assert _render(root, second_profile) == 0
++    capsys.readouterr()
++    assert (first_variant / "document.renderplan.toml").is_file()
++    assert (second_variant / "document.renderplan.toml").is_file()
++
++
++def test_mismatched_profile_snapshot_is_rejected_even_with_force(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    profile_path = tmp_path / "narration.renderprofile.toml"
++    other_profile_path = tmp_path / "other.renderprofile.toml"
++    _profile(profile_path, voice="amy")
++    _profile(other_profile_path, voice="joe")
++    variant_dir = _variant_dir(root, profile_path)
++    assert _render(root, profile_path) == 0
++    capsys.readouterr()
++    renderplan_path = variant_dir / "document.renderplan.toml"
++    previous_plan = renderplan_path.read_bytes()
++    renderplan_codec.save_profile(
++        renderplan_codec.load_profile(other_profile_path), variant_dir / "renderprofile.toml"
++    )
++
++    assert _render(root, profile_path, "--force") == 2
++    captured = capsys.readouterr()
++    assert "different profile identity" in captured.err
++    assert renderplan_path.read_bytes() == previous_plan
++
++
++def test_nonempty_variant_without_snapshot_is_never_adopted(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    profile_path = tmp_path / "narration.renderprofile.toml"
++    _profile(profile_path)
++    variant_dir = _variant_dir(root, profile_path)
++    variant_dir.mkdir(parents=True)
++    state = variant_dir / "state.toml"
++    state.write_text("keep = true\n", encoding="utf-8")
++
++    assert _render(root, profile_path, "--force") == 2
++    captured = capsys.readouterr()
++    assert "unknown non-empty variant directory" in captured.err
++    assert state.read_text(encoding="utf-8") == "keep = true\n"
++    assert not (variant_dir / "renderprofile.toml").exists()
++    assert not (variant_dir / "document.renderplan.toml").exists()
++
++
++def test_custom_variant_and_output_root_keep_identity_fingerprint(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    profile_path = tmp_path / "narration.renderprofile.toml"
++    _profile(profile_path)
++    output_root = tmp_path / "custom-render-output"
++    report_path = tmp_path / "custom-render-report.toml"
++
++    assert _render(
++        root,
++        profile_path,
++        "--variant",
++        "warm",
++        "--output-root",
++        str(output_root),
++        "--report",
++        str(report_path),
++    ) == 0
++    capsys.readouterr()
++    profile_id = renderplan_codec.load_profile(profile_path).profile_id
++    assert profile_id is not None
++    variant_dir = output_root / f"warm--{profile_id.removeprefix('sha256:')[:12]}"
++    assert variant_dir.is_dir()
++    assert (variant_dir / "document.renderplan.toml").is_file()
++    assert report_path.is_file()
++    assert not (variant_dir / "render-report.toml").exists()
++    assert not (root / "renderplan").exists()
++
++def test_unsafe_variant_labels_are_rejected(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
++    root = _workspace(tmp_path)
++    profile_path = tmp_path / "narration.renderprofile.toml"
++    _profile(profile_path)
++
++    for label in ("../escape", "nested/name", "nested\\name", ".."):
++        assert _render(root, profile_path, "--variant", label) == 2
++        captured = capsys.readouterr()
++        assert "must not contain path separators or traversal" in captured.err
++    assert not (root / "renderplan").exists()
++
++
++def test_failed_projection_does_not_initialize_variant(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
++) -> None:
++    root = _workspace(tmp_path)
++    profile_path = tmp_path / "narration.renderprofile.toml"
++    _profile(profile_path)
++
++    def fail_projection(*_args: object, **_kwargs: object) -> None:
++        raise ValueError("projection failed")
++
++    monkeypatch.setattr("utterplan.document_workspace.build_render_plan", fail_projection)
++
++    assert _render(root, profile_path) == 2
++    captured = capsys.readouterr()
++    assert "projection failed" in captured.err
++    assert not (root / "renderplan").exists()
++
++
++def test_render_document_parser_has_no_book_selection_options() -> None:
++    parser = build_parser()
++    with pytest.raises(SystemExit):
++        parser.parse_args(
++            ["render-document", "story.ssmdoc", "--profile", "voice.renderprofile.toml", "--chapters", "1"]
++        )
++    with pytest.raises(SystemExit):
++        parser.parse_args(
++            ["render-document", "story.ssmdoc", "--profile", "voice.renderprofile.toml", "--fail-fast"]
++        )
+diff --git a/tests/test_cli_ssmdoc.py b/tests/test_cli_ssmdoc.py
+index 50c2c74..183863c 100644
+--- a/tests/test_cli_ssmdoc.py
++++ b/tests/test_cli_ssmdoc.py
+@@ -48,8 +48,8 @@ def test_compile_document_writes_default_layout_and_keeps_source_unchanged(
+     )
+
+     captured = capsys.readouterr()
+-    output_dir = root / ".readio" / "utterplan"
+-    plan_path = output_dir / "document-0001.utterplan.toml"
++    output_dir = root / "utterplan"
++    plan_path = output_dir / "document.utterplan.toml"
+     report_path = output_dir / "compile-report.toml"
+     assert result == 0
+     assert captured.out == ""
+@@ -64,6 +64,11 @@ def test_compile_document_writes_default_layout_and_keeps_source_unchanged(
+     assert report["item"][0]["id"] == "document-0001"
+     assert manifest.read_bytes() == manifest_before
+     assert source.read_bytes() == source_before
++    assert {entry.name for entry in root.iterdir()} == {
++        "manifest.json",
++        "document.ssmd.md",
++        "utterplan",
++    }
+
+
+ def test_compile_document_uses_manifest_not_directory_suffix(
+@@ -77,7 +82,7 @@ def test_compile_document_uses_manifest_not_directory_suffix(
+
+     assert result == 0
+     capsys.readouterr()
+-    assert (root / ".readio/utterplan/document-0001.utterplan.toml").is_file()
++    assert (root / "utterplan/document.utterplan.toml").is_file()
+
+
+ def test_compile_document_uses_dirty_current_content_without_refreshing_manifest(
+@@ -99,13 +104,13 @@ def test_compile_document_uses_dirty_current_content_without_refreshing_manifest
+     assert result == 0
+     capsys.readouterr()
+     assert "Edited current content." in _plan_text(
+-        root / ".readio/utterplan/document-0001.utterplan.toml"
++        root / "utterplan/document.utterplan.toml"
+     )
+     assert manifest.read_bytes() == manifest_before
+     assert "Edited current content." in source.read_text(encoding="utf-8")
+
+
+-def test_compile_document_missing_source_is_a_reported_read_failure(
++def test_compile_document_missing_source_fails_before_output_creation(
+     tmp_path: Path, capsys: pytest.CaptureFixture[str]
+ ) -> None:
+     root = _workspace(tmp_path)
+@@ -114,12 +119,9 @@ def test_compile_document_missing_source_is_a_reported_read_failure(
+     result = main(["compile-document", str(root)])
+
+     captured = capsys.readouterr()
+-    report = _report(root / ".readio/utterplan/compile-report.toml")
+-    assert result == 1
+-    assert "FAILED" in captured.err
+-    assert report["item"][0]["status"] == "failed"
+-    assert report["item"][0]["stage"] == "read"
+-
++    assert result == 2
++    assert "document is missing" in captured.err
++    assert not (root / "utterplan").exists()
+
+ def test_compile_document_invalid_workspace_fails_before_output_creation(
+     tmp_path: Path, capsys: pytest.CaptureFixture[str]
+@@ -164,16 +166,16 @@ def test_compile_document_output_and_report_overrides(
+     assert result == 0
+     captured = capsys.readouterr()
+     assert str(output_dir) in captured.err
+-    assert (output_dir / "document-0001.utterplan.toml").is_file()
++    assert (output_dir / "document.utterplan.toml").is_file()
+     assert report.is_file()
+-    assert not (root / ".readio/utterplan").exists()
++    assert not (root / "utterplan").exists()
+
+
+ def test_compile_document_force_only_replaces_existing_plan(
+     tmp_path: Path, capsys: pytest.CaptureFixture[str]
+ ) -> None:
+     root = _workspace(tmp_path)
+-    output = root / ".readio/utterplan/document-0001.utterplan.toml"
++    output = root / "utterplan/document.utterplan.toml"
+     output.parent.mkdir(parents=True)
+     output.write_text("sentinel", encoding="utf-8")
+     args = ["compile-document", str(root), "--text-preparation", "identity", "--spacy", "off"]
+@@ -206,7 +208,7 @@ def test_compile_document_accepts_canonical_document_file(
+
+     assert result == 0
+     capsys.readouterr()
+-    assert (root / ".readio/utterplan/document-0001.utterplan.toml").is_file()
++    assert (root / "utterplan/document.utterplan.toml").is_file()
+
+
+ def test_compile_document_uses_only_ssmd_language_or_explicit_fallback(
+@@ -219,7 +221,7 @@ def test_compile_document_uses_only_ssmd_language_or_explicit_fallback(
+
+     assert main(args) == 1
+     capsys.readouterr()
+-    item = _report(root / ".readio/utterplan/compile-report.toml")["item"][0]
++    item = _report(root / "utterplan/compile-report.toml")["item"][0]
+     assert item["code"] == "input.language_required"
+
+     assert main([*args, "--language", "en-US"]) == 0
+diff --git a/tests/test_document_render.py b/tests/test_document_render.py
+index bbf7398..59d6904 100644
+--- a/tests/test_document_render.py
++++ b/tests/test_document_render.py
+@@ -31,7 +31,11 @@ def test_render_ssmdoc_projects_canonical_flowplan_without_book_index(tmp_path:
+     )
+     renderplan_codec.save_profile(profile, profile_path)
+     result = render_ssmdoc(root, profile=profile_path)
++    assert result.source_plan_path == root / "utterplan" / "document.utterplan.toml"
++    assert result.variant_dir.parent == root / "renderplan"
++    assert result.renderplan_path.name == "document.renderplan.toml"
+     plan = renderplan_codec.load_plan(result.renderplan_path)
++    plan.validate_against_profile(profile)
+     flow = FlowPlan.load(result.source_plan_path)
+     assert result.variant.startswith("narration--")
+     assert result.snapshot_path.is_file()
+diff --git a/tests/test_document_workspace.py b/tests/test_document_workspace.py
+index 5d833fa..371eb42 100644
+--- a/tests/test_document_workspace.py
++++ b/tests/test_document_workspace.py
+@@ -69,11 +69,11 @@ def test_compile_ssmdoc_writes_default_plan_and_one_item_report_without_source_c
+         on_progress=progress.append,
+     )
+
+-    output_dir = root / ".readio" / "utterplan"
++    output_dir = root / "utterplan"
+     assert result.exit_code == 0
+     assert result.failed == 0
+     assert result.document_id == "document-0001"
+-    assert result.plan_path == output_dir / "document-0001.utterplan.toml"
++    assert result.plan_path == output_dir / "document.utterplan.toml"
+     assert result.report_path == output_dir / "compile-report.toml"
+     assert result.plan_path.is_file()
+     assert result.report_path.is_file()
+@@ -107,18 +107,14 @@ def test_compile_ssmdoc_uses_edited_content_with_stale_digest(tmp_path: Path) ->
+     assert source.read_bytes() == source_before
+
+
+-def test_missing_document_is_a_reported_read_failure(tmp_path: Path) -> None:
++def test_missing_document_fails_before_creating_derived_outputs(tmp_path: Path) -> None:
+     root = _workspace(tmp_path)
+     (root / "document.ssmd.md").unlink()
+
+-    result = compile_ssmdoc(root, planner_config=_config())
+-
+-    assert result.exit_code == 1
+-    assert not result.plan_path.exists()
+-    item = _report(result.report_path)["item"][0]
+-    assert item["status"] == "failed"
+-    assert item["stage"] == "read"
++    with pytest.raises(DocumentWorkspaceServiceError, match="document is missing"):
++        compile_ssmdoc(root, planner_config=_config())
+
++    assert not (root / "utterplan").exists()
+
+ def test_invalid_ssmd_is_a_reported_compile_failure_without_plan(tmp_path: Path) -> None:
+     root = _workspace(tmp_path)
+@@ -136,7 +132,7 @@ def test_invalid_ssmd_is_a_reported_compile_failure_without_plan(tmp_path: Path)
+
+ def test_existing_plan_is_protected_unless_force_is_used(tmp_path: Path) -> None:
+     root = _workspace(tmp_path)
+-    output = root / ".readio" / "utterplan" / "document-0001.utterplan.toml"
++    output = root / "utterplan" / "document.utterplan.toml"
+     output.parent.mkdir(parents=True)
+     output.write_text("sentinel", encoding="utf-8")
+
+@@ -168,14 +164,15 @@ def test_output_override_and_report_override_do_not_create_default_layout(tmp_pa
+     assert result.output_dir == output_dir
+     assert result.report_path == report
+     assert result.plan_path.is_file()
++    assert result.plan_path == output_dir / "document.utterplan.toml"
+     assert report.is_file()
+-    assert not (root / ".readio" / "utterplan").exists()
++    assert not (root / "utterplan").exists()
+
+
+ def test_output_collisions_are_rejected_before_creating_directories(tmp_path: Path) -> None:
+     root = _workspace(tmp_path)
+     output_dir = tmp_path / "collision-plans"
+-    plan_path = output_dir / "document-0001.utterplan.toml"
++    plan_path = output_dir / "document.utterplan.toml"
+
+     with pytest.raises(DocumentWorkspaceServiceError, match="report path collides"):
+         compile_ssmdoc(
+@@ -203,6 +200,15 @@ def test_output_collisions_are_rejected_before_creating_directories(tmp_path: Pa
+             planner_config=_config(),
+         )
+     assert not output_dir.exists()
++    source = root / "document.ssmd.md"
++    for unsafe_output_dir in (source, source / "nested"):
++        with pytest.raises(DocumentWorkspaceServiceError, match="output directory overlaps"):
++            compile_ssmdoc(
++                root,
++                output_dir=unsafe_output_dir,
++                planner_config=_config(),
++            )
++    assert not (root / "utterplan").exists()
+
+
+ def test_invalid_manifest_is_rejected_before_output_creation(tmp_path: Path) -> None:
+diff --git a/tests/test_import_boundaries.py b/tests/test_import_boundaries.py
+index 6e36710..13f58ac 100644
+--- a/tests/test_import_boundaries.py
++++ b/tests/test_import_boundaries.py
+@@ -5,7 +5,7 @@ import sys
+ def test_import_does_not_load_consumers_engines_models_or_audio() -> None:
+     code = (
+         "import sys, utterplan; "
+-        "forbidden={'ttsready','spokenform','readio','ssmdconvert','pykokoro','pipersynth',"
++        "forbidden={'ttsready','spokenform','ssmdconvert','pykokoro','pipersynth',"
+         "'kokorog2p','piperg2p','onnxruntime','numpy','soundfile'}; "
+         "loaded=sorted({name.split('.')[0].lower() for name in sys.modules} & forbidden); "
+         "print(loaded)"
+diff --git a/tests/test_ssmdoc.py b/tests/test_ssmdoc.py
+index a9007dc..1886a9a 100644
+--- a/tests/test_ssmdoc.py
++++ b/tests/test_ssmdoc.py
+@@ -77,6 +77,47 @@ def test_resolves_ssmdoc_root_and_canonical_document_file(tmp_path: Path) -> Non
+     assert load_ssmdoc_index(root / "document.ssmd.md").root == root.resolve()
+
+
++
++def test_supports_manifest_declared_nested_source_and_optional_fields(tmp_path: Path) -> None:
++    root = tmp_path / "workspace"
++    source = root / "content" / "document.ssmd.md"
++    source.parent.mkdir(parents=True)
++    source.write_text(DOCUMENT_TEXT, encoding="utf-8")
++    document = _document(document_id="document-main", path="content/document.ssmd.md")
++    document.pop("sha256")
++    document.pop("char_count")
++    _write_manifest(root, _manifest(document=document, extra_provenance={"source": "test"}))
++
++    index = load_ssmdoc_index(root)
++
++    assert index.document_id == "document-main"
++    assert index.relative_path == "content/document.ssmd.md"
++    assert index.expected_sha256 is None
++    assert index.expected_char_count is None
++    assert index.source_path == source
++    assert resolve_ssmdoc_root(source) == root.resolve()
++    assert load_ssmdoc_index(source).document_id == "document-main"
++    with pytest.raises(SSMDDocError, match="not an ssmdoc workspace"):
++        resolve_ssmdoc_root(root / "content" / "other.ssmd.md")
++
++
++def test_stale_digest_and_character_count_do_not_block_source_resolution(tmp_path: Path) -> None:
++    root = tmp_path / "editable-workspace"
++    source = root / "document.ssmd.md"
++    source.parent.mkdir(parents=True)
++    source.write_text(DOCUMENT_TEXT, encoding="utf-8")
++    _write_manifest(
++        root,
++        _manifest(document=_document(sha256="a" * 64, char_count=0), extra_key="preserved"),
++    )
++
++    index = load_ssmdoc_index(root)
++
++    assert index.expected_sha256 == "a" * 64
++    assert index.expected_char_count == 0
++    assert index.source_path.read_text(encoding="utf-8") == DOCUMENT_TEXT
++
++
+ def test_root_detection_uses_manifest_not_suffix(tmp_path: Path) -> None:
+     root = tmp_path / "ordinary-name"
+     _write_manifest(root, _manifest())
+@@ -152,10 +193,14 @@ def test_rejects_unsupported_manifest_header(
+ @pytest.mark.parametrize(
+     ("field", "manifest_key", "value", "message"),
+     [
+-        ("document_id", "id", "other-document", "document.id"),
+-        ("path", "path", "other.ssmd.md", "document.path"),
++        ("id", "id", "", "document.id"),
++        ("id", "id", 42, "document.id"),
++        ("path", "path", "", "document.path"),
++        ("path", "path", None, "document.path"),
++        ("sha256", "sha256", None, "sha256"),
+         ("sha256", "sha256", "A" * 64, "sha256"),
+         ("sha256", "sha256", "abc", "sha256"),
++        ("char_count", "char_count", None, "char_count"),
+         ("char_count", "char_count", True, "char_count"),
+         ("char_count", "char_count", -1, "char_count"),
+     ],
+@@ -176,10 +221,14 @@ def test_rejects_invalid_document_fields(
+     "unsafe_path",
+     [
+         "/document.ssmd.md",
++        "//server/share/document.ssmd.md",
+         "C:/document.ssmd.md",
+         "C:document.ssmd.md",
++        "\\\\server\\share\\document.ssmd.md",
+         "..\\document.ssmd.md",
+         "../document.ssmd.md",
++        "nested/../document.ssmd.md",
++        ".",
+         "./document.ssmd.md",
+         "document//ssmd.md",
+         "document.ssmd.md/",
+@@ -203,14 +252,12 @@ def test_manifest_size_is_bounded_before_json_parsing(tmp_path: Path) -> None:
+         load_ssmdoc_index(root)
+
+
+-def test_missing_document_can_be_returned_for_compile_read_failure(tmp_path: Path) -> None:
++def test_rejects_missing_manifest_referenced_document(tmp_path: Path) -> None:
+     root = tmp_path / "missing-document"
+     _write_manifest(root, _manifest())
+
+-    index = load_ssmdoc_index(root)
+-
+-    assert ssmdoc_document_path(index) == root / "document.ssmd.md"
+-
++    with pytest.raises(SSMDDocError, match="document is missing"):
++        ssmdoc_document_path(load_ssmdoc_index(root))
+
+ def test_rejects_existing_non_file_document(tmp_path: Path) -> None:
+     root = tmp_path / "directory-document"
+diff --git a/utterplan/book.py b/utterplan/book.py
+index b9e9e61..6f36905 100644
+--- a/utterplan/book.py
++++ b/utterplan/book.py
+@@ -32,6 +32,8 @@ from .ssmdbook import (
+     select_ssmdbook_chapters,
+     selected_chapter_path,
+ )
++from .workspace_paths import renderplan_output_name as _renderplan_output_name
++from .workspace_paths import utterplan_output_name as _utterplan_output_name
+
+
+ class BookServiceError(ValueError):
+@@ -540,20 +542,6 @@ def _new_book_renderplan_set(
+     )
+
+
+-def _source_output_stem(source: Path) -> str:
+-    lower_name = source.name.lower()
+-    for suffix in (".ssmd.md", ".ssmd", ".md"):
+-        if lower_name.endswith(suffix):
+-            return source.name[: -len(suffix)]
+-    return source.stem
+-
+-
+-def _utterplan_output_name(source: Path) -> str:
+-    return f"{_source_output_stem(source)}.utterplan.toml"
+-
+-
+-def _renderplan_output_name(source: Path) -> str:
+-    return f"{_source_output_stem(source)}.renderplan.toml"
+
+
+ def _path_is_within(path: Path, parent: Path) -> bool:
+diff --git a/utterplan/cli.py b/utterplan/cli.py
+index a6e93c9..ff44ef2 100644
+--- a/utterplan/cli.py
++++ b/utterplan/cli.py
+@@ -45,6 +45,7 @@ from .source_input import _format_for_path as _format_source_path
+ from .source_input import load_source_path
+ from .trace_codec import loads_trace
+ from .versioning import CURRENT_SCHEMA_VERSION, V5_SCHEMA_VERSION, V6_SCHEMA_VERSION
++from .workspace_paths import utterplan_output_name as _utterplan_output_name
+
+ _EXAMPLES = """examples:
+   utterplan compile chapter.ssmd.md
+@@ -228,22 +229,23 @@ def build_parser() -> argparse.ArgumentParser:
+     )
+     document_parser = commands.add_parser(
+         "compile-document",
+-        help="compile one editable ssmdconvert.document workspace",
++        help="compile an editable SSMDoc workspace into its canonical UtterPlan",
+         formatter_class=argparse.RawDescriptionHelpFormatter,
+         epilog=(
+             "examples:\n"
+             "  utterplan compile-document story.ssmdoc\n"
+             "  utterplan compile-document . --spacy off\n"
++            "  utterplan compile-document . --force\n"
+             "  utterplan compile-document story.ssmdoc --output-dir build/utterplan --force"
+         ),
+     )
+     document_parser.add_argument(
+-        "input", type=Path, help="SSMDDoc workspace root or its canonical document.ssmd.md file"
++        "input", type=Path, help="SSMDoc workspace root or its manifest-declared source file"
+     )
+     document_parser.add_argument(
+         "--output-dir",
+         type=Path,
+-        help="plan output directory (default: <ssmdoc>/.readio/utterplan)",
++        help="plan output directory (default: <workspace>/utterplan)",
+     )
+     document_parser.add_argument("--language", "--lang", dest="language")
+     document_parser.add_argument(
+@@ -362,15 +364,31 @@ def build_parser() -> argparse.ArgumentParser:
+     render_plan_parser.add_argument(
+         "--json", action="store_true", help="emit the generated plan as machine-readable JSON"
+     )
+-    render_document_parser = commands.add_parser("render-document", help="project one compiled SSMDDoc FlowPlan")
+-    render_document_parser.add_argument("input", type=Path, help="SSMDDoc workspace root")
+-    render_document_parser.add_argument("--profile", type=Path, required=True)
+-    render_document_parser.add_argument("--variant", help="human label override")
+-    render_document_parser.add_argument("--utterplan-dir", type=Path)
+-    render_document_parser.add_argument("--output-root", type=Path)
+-    render_document_parser.add_argument("--report", type=Path)
+-    render_document_parser.add_argument("--force", action="store_true")
+-
++    render_document_parser = commands.add_parser(
++        "render-document",
++        help="project an SSMDoc workspace's saved UtterPlan into a profile-specific RenderPlan",
++        formatter_class=argparse.RawDescriptionHelpFormatter,
++        epilog=(
++            "examples:\n"
++            "  utterplan render-document story.ssmdoc --profile narration.renderprofile.toml\n"
++            "  utterplan render-document . --profile ../narration.renderprofile.toml"
++        ),
++    )
++    render_document_parser.add_argument(
++        "input", type=Path, help="SSMDoc workspace root or its manifest-declared source file"
++    )
++    render_document_parser.add_argument("--profile", type=Path, required=True, help="RenderProfile TOML file")
++    render_document_parser.add_argument(
++        "--variant", help="safe human-readable variant label; profile fingerprint is always appended"
++    )
++    render_document_parser.add_argument(
++        "--utterplan-dir", type=Path, help="directory containing the saved document UtterPlan"
++    )
++    render_document_parser.add_argument(
++        "--output-root", type=Path, help="RenderPlan variant root (default: <workspace>/renderplan)"
++    )
++    render_document_parser.add_argument("--report", type=Path, help="TOML operational report path")
++    render_document_parser.add_argument("--force", action="store_true", help="replace the existing RenderPlan")
+     render_book_parser = commands.add_parser(
+         "render-book",
+         help="project selected SSMDBook UtterPlans into a profile-specific RenderPlan set",
+@@ -582,20 +600,6 @@ def _linguistics_config(policy: str) -> LinguisticsConfig:
+     )
+
+
+-def _source_output_stem(source: Path) -> str:
+-    lower_name = source.name.lower()
+-    for suffix in (".ssmd.md", ".ssmd", ".md"):
+-        if lower_name.endswith(suffix):
+-            return source.name[: -len(suffix)]
+-    return source.stem
+-
+-
+-def _utterplan_output_name(source: Path) -> str:
+-    return _source_output_stem(source) + ".utterplan.toml"
+-
+-
+-def _renderplan_output_name(source: Path) -> str:
+-    return _source_output_stem(source) + ".renderplan.toml"
+
+
+ def _planner_config_from_batch_args(args: argparse.Namespace) -> PlannerConfig:
+diff --git a/utterplan/document_workspace.py b/utterplan/document_workspace.py
+index 263d51e..a07e4e6 100644
+--- a/utterplan/document_workspace.py
++++ b/utterplan/document_workspace.py
+@@ -17,6 +17,7 @@ from .model import FlowPlan
+ from .renderplan_export import build_render_plan
+ from .renderplan_workspace import profile_fingerprint, render_variant_label
+ from .ssmdoc import SSMDDocError, load_ssmdoc_index, ssmdoc_document_path
++from .workspace_paths import renderplan_output_name, utterplan_output_name
+
+
+ class DocumentWorkspaceServiceError(ValueError):
+@@ -109,9 +110,17 @@ def compile_ssmdoc(
+     except SSMDDocError as exc:
+         raise DocumentWorkspaceServiceError(str(exc)) from exc
+
+-    output_path = request.output_dir or (index.root / ".readio" / "utterplan")
+-    plan_path = output_path / f"{index.document_id}.utterplan.toml"
+-    report_path = request.report or (output_path / "compile-report.toml")
++    output_path = (
++        request.output_dir.expanduser()
++        if request.output_dir is not None
++        else index.root / "utterplan"
++    )
++    plan_path = output_path / utterplan_output_name(source_path)
++    report_path = (
++        request.report.expanduser()
++        if request.report is not None
++        else output_path / "compile-report.toml"
++    )
+     _preflight_outputs(index.manifest_path, source_path, output_path, plan_path, report_path)
+
+     compile_request = CompileRequest(
+@@ -201,66 +210,179 @@ DocumentRenderStartCallback = Callable[[DocumentRenderStart], None]
+
+
+ def render_ssmdoc(
+-    workspace: str | Path, *, profile: str | Path, variant: str | None = None,
+-    utterplan_dir: str | Path | None = None, output_root: str | Path | None = None,
+-    report: str | Path | None = None, force: bool = False,
++    workspace: str | Path,
++    *,
++    profile: str | Path,
++    variant: str | None = None,
++    utterplan_dir: str | Path | None = None,
++    output_root: str | Path | None = None,
++    report: str | Path | None = None,
++    force: bool = False,
+     on_start: DocumentRenderStartCallback | None = None,
+ ) -> DocumentRenderResult:
+-    """Project the already-compiled canonical document FlowPlan to one RenderPlan."""
++    """Project the saved document FlowPlan to one profile-specific RenderPlan."""
+     try:
+         index = load_ssmdoc_index(workspace)
++        source_path = ssmdoc_document_path(index)
++        if variant is not None and (
++            "/" in variant or "\\" in variant or "\x00" in variant or variant in {".", ".."}
++        ):
++            raise DocumentWorkspaceServiceError(
++                "render variant label must not contain path separators or traversal"
++            )
++
++        plan_dir = (
++            Path(utterplan_dir).expanduser().resolve(strict=False)
++            if utterplan_dir is not None
++            else index.root / "utterplan"
++        )
++        source_plan_path = plan_dir / utterplan_output_name(source_path)
++        if not source_plan_path.is_file():
++            raise DocumentWorkspaceServiceError(
++                f"No UtterPlan found at {source_plan_path}.\n"
++                "Run `utterplan compile-document <workspace>` first."
++            )
++        source_plan = FlowPlan.load(source_plan_path)
++
+         profile_path = Path(profile).expanduser().resolve(strict=True)
+         active_profile = renderplan_codec.load_profile(profile_path)
+         profile_id = active_profile.profile_id or active_profile.computed_id()
+-        variant_name = f"{render_variant_label(profile_path, variant)}--{profile_fingerprint(profile_id)}"
+-        plan_dir = Path(utterplan_dir).expanduser() if utterplan_dir is not None else index.root / ".readio" / "utterplan"
+-        source_plan_path = plan_dir / f"{index.document_id}.utterplan.toml"
+-        source_plan = FlowPlan.load(source_plan_path)
+-        variant_root = Path(output_root).expanduser() if output_root is not None else index.root / ".readio" / "renderplan"
++        variant_name = (
++            f"{render_variant_label(profile_path, variant)}--{profile_fingerprint(profile_id)}"
++        )
++        variant_root = (
++            Path(output_root).expanduser().resolve(strict=False)
++            if output_root is not None
++            else index.root / "renderplan"
++        )
+         variant_dir = variant_root / variant_name
+         snapshot_path = variant_dir / "renderprofile.toml"
+-        renderplan_path = variant_dir / f"{index.document_id}.renderplan.toml"
+-        report_path = Path(report).expanduser() if report is not None else variant_dir / "render-report.toml"
++        renderplan_path = variant_dir / renderplan_output_name(source_path)
++        report_path = (
++            Path(report).expanduser().resolve(strict=False)
++            if report is not None
++            else variant_dir / "render-report.toml"
++        )
++
+         if variant_root.exists() and not variant_root.is_dir():
+-            raise DocumentWorkspaceServiceError(f"RenderPlan output root is not a directory: {variant_root}")
+-        if report_path.resolve(strict=False) in {renderplan_path.resolve(strict=False), snapshot_path.resolve(strict=False)}:
+-            raise DocumentWorkspaceServiceError("render report path collides with a document output")
+-        protected = {index.manifest_path.resolve(strict=True), ssmdoc_document_path(index).resolve(strict=True), profile_path, source_plan_path.resolve(strict=True)}
+-        if any(path.resolve(strict=False) in protected for path in (renderplan_path, snapshot_path, report_path)):
+-            raise DocumentWorkspaceServiceError("document projection output would overwrite an input")
++            raise DocumentWorkspaceServiceError(
++                f"RenderPlan output root is not a directory: {variant_root}"
++            )
++        if variant_dir.is_symlink():
++            raise DocumentWorkspaceServiceError(
++                f"refusing to write through a variant directory symlink: {variant_dir}"
++            )
++        if variant_dir.exists() and not variant_dir.is_dir():
++            raise DocumentWorkspaceServiceError(f"variant path is not a directory: {variant_dir}")
++
++        resolved_plan_dir = plan_dir.resolve(strict=False)
++        resolved_variant_dir = variant_dir.resolve(strict=False)
++        if (
++            resolved_variant_dir == resolved_plan_dir
++            or resolved_variant_dir in resolved_plan_dir.parents
++            or resolved_plan_dir in resolved_variant_dir.parents
++        ):
++            raise DocumentWorkspaceServiceError(
++                "RenderPlan output must not overlap the UtterPlan input directory"
++            )
++
++        output_paths = (renderplan_path, snapshot_path, report_path)
++        resolved_outputs = tuple(path.resolve(strict=False) for path in output_paths)
++        if len(set(resolved_outputs)) != len(resolved_outputs):
++            raise DocumentWorkspaceServiceError("render output paths collide")
++        protected_inputs = {
++            index.manifest_path.resolve(strict=True),
++            source_path.resolve(strict=True),
++            profile_path,
++            source_plan_path.resolve(strict=True),
++        }
++        if any(
++            output == protected or protected in output.parents
++            for output in resolved_outputs
++            for protected in protected_inputs
++        ):
++            raise DocumentWorkspaceServiceError(
++                "document projection output would overwrite an input"
++            )
++        for path in output_paths:
++            if path.is_symlink():
++                raise DocumentWorkspaceServiceError(f"render output must not be a symlink: {path}")
++            if path.exists() and path.is_dir():
++                raise DocumentWorkspaceServiceError(f"metadata output is a directory: {path}")
++
++        has_matching_snapshot = False
+         if variant_dir.exists():
+-            if not variant_dir.is_dir():
+-                raise DocumentWorkspaceServiceError(f"variant path is not a directory: {variant_dir}")
+             nonempty = next(variant_dir.iterdir(), None) is not None
+             if nonempty and not snapshot_path.is_file():
+-                raise DocumentWorkspaceServiceError(f"refusing to adopt unknown non-empty variant directory: {variant_dir}")
++                raise DocumentWorkspaceServiceError(
++                    f"refusing to adopt unknown non-empty variant directory: {variant_dir}"
++                )
+             if snapshot_path.exists():
++                if snapshot_path.is_symlink():
++                    raise DocumentWorkspaceServiceError(
++                        f"render profile snapshot must not be a symlink: {snapshot_path}"
++                    )
+                 existing_profile = renderplan_codec.load_profile(snapshot_path)
+                 existing_id = existing_profile.profile_id or existing_profile.computed_id()
+                 if existing_id != profile_id:
+-                    raise DocumentWorkspaceServiceError("existing variant snapshot has a different profile identity")
++                    raise DocumentWorkspaceServiceError(
++                        "existing variant snapshot has a different profile identity"
++                    )
++                has_matching_snapshot = True
+             if renderplan_path.exists() and not force:
+-                raise DocumentWorkspaceServiceError(f"RenderPlan already exists (use --force): {renderplan_path}")
+-        if variant_dir.resolve(strict=False) == plan_dir.resolve(strict=False) or variant_dir.resolve(strict=False).is_relative_to(plan_dir.resolve(strict=False)):
+-            raise DocumentWorkspaceServiceError("RenderPlan output must not overlap the UtterPlan input directory")
+-        for path in (renderplan_path, snapshot_path, report_path):
+-            if path.exists() and path.is_dir():
+-                raise DocumentWorkspaceServiceError(f"metadata output is a directory: {path}")
+-        if on_start:
+-            on_start(DocumentRenderStart(index.root, index.document_id, source_plan_path, profile_path, profile_id, variant_name, variant_dir, renderplan_path, report_path))
++                raise DocumentWorkspaceServiceError(
++                    f"RenderPlan already exists (use --force): {renderplan_path}"
++                )
++
+         plan = build_render_plan(source_plan, active_profile).with_identity()
++        if on_start is not None:
++            on_start(
++                DocumentRenderStart(
++                    index.root,
++                    index.document_id,
++                    source_plan_path,
++                    profile_path,
++                    profile_id,
++                    variant_name,
++                    variant_dir,
++                    renderplan_path,
++                    report_path,
++                )
++            )
++
+         variant_dir.mkdir(parents=True, exist_ok=True)
+-        renderplan_codec.save_profile(active_profile, snapshot_path)
++        if not has_matching_snapshot:
++            renderplan_codec.save_profile(active_profile, snapshot_path)
+         renderplan_codec.save_plan(plan, renderplan_path)
+         report_data: dict[str, Any] = {
+-            "format": "utterplan-document-render-report", "version": 1, "complete": True,
+-            "workspace": str(index.root.resolve()), "document_id": index.document_id,
+-            "source_plan": str(source_plan_path.resolve()), "source_plan_id": source_plan.plan_id,
+-            "profile": str(profile_path), "profile_id": profile_id, "variant": variant_name,
+-            "renderplan": str(renderplan_path.resolve()), "render_plan_id": plan.plan_id,
++            "format": "utterplan.render-document-report",
++            "version": 1,
++            "status": "ok",
++            "workspace": str(index.root.resolve()),
++            "document_id": index.document_id,
++            "profile": str(profile_path),
++            "profile_id": profile_id,
++            "variant": variant_name,
++            "source_plan": str(source_plan_path.resolve()),
++            "source_plan_id": source_plan.plan_id,
++            "render_plan": str(renderplan_path.resolve()),
++            "render_plan_id": plan.plan_id,
+         }
+         atomic_write_text(report_path, tomlkit.dumps(report_data), create_parent=True)
+-        return DocumentRenderResult(index.root, index.document_id, source_plan_path, source_plan.plan_id, profile_path, profile_id, variant_name, variant_dir, snapshot_path, renderplan_path, plan.plan_id, report_path)
++        return DocumentRenderResult(
++            index.root,
++            index.document_id,
++            source_plan_path,
++            source_plan.plan_id,
++            profile_path,
++            profile_id,
++            variant_name,
++            variant_dir,
++            snapshot_path,
++            renderplan_path,
++            plan.plan_id,
++            report_path,
++        )
+     except (SSMDDocError, OSError, RuntimeError, ValueError, TypeError) as exc:
+         if isinstance(exc, DocumentWorkspaceServiceError):
+             raise
+@@ -276,31 +398,40 @@ def _preflight_outputs(
+ ) -> None:
+     resolved_manifest = manifest_path.resolve(strict=False)
+     resolved_source = source_path.resolve(strict=False)
++    resolved_output_dir = output_dir.expanduser().resolve(strict=False)
+     resolved_plan = plan_path.expanduser().resolve(strict=False)
+     resolved_report = report_path.expanduser().resolve(strict=False)
++    protected_inputs = (resolved_manifest, resolved_source)
+
++    if resolved_output_dir in protected_inputs or any(
++        protected in resolved_output_dir.parents for protected in protected_inputs
++    ):
++        raise DocumentWorkspaceServiceError(
++            "document output directory overlaps a source workspace file"
++        )
++    if output_dir.expanduser().exists() and not output_dir.expanduser().is_dir():
++        raise DocumentWorkspaceServiceError(
++            f"document output directory is not a directory: {output_dir.expanduser()}"
++        )
+     if resolved_plan == resolved_report:
+         raise DocumentWorkspaceServiceError(
+             f"document report path collides with plan output: {report_path}"
+         )
+     for output in (resolved_plan, resolved_report):
+-        if output in {resolved_manifest, resolved_source}:
++        if output == resolved_output_dir:
++            raise DocumentWorkspaceServiceError(
++                f"document output path collides with output directory: {output}"
++            )
++        if any(output == protected or protected in output.parents for protected in protected_inputs):
+             raise DocumentWorkspaceServiceError(
+                 f"document output would overwrite source workspace content: {output}"
+             )
+-
+-    expanded_output_dir = output_dir.expanduser()
+-    if expanded_output_dir.exists() and not expanded_output_dir.is_dir():
+-        raise DocumentWorkspaceServiceError(
+-            f"document output directory is not a directory: {expanded_output_dir}"
+-        )
+     for output_path in (plan_path, report_path):
+         if output_path.exists() and output_path.is_dir():
+             raise DocumentWorkspaceServiceError(
+                 f"document output path is a directory when a file is expected: {output_path}"
+             )
+
+-
+ __all__ = [
+     "DocumentCompileRequest",
+     "DocumentCompileResult",
+diff --git a/utterplan/source_input.py b/utterplan/source_input.py
+index 7873e0c..bf3c295 100644
+--- a/utterplan/source_input.py
++++ b/utterplan/source_input.py
+@@ -43,6 +43,8 @@ def load_source_path(
+             index = load_ssmdoc_index(input_path)
+             source_path = ssmdoc_document_path(index)
+         except SSMDDocError as exc:
++            if isinstance(exc.__cause__, FileNotFoundError):
++                raise exc.__cause__ from None
+             raise SourceInputError(f"unsupported source directory {input_path}: {exc}") from exc
+         workspace_root = index.root
+         workspace_kind = "ssmdoc"
+diff --git a/utterplan/ssmdoc.py b/utterplan/ssmdoc.py
+index 05185a8..bdee071 100644
+--- a/utterplan/ssmdoc.py
++++ b/utterplan/ssmdoc.py
+@@ -11,8 +11,6 @@ from typing import Any
+ _DOCUMENT_FORMAT = "ssmdconvert.document"
+ _DOCUMENT_SCHEMA_VERSION = 1
+ _SSMD_VERSION = "0.9"
+-_DOCUMENT_ID = "document-0001"
+-_DOCUMENT_PATH = "document.ssmd.md"
+ _MAX_MANIFEST_BYTES = 2 * 1024 * 1024
+ _MAX_DOCUMENT_BYTES = 64 * 1024 * 1024
+ _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+@@ -30,25 +28,39 @@ class SSMDDocIndex:
+     manifest_path: Path
+     document_id: str
+     relative_path: str
+-    expected_sha256: str
+-    expected_char_count: int
++    expected_sha256: str | None = None
++    expected_char_count: int | None = None
++
++    @property
++    def source_path(self) -> Path:
++        """Return the manifest-declared source after enforcing path safety."""
++        return ssmdoc_document_path(self)
+
+
+ def resolve_ssmdoc_root(path: str | Path) -> Path:
+-    """Resolve a manifest-authorized workspace root or its canonical document path."""
++    """Resolve a manifest-authorized workspace root or its declared source path."""
+     input_path = Path(path).expanduser()
+     try:
+         if input_path.is_dir():
+             root = input_path.resolve(strict=True)
+             if _has_document_manifest(root):
+                 return root
+-        elif input_path.name == _DOCUMENT_PATH and input_path.parent.is_dir():
+-            root = input_path.parent.resolve(strict=True)
+-            if _has_document_manifest(root):
+-                return root
++
++        input_absolute = input_path.absolute()
++        for candidate in (input_absolute.parent, *input_absolute.parent.parents):
++            root = candidate.resolve(strict=True)
++            if not _has_document_manifest(root):
++                continue
++            index = load_ssmdoc_index(root)
++            try:
++                relative_input = input_absolute.relative_to(candidate.absolute()).as_posix()
++            except ValueError:
++                continue
++            if relative_input == index.relative_path:
++                return index.root
+     except SSMDDocError:
+         raise
+-    except (OSError, RuntimeError) as exc:
++    except (OSError, RuntimeError, ValueError) as exc:
+         raise SSMDDocError(f"cannot inspect ssmdoc input {input_path}: {exc}") from exc
+
+     raise SSMDDocError(
+@@ -76,22 +88,27 @@ def load_ssmdoc_index(path: str | Path) -> SSMDDocIndex:
+         raise SSMDDocError("ssmdoc manifest document must be an object")
+     document_id = document.get("id")
+     relative_path = document.get("path")
+-    expected_sha256 = document.get("sha256")
+-    expected_char_count = document.get("char_count")
+-
+-    if document_id != _DOCUMENT_ID:
+-        raise SSMDDocError(f"unsupported ssmdoc document.id; expected '{_DOCUMENT_ID}'")
++    if not isinstance(document_id, str) or not document_id.strip():
++        raise SSMDDocError("ssmdoc document.id must be a non-empty string")
+     if not isinstance(relative_path, str) or not relative_path:
+         raise SSMDDocError(
+             "ssmdoc document.path must be a non-empty normalized relative POSIX path"
+         )
+     _validate_relative_document_path(relative_path)
+-    if relative_path != _DOCUMENT_PATH:
+-        raise SSMDDocError(f"unsupported ssmdoc document.path; expected '{_DOCUMENT_PATH}'")
+-    if not isinstance(expected_sha256, str) or _SHA256_RE.fullmatch(expected_sha256) is None:
+-        raise SSMDDocError("ssmdoc document.sha256 must be 64 lowercase hexadecimal characters")
+-    if type(expected_char_count) is not int or expected_char_count < 0:
+-        raise SSMDDocError("ssmdoc document.char_count must be a non-negative integer")
++
++    expected_sha256: str | None = None
++    if "sha256" in document:
++        value = document["sha256"]
++        if not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None:
++            raise SSMDDocError("ssmdoc document.sha256 must be 64 lowercase hexadecimal characters")
++        expected_sha256 = value
++
++    expected_char_count: int | None = None
++    if "char_count" in document:
++        value = document["char_count"]
++        if type(value) is not int or value < 0:
++            raise SSMDDocError("ssmdoc document.char_count must be a non-negative integer")
++        expected_char_count = value
+
+     return SSMDDocIndex(
+         root=root,
+@@ -104,28 +121,34 @@ def load_ssmdoc_index(path: str | Path) -> SSMDDocIndex:
+
+
+ def ssmdoc_document_path(index: SSMDDocIndex) -> Path:
+-    """Return the canonical document path after enforcing containment and file safety."""
++    """Return the declared source path after enforcing containment and file safety."""
+     _validate_relative_document_path(index.relative_path)
+-    if index.relative_path != _DOCUMENT_PATH:
+-        raise SSMDDocError(f"unsupported ssmdoc document.path; expected '{_DOCUMENT_PATH}'")
++    root = index.root.resolve(strict=True)
++    source = root.joinpath(*PurePosixPath(index.relative_path).parts)
++    try:
++        resolved = source.resolve(strict=True)
++    except FileNotFoundError as exc:
++        raise SSMDDocError(f"ssmdoc document is missing: {index.relative_path}") from exc
++    except (OSError, RuntimeError) as exc:
++        raise SSMDDocError(
++            f"cannot resolve ssmdoc document path {index.relative_path}: {exc}"
++        ) from exc
+
+     try:
+-        root = index.root.resolve(strict=True)
+-        source = root.joinpath(*PurePosixPath(index.relative_path).parts)
+-        resolved = source.resolve(strict=False)
+         resolved.relative_to(root)
+-        exists_or_link = source.exists() or source.is_symlink()
+-        if exists_or_link:
+-            if not resolved.is_file():
+-                raise SSMDDocError(f"ssmdoc document is not a regular file: {index.relative_path}")
+-            if resolved.stat().st_size > _MAX_DOCUMENT_BYTES:
+-                raise SSMDDocError("ssmdoc document.ssmd.md exceeds the 64 MiB size limit")
+-    except SSMDDocError:
+-        raise
+-    except (OSError, RuntimeError, ValueError) as exc:
++    except ValueError as exc:
+         raise SSMDDocError(
+             f"ssmdoc document path escapes workspace root: {index.relative_path}"
+         ) from exc
++    if not resolved.is_file():
++        raise SSMDDocError(f"ssmdoc document is not a regular file: {index.relative_path}")
++    try:
++        if resolved.stat().st_size > _MAX_DOCUMENT_BYTES:
++            raise SSMDDocError("ssmdoc document exceeds the 64 MiB size limit")
++    except OSError as exc:
++        raise SSMDDocError(
++            f"cannot inspect ssmdoc document {index.relative_path}: {exc}"
++        ) from exc
+     return source
+
+
+@@ -172,8 +195,8 @@ def _validate_relative_document_path(value: str) -> None:
+     path = PurePosixPath(value)
+     if path.is_absolute() or PureWindowsPath(value).drive:
+         raise SSMDDocError("ssmdoc document.path must be a relative POSIX path")
+-    if any(part in {".", ".."} for part in path.parts):
+-        raise SSMDDocError("ssmdoc document.path must not contain '.' or '..' components")
++    if not path.parts or any(part in {"", ".", ".."} for part in value.split("/")):
++        raise SSMDDocError("ssmdoc document.path must not contain empty, '.' or '..' components")
+     if path.as_posix() != value:
+         raise SSMDDocError("ssmdoc document.path must be a normalized relative POSIX path")
+
+diff --git a/utterplan/workspace_paths.py b/utterplan/workspace_paths.py
+new file mode 100644
+index 0000000..29be0f0
+--- /dev/null
++++ b/utterplan/workspace_paths.py
+@@ -0,0 +1,27 @@
++"""Shared filename helpers for workspace-local derived artifacts."""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++
++def source_output_stem(source: Path) -> str:
++    """Return the portable artifact stem for an SSMD source path."""
++    lower_name = source.name.lower()
++    for suffix in (".ssmd.md", ".ssmd", ".md"):
++        if lower_name.endswith(suffix):
++            return source.name[: -len(suffix)]
++    return source.stem
++
++
++def utterplan_output_name(source: Path) -> str:
++    """Return the canonical UtterPlan filename for an SSMD source."""
++    return f"{source_output_stem(source)}.utterplan.toml"
++
++
++def renderplan_output_name(source: Path) -> str:
++    """Return the canonical RenderPlan filename for an SSMD source."""
++    return f"{source_output_stem(source)}.renderplan.toml"
++
++
++__all__ = ["renderplan_output_name", "source_output_stem", "utterplan_output_name"]

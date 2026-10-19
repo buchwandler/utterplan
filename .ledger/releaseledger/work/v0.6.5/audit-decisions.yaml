@@ -1,0 +1,95 @@
+rows:
+  - sha: afed223c482a9421b0fa38d3d6aa6a35bd00df63
+    inspected: true
+    inspected_paths:
+      - docs/ssmdoc.md
+      - tests/test_cli_ssmdoc.py
+      - tests/test_document_render.py
+      - utterplan/__init__.py
+      - utterplan/book.py
+      - utterplan/cli.py
+      - utterplan/document_workspace.py
+      - utterplan/renderplan_workspace.py
+    observed_behavior: "Added the render-document service, CLI command, public API, profile-specific artifact projection, and safety tests for compiled SSMDDoc workspaces."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
+  - sha: a0edfc00862bcbc77a3746c963d6e9d23436c002
+    inspected: true
+    inspected_paths:
+      - .ledger/archledger/data/document-state.json
+      - .ledger/archledger/data/profiles/arc42/sections/content-0001.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0003.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0006.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0007.md
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/ssmdoc.md
+      - tests/test_cli_render_document.py
+      - tests/test_cli_ssmdoc.py
+      - tests/test_document_render.py
+      - tests/test_document_workspace.py
+      - tests/test_import_boundaries.py
+      - tests/test_ssmdoc.py
+      - utterplan/book.py
+      - utterplan/cli.py
+      - utterplan/document_workspace.py
+      - utterplan/source_input.py
+      - utterplan/ssmdoc.py
+      - utterplan/workspace_paths.py
+    observed_behavior: "Changed editable SSMDDoc compilation and projection to stable workspace-local utterplan and renderplan directories, with updated documentation and tests."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
+  - sha: b12e1f24350c6974f6710f942fad601db8252b0e
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/python-api.md
+      - docs/ssmdbook.md
+      - docs/ssmdoc.md
+      - tests/test_book_api.py
+      - tests/test_cli_render_book.py
+      - tests/test_cli_render_document.py
+      - tests/test_cli_ssmdoc.py
+      - tests/test_document_render.py
+      - tests/test_document_workspace.py
+      - tests/test_renderplan_export.py
+      - tests/test_role_coverage.py
+      - tests/test_ssmdoc.py
+      - utterplan/__init__.py
+      - utterplan/book.py
+      - utterplan/cli.py
+      - utterplan/document_workspace.py
+      - utterplan/renderplan_export.py
+      - utterplan/renderplan_workspace.py
+      - utterplan/role_coverage.py
+      - utterplan/ssmdoc.py
+    observed_behavior: "Added renderer-independent logical role inventory and complete RenderProfile coverage checks for document and book projections, with CLI, API, documentation, and tests."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
+  - sha: 6955399abed0c84dbfa9d589cccac79f44d9652f
+    inspected: true
+    inspected_paths:
+      - docs/ssmdbook.md
+      - docs/ssmdoc.md
+    observed_behavior: "Corrected role-coverage documentation links to the repository README for stable navigation."
+    public_impact: docs
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false

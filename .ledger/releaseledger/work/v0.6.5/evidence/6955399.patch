@@ -1,0 +1,27 @@
+ docs/ssmdbook.md | 2 +-
+ docs/ssmdoc.md   | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/docs/ssmdbook.md b/docs/ssmdbook.md
+index c34400c..0673c9f 100644
+--- a/docs/ssmdbook.md
++++ b/docs/ssmdbook.md
+@@ -102,7 +102,7 @@ utterplan render-book . --profile amy.renderprofile.toml --chapters 5-17
+ utterplan render-book . --profile joe.renderprofile.toml --chapters 5-17
+ ```
+
+-One RenderProfile is the complete cast shared by every selected chapter, not a profile per character or role. Logical role names live in SSMD; the profile's role bindings can target different renderers. Before creating a new variant, `render-book` checks all readable selected UtterPlans together and reports every uncovered role with the affected chapter IDs. See the [README role example](../README.md#logical-roles-and-complete-renderprofiles).
++One RenderProfile is the complete cast shared by every selected chapter, not a profile per character or role. Logical role names live in SSMD; the profile's role bindings can target different renderers. Before creating a new variant, `render-book` checks all readable selected UtterPlans together and reports every uncovered role with the affected chapter IDs. See the [README role example](https://github.com/buchwandler/utterplan/blob/main/README.md#logical-roles-and-complete-renderprofiles).
+
+ The result has one shared semantic collection and distinct renderer-specific
+ variants, for example:
+diff --git a/docs/ssmdoc.md b/docs/ssmdoc.md
+index 85e0160..93336f5 100644
+--- a/docs/ssmdoc.md
++++ b/docs/ssmdoc.md
+@@ -77,4 +77,4 @@ This writes `renderplan/<label>--<profile-fingerprint>/renderprofile.toml`, `doc
+
+ A source-level `voice` name such as `narrator`, `host`, or `guest` is a **logical role**; it does not name an engine voice. The selected RenderProfile's **role binding** supplies the concrete renderer configuration. Treat one RenderProfile as the complete cast for a rendering variant, including its default role and shared planning/pause policy. UtterPlan accepts exactly one profile for this projection; it does not accept one profile per role or discover engines.
+
+-Use `utterplan inspect <plan> --roles` to see explicit speech-role counts and whether unqualified speech needs the selected profile's default. `render-document` reports required roles and complete coverage, and rejects any missing roles before creating a new variant directory. The same multi-role RenderProfile format and example are documented in the [README](../README.md#logical-roles-and-complete-renderprofiles).
++Use `utterplan inspect <plan> --roles` to see explicit speech-role counts and whether unqualified speech needs the selected profile's default. `render-document` reports required roles and complete coverage, and rejects any missing roles before creating a new variant directory. The same multi-role RenderProfile format and example are documented in the [README](https://github.com/buchwandler/utterplan/blob/main/README.md#logical-roles-and-complete-renderprofiles).
