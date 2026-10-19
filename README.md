@@ -41,6 +41,16 @@ utterplan compile-many examples/*.ssmd --output-dir build/plans
 
 This writes one `.utterplan.toml` per source plus an atomically refreshed `compile-report.toml`. Terminal diagnostics default to warnings; `--diagnostics all` also prints informational records, while `--diagnostics none` suppresses non-failure details. Failures are always reported, and the operational report retains every diagnostic. Use `--fail-fast` to skip later inputs after a failure, `--force` to replace existing plans, or `--report PATH` to choose another report location.
 
+## Compile an SSMDDoc workspace
+
+Compile one editable `.ssmdoc` directory as one SSMD document and one FlowPlan:
+
+```bash
+utterplan compile-document story.ssmdoc
+```
+
+By default this writes `story.ssmdoc/.readio/utterplan/document-0001.utterplan.toml` and a `compile-report.toml`. The current `document.ssmd.md` is authoritative even if its manifest digest is stale; UtterPlan leaves the source and manifest untouched. This is separate from the multi-chapter SSMDBook workflow below. See the [SSMDDoc workspace guide](docs/ssmdoc.md) for manifest safety, output options, and the Python API.
+
 Compile a selected chapter range directly from an editable SSMDBook workspace:
 
 ```bash

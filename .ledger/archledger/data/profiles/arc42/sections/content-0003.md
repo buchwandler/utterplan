@@ -7,7 +7,7 @@ section: context_and_scope
 title: Context and Scope
 order: 30
 status: accepted
-version: 2
+version: 3
 body_format: markdown
 ---
 
@@ -64,3 +64,9 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
 - SSMD source migration (`ssmd migrate` owns that).
 - Renderer chunking, token-budget, and pause-realization choices.
 - Consumer-specific compatibility testing.
+
+## SSMDDoc source workspace
+
+- An editable `.ssmdoc` directory is discovered by its `ssmdconvert.document` v1 manifest, not by its directory suffix. Its canonical `document.ssmd.md` is the current compiler input.
+- The workspace remains one document to one FlowPlan. Manifest digests are provenance only for editable directories: UtterPlan compiles current content and never refreshes the manifest or edits the source.
+- `compile-document` is single-document convenience, not book orchestration. ZIP bundles, fake chapters, and an `ssmdconvert` runtime dependency are outside the contract.

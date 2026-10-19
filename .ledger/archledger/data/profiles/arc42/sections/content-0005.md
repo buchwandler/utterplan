@@ -7,7 +7,7 @@ section: building_block_view
 title: Building Block View
 order: 50
 status: accepted
-version: 2
+version: 3
 body_format: markdown
 ---
 
@@ -39,3 +39,7 @@ when requested, the trace retains source text/hash, coordinate maps, preparation
 provenance, diagnostics, and renderability evidence in a separate versioned TOML
 sidecar. Trace state is not renderer input and does not affect plan identity or
 TOML.
+
+## Document workspace orchestration
+
+`ssmdoc.py` performs read-only manifest discovery and canonical path safety checks; `source_input.py` centralizes standalone-file and `.ssmdoc` source loading; and `document_workspace.py` delegates one stable `document-0001` CompileRequest to the existing batch persistence/report path. The CLI and public package API expose `compile-document` and `compile_ssmdoc()` without shadowing the in-memory `compile_document()` compiler.

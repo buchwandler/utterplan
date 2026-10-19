@@ -1,6 +1,6 @@
 ---
 title: "Architecture Documentation"
-version: 1
+version: 2
 generator: "archledger 0.4.0"
 arc42_template_version: "9.0-EN"
 ---
@@ -59,6 +59,10 @@ G2P / synthesis / audio (downstream)
 The compiler still handles one document at a time; the CLI's explicit SSMDBook
 commands (`compile-book`, `render-book`) discover chapters and orchestrate per-file
 workspaces without changing book content.
+
+## Document workspaces
+
+An editable `ssmdconvert.document` v1 workspace (`.ssmdoc`) is another source path for the one-document compiler. `compile-document` discovers its canonical current SSMD document and writes one FlowPlan plus an operational report under `.readio/utterplan/`; it does not create a book or alter workspace source material.
 
 ## Requirements Overview
 
@@ -164,6 +168,12 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
 - Renderer chunking, token-budget, and pause-realization choices.
 - Consumer-specific compatibility testing.
 
+## SSMDDoc source workspace
+
+- An editable `.ssmdoc` directory is discovered by its `ssmdconvert.document` v1 manifest, not by its directory suffix. Its canonical `document.ssmd.md` is the current compiler input.
+- The workspace remains one document to one FlowPlan. Manifest digests are provenance only for editable directories: UtterPlan compiles current content and never refreshes the manifest or edits the source.
+- `compile-document` is single-document convenience, not book orchestration. ZIP bundles, fake chapters, and an `ssmdconvert` runtime dependency are outside the contract.
+
 ## Business Context
 
 <!-- archledger: no accepted records for this section yet -->
@@ -253,6 +263,10 @@ provenance, diagnostics, and renderability evidence in a separate versioned TOML
 sidecar. Trace state is not renderer input and does not affect plan identity or
 TOML.
 
+## Document workspace orchestration
+
+`ssmdoc.py` performs read-only manifest discovery and canonical path safety checks; `source_input.py` centralizes standalone-file and `.ssmdoc` source loading; and `document_workspace.py` delegates one stable `document-0001` CompileRequest to the existing batch persistence/report path. The CLI and public package API expose `compile-document` and `compile_ssmdoc()` without shadowing the in-memory `compile_document()` compiler.
+
 <!-- archledger: no accepted records for this section yet -->
 
 # Runtime View
@@ -327,6 +341,17 @@ accepts TOML only and rejects JSON.
 RenderPlan and its matching preflight report are required together; UtterPlan does
 not calculate renderer-specific metrics.
 
+## Scenario: compile an editable SSMDDoc workspace
+
+```text
+ssmdconvert.document v1 manifest + current document.ssmd.md
+    -> utterplan compile-document
+    -> one FlowPlan at .readio/utterplan/document-0001.utterplan.toml
+       + one compile-report.toml
+```
+
+The manifest validates the workspace contract and safe canonical path; SSMD 0.9 content is compiled by the existing single-document path. A stale stored digest does not block editable-directory compilation, and UtterPlan does not modify source material or model the document as a chapter.
+
 <!-- archledger: no accepted records for this section yet -->
 
 # Deployment View
@@ -354,6 +379,8 @@ or audio dependencies:
   `sphinx-build -W --keep-going -b html docs docs/_build/html`.
 - **Quality gate.** `python -m pytest -q`, `ruff check .`, and `mypy utterplan` run
   against the self-contained repository test suite.
+
+- **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes derived plans under the reserved `.readio/utterplan/` directory without changing source files.
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -484,6 +511,8 @@ drafts and never become canonical plans.
   compiled plan; replanning is a separate operation. _Rationale:_ schema evolution
   must not force package-version coupling or silent replans.
 
+- **AD: SSMDDoc is one document, not a book.** An `ssmdconvert.document` v1 workspace resolves to its current canonical SSMD source and the existing one-document compiler, producing one FlowPlan. Editable directory digests do not override current source content; UtterPlan neither refreshes nor mutates the workspace. _Rationale:_ preserve one-document/one-plan semantics and keep source-workspace ownership in `ssmdconvert`.
+
 <!-- archledger: no accepted records for this section yet -->
 
 # Quality Requirements
@@ -583,5 +612,7 @@ drafts and never become canonical plans.
 | SSMDBook         | Editable book workspace whose manifest drives chapter discovery; `compile-book`/`render-book` orchestrate per-file workspaces without changing content.                                             |
 | Planning attempt | Inspect-only `utterplan.planning-attempt.v1` artifact for reviewing blocked renderability outcomes; never a canonical plan.                                                                         |
 | plan_id          | Deterministic renderer-independent plan identity; v7 `utterplan-flow-v3` includes boundaries and never hashes TOML formatting.                                                                      |
+
+| SSMDDoc | Editable single-document workspace using the `ssmdconvert.document` v1 manifest; `compile-document` compiles the current canonical SSMD file to one FlowPlan without mutating source. |
 
 <!-- archledger: no accepted records for this section yet -->

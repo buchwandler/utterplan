@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -145,6 +146,57 @@ def test_compile_auto_detects_ssmd_suffix(
     source.write_text("Hello SSMD.", encoding="utf-8")
     assert main(["compile", str(source), "--lang", "en-us"]) == 0
     assert _payload(capsys)["document"]["format"] == "ssmd"
+
+
+def test_compile_ssmdoc_directory_matches_canonical_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
+    workspace = tmp_path / "story.ssmdoc"
+    shutil.copytree(fixture, workspace)
+    source = workspace / "document.ssmd.md"
+
+    assert main(["compile", str(source), "--spacy", "off"]) == 0
+    direct = FlowPlan.from_toml(capsys.readouterr().out)
+    assert main(["compile", str(workspace), "--spacy", "off"]) == 0
+    from_workspace = FlowPlan.from_toml(capsys.readouterr().out)
+
+    assert from_workspace.plan_id == direct.plan_id
+    assert from_workspace.to_dict() == direct.to_dict()
+
+
+def test_validate_accepts_dirty_ssmdoc_workspace(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
+    workspace = tmp_path / "dirty.ssmdoc"
+    shutil.copytree(fixture, workspace)
+    manifest = workspace / "manifest.json"
+    manifest_before = manifest.read_bytes()
+    source = workspace / "document.ssmd.md"
+    source.write_text(
+        '---\nssmd_version: "0.9"\nlanguage: en-US\n---\n\nEdited current document.\n',
+        encoding="utf-8",
+    )
+
+    assert main(["validate", str(workspace)]) == 0
+    captured = capsys.readouterr()
+    assert "valid" in captured.out
+    assert "input format: ssmd" in captured.out
+    assert manifest.read_bytes() == manifest_before
+    assert "Edited current document." in source.read_text(encoding="utf-8")
+
+
+def test_compile_and_validate_reject_arbitrary_directories(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    directory = tmp_path / "not-a-source"
+    directory.mkdir()
+
+    assert main(["compile", str(directory)]) == 1
+    assert "unsupported source directory" in capsys.readouterr().err
+    assert main(["validate", str(directory)]) == 1
+    assert "unsupported source directory" in capsys.readouterr().err
 
 
 def test_compile_explicit_ssmd_from_stdin(

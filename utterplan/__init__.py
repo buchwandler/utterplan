@@ -41,6 +41,14 @@ from .config import (
     PlannerConfig,
     SSMDConfig,
 )
+from .document_workspace import (
+    DocumentCompileRequest,
+    DocumentCompileResult,
+    DocumentCompileStart,
+    DocumentCompileStartCallback,
+    DocumentWorkspaceServiceError,
+    compile_ssmdoc,
+)
 from .exceptions import (
     ConfigurationError,
     LanguagePlanError,
@@ -134,6 +142,12 @@ __all__ = [
     "BookRenderStart",
     "BookRenderStartCallback",
     "BookServiceError",
+    "DocumentCompileRequest",
+    "DocumentCompileResult",
+    "DocumentCompileStart",
+    "DocumentCompileStartCallback",
+    "DocumentWorkspaceServiceError",
+    "compile_ssmdoc",
     "BookReplanError",
     "BookReplanRequest",
     "BookReplanResult",

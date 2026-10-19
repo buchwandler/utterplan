@@ -1,0 +1,21 @@
+{
+  "format": "ssmdconvert.document",
+  "schema_version": 1,
+  "ssmd_version": "0.9",
+  "metadata": {
+    "title": "UtterPlan document fixture",
+    "language": "en-US"
+  },
+  "source": {
+    "format": "markdown",
+    "media_type": "text/markdown",
+    "name": "story.md",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "document": {
+    "id": "document-0001",
+    "path": "document.ssmd.md",
+    "char_count": 87,
+    "sha256": "ed67851d91bb3d82c08020d1cdfef99102632a62dbeea46ee1793cf8fa9a49c3"
+  }
+}

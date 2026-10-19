@@ -1,1 +1,2 @@
 prune .ledger
+include docs/ssmdoc.md

@@ -7,7 +7,7 @@ section: runtime_view
 title: Runtime View
 order: 60
 status: accepted
-version: 2
+version: 3
 body_format: markdown
 ---
 
@@ -80,3 +80,14 @@ accepts TOML only and rejects JSON.
 `render-plan --previous-plan`/`build_render_plan(..., previous_plan=..., preflight=...)` refine only failed speech occurrences. Both the exact previous
 RenderPlan and its matching preflight report are required together; UtterPlan does
 not calculate renderer-specific metrics.
+
+## Scenario: compile an editable SSMDDoc workspace
+
+```text
+ssmdconvert.document v1 manifest + current document.ssmd.md
+    -> utterplan compile-document
+    -> one FlowPlan at .readio/utterplan/document-0001.utterplan.toml
+       + one compile-report.toml
+```
+
+The manifest validates the workspace contract and safe canonical path; SSMD 0.9 content is compiled by the existing single-document path. A stale stored digest does not block editable-directory compilation, and UtterPlan does not modify source material or model the document as a chapter.

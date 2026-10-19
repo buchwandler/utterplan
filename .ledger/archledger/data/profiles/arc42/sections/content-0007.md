@@ -7,7 +7,7 @@ section: deployment_view
 title: Deployment View
 order: 70
 status: accepted
-version: 2
+version: 3
 body_format: markdown
 ---
 
@@ -34,3 +34,5 @@ or audio dependencies:
   `sphinx-build -W --keep-going -b html docs docs/_build/html`.
 - **Quality gate.** `python -m pytest -q`, `ruff check .`, and `mypy utterplan` run
   against the self-contained repository test suite.
+
+- **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes derived plans under the reserved `.readio/utterplan/` directory without changing source files.

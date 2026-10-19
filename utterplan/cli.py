@@ -26,6 +26,13 @@ from .book_replan import BookReplanStart, ReplanOutcome
 from .book_replan import replan_book as _replan_book_service
 from .compiler import InputFormat, PreparationTrace, compile_document
 from .config import LinguisticsConfig, PlannerConfig
+from .document_workspace import (
+    DocumentCompileStart,
+    DocumentWorkspaceServiceError,
+)
+from .document_workspace import (
+    compile_ssmdoc as _compile_ssmdoc_service,
+)
 from .exceptions import PlanFormatError, PlanRenderabilityError, UtterPlanError
 from .explain import format_explanation
 from .migration import MigrationResult, migrate_plan_data
@@ -34,6 +41,8 @@ from .preview import PreviewChunk, preview_plan
 from .renderability import format_renderability_error
 from .renderplan_batch import RenderOutcome
 from .renderplan_export import build_render_plan, format_render_plan_explanation
+from .source_input import _format_for_path as _format_source_path
+from .source_input import load_source_path
 from .trace_codec import loads_trace
 from .versioning import CURRENT_SCHEMA_VERSION, V5_SCHEMA_VERSION, V6_SCHEMA_VERSION
 
@@ -43,6 +52,7 @@ _EXAMPLES = """examples:
   utterplan compile plain.txt --input-format plain --language de-DE --stdout
   utterplan compile-many chapters/*.ssmd --output-dir build/plans
   utterplan compile-book chapters --chapters 5-17
+  utterplan compile-document story.ssmdoc
   utterplan validate chapter.utterplan.toml
   utterplan preview chapter.utterplan.toml --chunk-by sentence --pause-policy native
   utterplan render-plan chapter.utterplan.toml --profile voice.renderprofile.toml -o chapter.renderplan.toml
@@ -211,6 +221,51 @@ def build_parser() -> argparse.ArgumentParser:
     )
     book_parser.add_argument("--report", type=Path, help="TOML operational report path")
     book_parser.add_argument(
+        "--diagnostics",
+        choices=("warnings", "all", "none"),
+        default="warnings",
+        help="diagnostic detail verbosity (default: warnings)",
+    )
+    document_parser = commands.add_parser(
+        "compile-document",
+        help="compile one editable ssmdconvert.document workspace",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  utterplan compile-document story.ssmdoc\n"
+            "  utterplan compile-document . --spacy off\n"
+            "  utterplan compile-document story.ssmdoc --output-dir build/utterplan --force"
+        ),
+    )
+    document_parser.add_argument(
+        "input", type=Path, help="SSMDDoc workspace root or its canonical document.ssmd.md file"
+    )
+    document_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="plan output directory (default: <ssmdoc>/.readio/utterplan)",
+    )
+    document_parser.add_argument("--language", "--lang", dest="language")
+    document_parser.add_argument(
+        "--text-preparation", choices=("auto", "ssmd", "spokenform", "identity"), default="auto"
+    )
+    document_parser.add_argument(
+        "--renderability",
+        choices=("strict", "repair"),
+        default="repair",
+        help="safely repair isolated punctuation by default; strict rejects every repair opportunity",
+    )
+    document_parser.add_argument(
+        "--spacy",
+        choices=("auto", "off", "sm", "md", "lg", "trf"),
+        default="auto",
+        help="linguistic-resource policy; default auto uses a compatible local spaCy model when available and falls back safely",
+    )
+    document_parser.add_argument(
+        "--force", action="store_true", help="replace an existing plan file"
+    )
+    document_parser.add_argument("--report", type=Path, help="TOML operational report path")
+    document_parser.add_argument(
         "--diagnostics",
         choices=("warnings", "all", "none"),
         default="warnings",
@@ -433,18 +488,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _declares_ssmd_version(source: str) -> bool:
-    try:
-        from ssmd.frontmatter import FrontMatterError, parse_front_matter
-    except ImportError:
-        return False
-    try:
-        front_matter = parse_front_matter(source)
-    except FrontMatterError:
-        return False
-    return front_matter.present and "ssmd_version" in front_matter.data
-
-
 def _ssmd_header_language(source: str) -> str | None:
     try:
         from ssmd.frontmatter import FrontMatterError, parse_front_matter
@@ -456,6 +499,11 @@ def _ssmd_header_language(source: str) -> str | None:
         raise PlanFormatError(str(exc), code=exc.code, path="$.source") from exc
     language = front_matter.data.get("language") if front_matter.present else None
     return language.strip() if isinstance(language, str) and language.strip() else None
+
+
+def _format_for_path(path: Path, source: str) -> InputFormat:
+    """Keep the legacy CLI auto-detection helper as a compatibility shim."""
+    return _format_source_path(path, source, "auto")
 
 
 def _language_fallback(source: str, input_format: InputFormat, requested: str | None) -> str:
@@ -471,26 +519,15 @@ def _language_fallback(source: str, input_format: InputFormat, requested: str | 
     raise ValueError("plain input requires --language")
 
 
-def _format_for_path(path: Path, source: str) -> InputFormat:
-    lower_name = path.name.lower()
-    if lower_name.endswith((".ssmd.md", ".ssmd")):
-        return "ssmd"
-    if path.suffix.lower() == ".md" and _declares_ssmd_version(source):
-        return "ssmd"
-    return "plain"
-
-
 def _read_compile_input(args: argparse.Namespace) -> tuple[str, InputFormat]:
+    requested_format = (
+        "auto" if args.input_format == "auto" else _map_input_format(args.input_format)
+    )
     if args.file is not None:
         if args.text:
             raise ValueError("--file cannot be combined with positional text")
-        source = args.file.read_text(encoding="utf-8")
-        input_format = (
-            _format_for_path(args.file, source)
-            if args.input_format == "auto"
-            else _map_input_format(args.input_format)
-        )
-        return source, input_format
+        loaded = load_source_path(args.file, requested_format=requested_format)
+        return loaded.text, loaded.input_format
 
     if not args.text:
         if sys.stdin.isatty():
@@ -505,14 +542,13 @@ def _read_compile_input(args: argparse.Namespace) -> tuple[str, InputFormat]:
 
     if len(args.text) == 1:
         candidate = Path(args.text[0])
-        if candidate.is_file():
-            source = candidate.read_text(encoding="utf-8")
-            input_format = (
-                _format_for_path(candidate, source)
-                if args.input_format == "auto"
-                else _map_input_format(args.input_format)
-            )
-            return source, input_format
+        canonical_workspace_path = candidate.name == "document.ssmd.md" and (
+            (candidate.parent / "manifest.json").exists()
+            or (candidate.parent / "manifest.json").is_symlink()
+        )
+        if candidate.exists() or candidate.is_symlink() or canonical_workspace_path:
+            loaded = load_source_path(candidate, requested_format=requested_format)
+            return loaded.text, loaded.input_format
 
     return " ".join(args.text), _map_input_format(args.input_format, default="plain")
 
@@ -809,6 +845,58 @@ def _compile_book(args: argparse.Namespace) -> int:
             )
         if written:
             print(f"\n{written} valid plan files were preserved.", file=sys.stderr)
+    return result.exit_code
+
+
+def _compile_document(args: argparse.Namespace) -> int:
+    written = 0
+
+    def start(progress: DocumentCompileStart) -> None:
+        print("UtterPlan document compile", file=sys.stderr)
+        print(f"  workspace: {progress.workspace}", file=sys.stderr)
+        print(f"  document:  {progress.document_id}", file=sys.stderr)
+        print(f"  source:    {progress.source_path}", file=sys.stderr)
+        print(f"  output:    {progress.output_dir}", file=sys.stderr)
+        if progress.dirty is not None:
+            status = "dirty" if progress.dirty else "clean"
+            print(f"  status:    {status}", file=sys.stderr)
+
+    def report_progress(outcome: CompileOutcome) -> None:
+        nonlocal written
+        print(f"[{outcome.index}/1] {outcome.id}  {outcome.source_label}", file=sys.stderr)
+        if outcome.status == "written":
+            written += 1
+            mode = outcome.preparation_mode or "unknown"
+            linguistics = "degraded" if outcome.degraded_linguistics else "full"
+            print(f"       preparation: {mode}; linguistics: {linguistics}", file=sys.stderr)
+            _print_batch_diagnostics(outcome, verbosity=args.diagnostics)
+            print(f"       wrote {outcome.output}", file=sys.stderr)
+        elif outcome.status == "failed":
+            print("       FAILED", file=sys.stderr)
+            if outcome.error_message:
+                for line in outcome.error_message.splitlines():
+                    print(f"       {line}", file=sys.stderr)
+
+    try:
+        result = _compile_ssmdoc_service(
+            args.input,
+            output_dir=args.output_dir,
+            report=args.report,
+            language=args.language,
+            planner_config=_planner_config_from_batch_args(args),
+            force=args.force,
+            diagnostics=args.diagnostics,
+            on_progress=report_progress,
+            on_start=start,
+        )
+    except DocumentWorkspaceServiceError as exc:
+        raise _CliUsageError(str(exc)) from exc
+
+    print("UtterPlan compile summary", file=sys.stderr)
+    print("  requested: 1", file=sys.stderr)
+    print(f"  written:   {written}", file=sys.stderr)
+    print(f"  failed:    {result.failed}", file=sys.stderr)
+    print(f"  report:    {result.report_path}", file=sys.stderr)
     return result.exit_code
 
 
@@ -1200,12 +1288,14 @@ def _validate(args: argparse.Namespace) -> int:
         print(f"warnings: {len(plan.warnings)}")
         return 0
 
-    source = path.read_text(encoding="utf-8")
-    input_format = (
-        _format_for_path(path, source)
-        if args.input_format == "auto"
-        else _map_input_format(args.input_format)
+    loaded = load_source_path(
+        path,
+        requested_format=(
+            "auto" if args.input_format == "auto" else _map_input_format(args.input_format)
+        ),
     )
+    source = loaded.text
+    input_format = loaded.input_format
     fallback_language = _language_fallback(source, input_format, args.language)
     config = PlannerConfig(
         language=fallback_language,
@@ -1292,6 +1382,8 @@ def main(argv: list[str] | None = None) -> int:
             return _compile_many(args)
         if args.command == "compile-book":
             return _compile_book(args)
+        if args.command == "compile-document":
+            return _compile_document(args)
         if args.command == "render-book":
             return _render_book(args)
         if args.command == "replan-book":

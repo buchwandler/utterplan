@@ -124,6 +124,21 @@ Compile reports use format version 2. Each successful item records its resolved 
 
 Shared planning options include `--language`, `--input-format auto|plain|ssmd`, `--text-preparation`, `--spacy`, and `--renderability`. `--diagnostics warnings|all|none` controls terminal detail (default `warnings`): warnings mode suppresses informational diagnostics, all includes them, and none suppresses non-failure diagnostics. Failures are always reported, and the operational report always retains complete diagnostics. Progress, selected diagnostic details, actionable errors, and final counts are written to stderr. Exit status is 0 if every input succeeds, 1 if any input fails, and 2 for usage errors such as output collisions. `--fail-fast` skips later requests after the first failure but preserves all completed outputs and updates the report.
 
+## Compile one SSMDDoc workspace
+
+`compile-document` reads a single editable `ssmdconvert.document` v1 workspace and compiles its canonical SSMD 0.9 document into one plan. It accepts the workspace root or its canonical `document.ssmd.md` path:
+
+```text
+utterplan compile-document INPUT [--output-dir PATH] [--language LANGUAGE]
+  [--text-preparation {auto,ssmd,spokenform,identity}]
+  [--renderability {strict,repair}] [--spacy {auto,off,sm,md,lg,trf}]
+  [--force] [--report PATH] [--diagnostics {warnings,all,none}]
+```
+
+The default output directory is `<workspace>/.readio/utterplan/`, containing `document-0001.utterplan.toml` and `compile-report.toml`. `--output-dir` and `--report` override those locations. Existing plan files require `--force`; output collisions with the source or manifest are rejected. A document header's language is authoritative; `--language`/`--lang` is a fallback when it is absent.
+
+Editable content wins over the stored manifest digest: compilation reads the current `document.ssmd.md` but never modifies the manifest or source. The command has no `--input-format`, chapter selection, or `--fail-fast`; it handles one document. The existing `compile` and `validate` commands also accept the workspace root or canonical document path, while `compile` retains its normal stdout/`-o` behavior. This is not `compile-book`: an SSMDDoc creates one plan, while an SSMDBook orchestrates independent chapter plans. ZIP bundles are not supported and `ssmdconvert` is not a runtime dependency. See the [SSMDDoc guide](ssmdoc.md) for format validation and the `compile_ssmdoc()` Python API.
+
 ## Compile chapters from an SSMDBook workspace
 
 `compile-book` discovers selected SSMD chapters from an editable `.ssmdbook` manifest and compiles each chapter independently through the batch compiler. Pass either the book directory or its canonical `chapters/` directory:

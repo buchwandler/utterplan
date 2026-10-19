@@ -7,7 +7,7 @@ section: architecture_decisions
 title: Architecture Decisions
 order: 90
 status: accepted
-version: 2
+version: 3
 body_format: markdown
 ---
 
@@ -53,3 +53,5 @@ body_format: markdown
 - **AD: Package and schema versions are independent.** Migration preserves a
   compiled plan; replanning is a separate operation. _Rationale:_ schema evolution
   must not force package-version coupling or silent replans.
+
+- **AD: SSMDDoc is one document, not a book.** An `ssmdconvert.document` v1 workspace resolves to its current canonical SSMD source and the existing one-document compiler, producing one FlowPlan. Editable directory digests do not override current source content; UtterPlan neither refreshes nor mutates the workspace. _Rationale:_ preserve one-document/one-plan semantics and keep source-workspace ownership in `ssmdconvert`.

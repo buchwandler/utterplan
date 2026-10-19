@@ -7,7 +7,7 @@ section: introduction_and_goals
 title: Introduction and Goals
 order: 10
 status: accepted
-version: 2
+version: 3
 body_format: markdown
 ---
 
@@ -59,3 +59,7 @@ G2P / synthesis / audio (downstream)
 The compiler still handles one document at a time; the CLI's explicit SSMDBook
 commands (`compile-book`, `render-book`) discover chapters and orchestrate per-file
 workspaces without changing book content.
+
+## Document workspaces
+
+An editable `ssmdconvert.document` v1 workspace (`.ssmdoc`) is another source path for the one-document compiler. `compile-document` discovers its canonical current SSMD document and writes one FlowPlan plus an operational report under `.readio/utterplan/`; it does not create a book or alter workspace source material.
