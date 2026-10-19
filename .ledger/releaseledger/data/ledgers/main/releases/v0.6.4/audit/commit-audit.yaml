@@ -1,0 +1,86 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: v0.6.4
+git_base_ref: v0.6.3
+git_base_sha: 14e405bb0bf2f7b4635ebd17ebe058d46e267286
+git_head_ref: HEAD
+git_head_sha: 60e6be0d43e092f854e246a681b844453034693e
+git_range: 14e405bb0bf2f7b4635ebd17ebe058d46e267286..60e6be0d43e092f854e246a681b844453034693e
+commit_count: 1
+rows:
+  - sha: 60e6be0d43e092f854e246a681b844453034693e
+    source_ref: git:60e6be0d43e092f854e246a681b844453034693e
+    short_sha: 60e6be0
+    changed_paths:
+      - .ledger/archledger/data/document-state.json
+      - .ledger/archledger/data/profiles/arc42/sections/content-0001.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0003.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0005.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0006.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0007.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0009.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0012.md
+      - MANIFEST.in
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/index.md
+      - docs/ssmdoc.md
+      - tests/fixtures/ssmdoc-v1/story.ssmdoc/document.ssmd.md
+      - tests/fixtures/ssmdoc-v1/story.ssmdoc/manifest.json
+      - tests/test_cli.py
+      - tests/test_cli_ssmdoc.py
+      - tests/test_document_workspace.py
+      - tests/test_source_input.py
+      - tests/test_ssmdoc.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/document_workspace.py
+      - utterplan/source_input.py
+      - utterplan/ssmdoc.py
+    stats:
+      files_changed: 26
+      insertions: 1777
+      deletions: 51
+    inspected: true
+    inspected_paths:
+      - .ledger/archledger/data/document-state.json
+      - .ledger/archledger/data/profiles/arc42/sections/content-0001.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0003.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0005.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0006.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0007.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0009.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0012.md
+      - MANIFEST.in
+      - README.md
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/index.md
+      - docs/ssmdoc.md
+      - tests/fixtures/ssmdoc-v1/story.ssmdoc/document.ssmd.md
+      - tests/fixtures/ssmdoc-v1/story.ssmdoc/manifest.json
+      - tests/test_cli.py
+      - tests/test_cli_ssmdoc.py
+      - tests/test_document_workspace.py
+      - tests/test_source_input.py
+      - tests/test_ssmdoc.py
+      - utterplan/__init__.py
+      - utterplan/cli.py
+      - utterplan/document_workspace.py
+      - utterplan/source_input.py
+      - utterplan/ssmdoc.py
+    observed_behavior:
+      Added manifest-validated SSMDDoc v1 workspace discovery, centralized
+      source loading, compile-document CLI and public API support, safe canonical path
+      checks, one-document FlowPlan and report output, documentation, and comprehensive
+      tests; source and manifest remain unchanged.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: support for document dirs"
+    target_entry_id: entry-0001
+    notes: ""

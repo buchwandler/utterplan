@@ -1,0 +1,2256 @@
+ .ledger/archledger/data/document-state.json        |   4 +-
+ .../data/profiles/arc42/sections/content-0001.md   |   6 +-
+ .../data/profiles/arc42/sections/content-0003.md   |   8 +-
+ .../data/profiles/arc42/sections/content-0005.md   |   6 +-
+ .../data/profiles/arc42/sections/content-0006.md   |  13 +-
+ .../data/profiles/arc42/sections/content-0007.md   |   4 +-
+ .../data/profiles/arc42/sections/content-0009.md   |   4 +-
+ .../data/profiles/arc42/sections/content-0012.md   |   4 +-
+ MANIFEST.in                                        |   1 +
+ README.md                                          |  10 +
+ docs/architecture.md                               |  33 ++-
+ docs/cli.md                                        |  15 ++
+ docs/index.md                                      |   2 +
+ docs/ssmdoc.md                                     |  64 +++++
+ .../ssmdoc-v1/story.ssmdoc/document.ssmd.md        |   6 +
+ .../fixtures/ssmdoc-v1/story.ssmdoc/manifest.json  |  21 ++
+ tests/test_cli.py                                  |  52 ++++
+ tests/test_cli_ssmdoc.py                           | 279 +++++++++++++++++++++
+ tests/test_document_workspace.py                   | 248 ++++++++++++++++++
+ tests/test_source_input.py                         | 104 ++++++++
+ tests/test_ssmdoc.py                               | 250 ++++++++++++++++++
+ utterplan/__init__.py                              |  14 ++
+ utterplan/cli.py                                   | 174 ++++++++++---
+ utterplan/document_workspace.py                    | 194 ++++++++++++++
+ utterplan/source_input.py                          | 121 +++++++++
+ utterplan/ssmdoc.py                                | 191 ++++++++++++++
+ 26 files changed, 1777 insertions(+), 51 deletions(-)
+
+diff --git a/.ledger/archledger/data/document-state.json b/.ledger/archledger/data/document-state.json
+index e64cbef..eb9de79 100644
+--- a/.ledger/archledger/data/document-state.json
++++ b/.ledger/archledger/data/document-state.json
+@@ -1,9 +1,9 @@
+ {
+   "documents": {
+     "arc42:markdown:draft=false:superseded=false": {
+-      "fingerprint": "sha256:a96a2a1547f3c9de52decc865c2594076838f0e5d647747c5b2c3540a21a6080",
++      "fingerprint": "sha256:06567b86685f55098f7473ab4eb1d3952cf1cd9e1464a7b17e7bc77430f2a1b9",
+       "input_count": 12,
+-      "version": 1
++      "version": 2
+     }
+   },
+   "schema": "archledger.document-state.v1"
+diff --git a/.ledger/archledger/data/profiles/arc42/sections/content-0001.md b/.ledger/archledger/data/profiles/arc42/sections/content-0001.md
+index 2a74aee..c09328e 100644
+--- a/.ledger/archledger/data/profiles/arc42/sections/content-0001.md
++++ b/.ledger/archledger/data/profiles/arc42/sections/content-0001.md
+@@ -7,7 +7,7 @@ section: introduction_and_goals
+ title: Introduction and Goals
+ order: 10
+ status: accepted
+-version: 2
++version: 3
+ body_format: markdown
+ ---
+
+@@ -59,3 +59,7 @@ G2P / synthesis / audio (downstream)
+ The compiler still handles one document at a time; the CLI's explicit SSMDBook
+ commands (`compile-book`, `render-book`) discover chapters and orchestrate per-file
+ workspaces without changing book content.
++
++## Document workspaces
++
++An editable `ssmdconvert.document` v1 workspace (`.ssmdoc`) is another source path for the one-document compiler. `compile-document` discovers its canonical current SSMD document and writes one FlowPlan plus an operational report under `.readio/utterplan/`; it does not create a book or alter workspace source material.
+diff --git a/.ledger/archledger/data/profiles/arc42/sections/content-0003.md b/.ledger/archledger/data/profiles/arc42/sections/content-0003.md
+index 7859211..34045aa 100644
+--- a/.ledger/archledger/data/profiles/arc42/sections/content-0003.md
++++ b/.ledger/archledger/data/profiles/arc42/sections/content-0003.md
+@@ -7,7 +7,7 @@ section: context_and_scope
+ title: Context and Scope
+ order: 30
+ status: accepted
+-version: 2
++version: 3
+ body_format: markdown
+ ---
+
+@@ -64,3 +64,9 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
+ - SSMD source migration (`ssmd migrate` owns that).
+ - Renderer chunking, token-budget, and pause-realization choices.
+ - Consumer-specific compatibility testing.
++
++## SSMDDoc source workspace
++
++- An editable `.ssmdoc` directory is discovered by its `ssmdconvert.document` v1 manifest, not by its directory suffix. Its canonical `document.ssmd.md` is the current compiler input.
++- The workspace remains one document to one FlowPlan. Manifest digests are provenance only for editable directories: UtterPlan compiles current content and never refreshes the manifest or edits the source.
++- `compile-document` is single-document convenience, not book orchestration. ZIP bundles, fake chapters, and an `ssmdconvert` runtime dependency are outside the contract.
+diff --git a/.ledger/archledger/data/profiles/arc42/sections/content-0005.md b/.ledger/archledger/data/profiles/arc42/sections/content-0005.md
+index a1f063c..34ad118 100644
+--- a/.ledger/archledger/data/profiles/arc42/sections/content-0005.md
++++ b/.ledger/archledger/data/profiles/arc42/sections/content-0005.md
+@@ -7,7 +7,7 @@ section: building_block_view
+ title: Building Block View
+ order: 50
+ status: accepted
+-version: 2
++version: 3
+ body_format: markdown
+ ---
+
+@@ -39,3 +39,7 @@ when requested, the trace retains source text/hash, coordinate maps, preparation
+ provenance, diagnostics, and renderability evidence in a separate versioned TOML
+ sidecar. Trace state is not renderer input and does not affect plan identity or
+ TOML.
++
++## Document workspace orchestration
++
++`ssmdoc.py` performs read-only manifest discovery and canonical path safety checks; `source_input.py` centralizes standalone-file and `.ssmdoc` source loading; and `document_workspace.py` delegates one stable `document-0001` CompileRequest to the existing batch persistence/report path. The CLI and public package API expose `compile-document` and `compile_ssmdoc()` without shadowing the in-memory `compile_document()` compiler.
+diff --git a/.ledger/archledger/data/profiles/arc42/sections/content-0006.md b/.ledger/archledger/data/profiles/arc42/sections/content-0006.md
+index f1a4ea6..f3e4146 100644
+--- a/.ledger/archledger/data/profiles/arc42/sections/content-0006.md
++++ b/.ledger/archledger/data/profiles/arc42/sections/content-0006.md
+@@ -7,7 +7,7 @@ section: runtime_view
+ title: Runtime View
+ order: 60
+ status: accepted
+-version: 2
++version: 3
+ body_format: markdown
+ ---
+
+@@ -80,3 +80,14 @@ accepts TOML only and rejects JSON.
+ `render-plan --previous-plan`/`build_render_plan(..., previous_plan=..., preflight=...)` refine only failed speech occurrences. Both the exact previous
+ RenderPlan and its matching preflight report are required together; UtterPlan does
+ not calculate renderer-specific metrics.
++
++## Scenario: compile an editable SSMDDoc workspace
++
++```text
++ssmdconvert.document v1 manifest + current document.ssmd.md
++    -> utterplan compile-document
++    -> one FlowPlan at .readio/utterplan/document-0001.utterplan.toml
++       + one compile-report.toml
++```
++
++The manifest validates the workspace contract and safe canonical path; SSMD 0.9 content is compiled by the existing single-document path. A stale stored digest does not block editable-directory compilation, and UtterPlan does not modify source material or model the document as a chapter.
+diff --git a/.ledger/archledger/data/profiles/arc42/sections/content-0007.md b/.ledger/archledger/data/profiles/arc42/sections/content-0007.md
+index 152d335..f8b57fe 100644
+--- a/.ledger/archledger/data/profiles/arc42/sections/content-0007.md
++++ b/.ledger/archledger/data/profiles/arc42/sections/content-0007.md
+@@ -7,7 +7,7 @@ section: deployment_view
+ title: Deployment View
+ order: 70
+ status: accepted
+-version: 2
++version: 3
+ body_format: markdown
+ ---
+
+@@ -34,3 +34,5 @@ or audio dependencies:
+   `sphinx-build -W --keep-going -b html docs docs/_build/html`.
+ - **Quality gate.** `python -m pytest -q`, `ruff check .`, and `mypy utterplan` run
+   against the self-contained repository test suite.
++
++- **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes derived plans under the reserved `.readio/utterplan/` directory without changing source files.
+diff --git a/.ledger/archledger/data/profiles/arc42/sections/content-0009.md b/.ledger/archledger/data/profiles/arc42/sections/content-0009.md
+index ddc4bfa..1f29e63 100644
+--- a/.ledger/archledger/data/profiles/arc42/sections/content-0009.md
++++ b/.ledger/archledger/data/profiles/arc42/sections/content-0009.md
+@@ -7,7 +7,7 @@ section: architecture_decisions
+ title: Architecture Decisions
+ order: 90
+ status: accepted
+-version: 2
++version: 3
+ body_format: markdown
+ ---
+
+@@ -53,3 +53,5 @@ body_format: markdown
+ - **AD: Package and schema versions are independent.** Migration preserves a
+   compiled plan; replanning is a separate operation. _Rationale:_ schema evolution
+   must not force package-version coupling or silent replans.
++
++- **AD: SSMDDoc is one document, not a book.** An `ssmdconvert.document` v1 workspace resolves to its current canonical SSMD source and the existing one-document compiler, producing one FlowPlan. Editable directory digests do not override current source content; UtterPlan neither refreshes nor mutates the workspace. _Rationale:_ preserve one-document/one-plan semantics and keep source-workspace ownership in `ssmdconvert`.
+diff --git a/.ledger/archledger/data/profiles/arc42/sections/content-0012.md b/.ledger/archledger/data/profiles/arc42/sections/content-0012.md
+index 40a2a9f..edd260e 100644
+--- a/.ledger/archledger/data/profiles/arc42/sections/content-0012.md
++++ b/.ledger/archledger/data/profiles/arc42/sections/content-0012.md
+@@ -7,7 +7,7 @@ section: glossary
+ title: Glossary
+ order: 120
+ status: accepted
+-version: 2
++version: 3
+ body_format: markdown
+ ---
+
+@@ -35,3 +35,5 @@ body_format: markdown
+ | SSMDBook         | Editable book workspace whose manifest drives chapter discovery; `compile-book`/`render-book` orchestrate per-file workspaces without changing content.                                             |
+ | Planning attempt | Inspect-only `utterplan.planning-attempt.v1` artifact for reviewing blocked renderability outcomes; never a canonical plan.                                                                         |
+ | plan_id          | Deterministic renderer-independent plan identity; v7 `utterplan-flow-v3` includes boundaries and never hashes TOML formatting.                                                                      |
++
++| SSMDDoc | Editable single-document workspace using the `ssmdconvert.document` v1 manifest; `compile-document` compiles the current canonical SSMD file to one FlowPlan without mutating source. |
+diff --git a/MANIFEST.in b/MANIFEST.in
+index a604118..7145827 100644
+--- a/MANIFEST.in
++++ b/MANIFEST.in
+@@ -1 +1,2 @@
+ prune .ledger
++include docs/ssmdoc.md
+diff --git a/README.md b/README.md
+index 9b8f9b7..de4e98e 100644
+--- a/README.md
++++ b/README.md
+@@ -41,6 +41,16 @@ utterplan compile-many examples/*.ssmd --output-dir build/plans
+
+ This writes one `.utterplan.toml` per source plus an atomically refreshed `compile-report.toml`. Terminal diagnostics default to warnings; `--diagnostics all` also prints informational records, while `--diagnostics none` suppresses non-failure details. Failures are always reported, and the operational report retains every diagnostic. Use `--fail-fast` to skip later inputs after a failure, `--force` to replace existing plans, or `--report PATH` to choose another report location.
+
++## Compile an SSMDDoc workspace
++
++Compile one editable `.ssmdoc` directory as one SSMD document and one FlowPlan:
++
++```bash
++utterplan compile-document story.ssmdoc
++```
++
++By default this writes `story.ssmdoc/.readio/utterplan/document-0001.utterplan.toml` and a `compile-report.toml`. The current `document.ssmd.md` is authoritative even if its manifest digest is stale; UtterPlan leaves the source and manifest untouched. This is separate from the multi-chapter SSMDBook workflow below. See the [SSMDDoc workspace guide](docs/ssmdoc.md) for manifest safety, output options, and the Python API.
++
+ Compile a selected chapter range directly from an editable SSMDBook workspace:
+
+ ```bash
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 97f9ebb..e60e411 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -1,6 +1,6 @@
+ ---
+ title: "Architecture Documentation"
+-version: 1
++version: 2
+ generator: "archledger 0.4.0"
+ arc42_template_version: "9.0-EN"
+ ---
+@@ -60,6 +60,10 @@ The compiler still handles one document at a time; the CLI's explicit SSMDBook
+ commands (`compile-book`, `render-book`) discover chapters and orchestrate per-file
+ workspaces without changing book content.
+
++## Document workspaces
++
++An editable `ssmdconvert.document` v1 workspace (`.ssmdoc`) is another source path for the one-document compiler. `compile-document` discovers its canonical current SSMD document and writes one FlowPlan plus an operational report under `.readio/utterplan/`; it does not create a book or alter workspace source material.
++
+ ## Requirements Overview
+
+ <!-- archledger: no accepted records for this section yet -->
+@@ -164,6 +168,12 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
+ - Renderer chunking, token-budget, and pause-realization choices.
+ - Consumer-specific compatibility testing.
+
++## SSMDDoc source workspace
++
++- An editable `.ssmdoc` directory is discovered by its `ssmdconvert.document` v1 manifest, not by its directory suffix. Its canonical `document.ssmd.md` is the current compiler input.
++- The workspace remains one document to one FlowPlan. Manifest digests are provenance only for editable directories: UtterPlan compiles current content and never refreshes the manifest or edits the source.
++- `compile-document` is single-document convenience, not book orchestration. ZIP bundles, fake chapters, and an `ssmdconvert` runtime dependency are outside the contract.
++
+ ## Business Context
+
+ <!-- archledger: no accepted records for this section yet -->
+@@ -253,6 +263,10 @@ provenance, diagnostics, and renderability evidence in a separate versioned TOML
+ sidecar. Trace state is not renderer input and does not affect plan identity or
+ TOML.
+
++## Document workspace orchestration
++
++`ssmdoc.py` performs read-only manifest discovery and canonical path safety checks; `source_input.py` centralizes standalone-file and `.ssmdoc` source loading; and `document_workspace.py` delegates one stable `document-0001` CompileRequest to the existing batch persistence/report path. The CLI and public package API expose `compile-document` and `compile_ssmdoc()` without shadowing the in-memory `compile_document()` compiler.
++
+ <!-- archledger: no accepted records for this section yet -->
+
+ # Runtime View
+@@ -327,6 +341,17 @@ accepts TOML only and rejects JSON.
+ RenderPlan and its matching preflight report are required together; UtterPlan does
+ not calculate renderer-specific metrics.
+
++## Scenario: compile an editable SSMDDoc workspace
++
++```text
++ssmdconvert.document v1 manifest + current document.ssmd.md
++    -> utterplan compile-document
++    -> one FlowPlan at .readio/utterplan/document-0001.utterplan.toml
++       + one compile-report.toml
++```
++
++The manifest validates the workspace contract and safe canonical path; SSMD 0.9 content is compiled by the existing single-document path. A stale stored digest does not block editable-directory compilation, and UtterPlan does not modify source material or model the document as a chapter.
++
+ <!-- archledger: no accepted records for this section yet -->
+
+ # Deployment View
+@@ -355,6 +380,8 @@ or audio dependencies:
+ - **Quality gate.** `python -m pytest -q`, `ruff check .`, and `mypy utterplan` run
+   against the self-contained repository test suite.
+
++- **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes derived plans under the reserved `.readio/utterplan/` directory without changing source files.
++
+ <!-- archledger: no accepted records for this section yet -->
+
+ # Cross-cutting Concepts
+@@ -484,6 +511,8 @@ drafts and never become canonical plans.
+   compiled plan; replanning is a separate operation. _Rationale:_ schema evolution
+   must not force package-version coupling or silent replans.
+
++- **AD: SSMDDoc is one document, not a book.** An `ssmdconvert.document` v1 workspace resolves to its current canonical SSMD source and the existing one-document compiler, producing one FlowPlan. Editable directory digests do not override current source content; UtterPlan neither refreshes nor mutates the workspace. _Rationale:_ preserve one-document/one-plan semantics and keep source-workspace ownership in `ssmdconvert`.
++
+ <!-- archledger: no accepted records for this section yet -->
+
+ # Quality Requirements
+@@ -584,4 +613,6 @@ drafts and never become canonical plans.
+ | Planning attempt | Inspect-only `utterplan.planning-attempt.v1` artifact for reviewing blocked renderability outcomes; never a canonical plan.                                                                         |
+ | plan_id          | Deterministic renderer-independent plan identity; v7 `utterplan-flow-v3` includes boundaries and never hashes TOML formatting.                                                                      |
+
++| SSMDDoc | Editable single-document workspace using the `ssmdconvert.document` v1 manifest; `compile-document` compiles the current canonical SSMD file to one FlowPlan without mutating source. |
++
+ <!-- archledger: no accepted records for this section yet -->
+diff --git a/docs/cli.md b/docs/cli.md
+index 91a99a4..da8fc99 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -124,6 +124,21 @@ Compile reports use format version 2. Each successful item records its resolved
+
+ Shared planning options include `--language`, `--input-format auto|plain|ssmd`, `--text-preparation`, `--spacy`, and `--renderability`. `--diagnostics warnings|all|none` controls terminal detail (default `warnings`): warnings mode suppresses informational diagnostics, all includes them, and none suppresses non-failure diagnostics. Failures are always reported, and the operational report always retains complete diagnostics. Progress, selected diagnostic details, actionable errors, and final counts are written to stderr. Exit status is 0 if every input succeeds, 1 if any input fails, and 2 for usage errors such as output collisions. `--fail-fast` skips later requests after the first failure but preserves all completed outputs and updates the report.
+
++## Compile one SSMDDoc workspace
++
++`compile-document` reads a single editable `ssmdconvert.document` v1 workspace and compiles its canonical SSMD 0.9 document into one plan. It accepts the workspace root or its canonical `document.ssmd.md` path:
++
++```text
++utterplan compile-document INPUT [--output-dir PATH] [--language LANGUAGE]
++  [--text-preparation {auto,ssmd,spokenform,identity}]
++  [--renderability {strict,repair}] [--spacy {auto,off,sm,md,lg,trf}]
++  [--force] [--report PATH] [--diagnostics {warnings,all,none}]
++```
++
++The default output directory is `<workspace>/.readio/utterplan/`, containing `document-0001.utterplan.toml` and `compile-report.toml`. `--output-dir` and `--report` override those locations. Existing plan files require `--force`; output collisions with the source or manifest are rejected. A document header's language is authoritative; `--language`/`--lang` is a fallback when it is absent.
++
++Editable content wins over the stored manifest digest: compilation reads the current `document.ssmd.md` but never modifies the manifest or source. The command has no `--input-format`, chapter selection, or `--fail-fast`; it handles one document. The existing `compile` and `validate` commands also accept the workspace root or canonical document path, while `compile` retains its normal stdout/`-o` behavior. This is not `compile-book`: an SSMDDoc creates one plan, while an SSMDBook orchestrates independent chapter plans. ZIP bundles are not supported and `ssmdconvert` is not a runtime dependency. See the [SSMDDoc guide](ssmdoc.md) for format validation and the `compile_ssmdoc()` Python API.
++
+ ## Compile chapters from an SSMDBook workspace
+
+ `compile-book` discovers selected SSMD chapters from an editable `.ssmdbook` manifest and compiles each chapter independently through the batch compiler. Pass either the book directory or its canonical `chapters/` directory:
+diff --git a/docs/index.md b/docs/index.md
+index 41779e1..02792dc 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -9,6 +9,7 @@ speech plans. It stops before G2P and synthesis.
+
+ getting-started
+ cli
++SSMDDoc workspace support <ssmdoc>
+ SSMDBook and RenderPlan workflow <ssmdbook>
+ consumer-guide
+ format
+@@ -27,4 +28,5 @@ changelog
+ ```
+
+ The [SSMDBook guide](ssmdbook.md) covers workspace compilation and the profile-specific `render-book` workflow, including how RenderPlan and VoiceRender fit after semantic planning.
++The [SSMDDoc guide](ssmdoc.md) covers one-document workspace compilation, source immutability, and how it differs from an SSMDBook.
+ The package version and the UtterPlan schema version are independent. Schema v7 is the only version accepted by normal loading and execution. Schema-v5/v6 TOML and schemas v1–v4 remain immutable historical migration inputs; the sequential path reaches v6, while v6-to-v7 requires recompiling the original source.
+diff --git a/docs/ssmdoc.md b/docs/ssmdoc.md
+new file mode 100644
+index 0000000..1fd359f
+--- /dev/null
++++ b/docs/ssmdoc.md
+@@ -0,0 +1,64 @@
++# SSMDDoc workspace support
++
++UtterPlan can compile an editable `.ssmdoc` workspace as one SSMD 0.9 document. This is a workspace input convenience around the existing one-document compiler; it is not a book format and does not create chapter plans.
++
++## Workspace contract
++
++A workspace is identified by a `manifest.json` whose `format` is `ssmdconvert.document` and whose `schema_version` is `1`. UtterPlan supports the v1 contract and expects the canonical document entry to identify `document-0001` at the normalized relative path `document.ssmd.md`. The source is SSMD 0.9.
++
++The current `document.ssmd.md` is authoritative. Its manifest digest and character count are metadata, not a lock: if you edit the document and its recorded digest becomes stale, UtterPlan compiles the current file. It never rewrites the manifest, refreshes hashes, or edits source content. The `.readio/utterplan/` directory is reserved for derived UtterPlan artifacts.
++
++Discovery and path handling are deliberately strict. The manifest must be valid UTF-8 JSON within the 2 MiB limit, and the document is limited to 64 MiB. UtterPlan checks the canonical path and workspace containment, rejects unsupported manifest versions and unsafe paths, and does not follow a document path outside the workspace. It reads no source-media files. `ssmdconvert` is not a runtime dependency: UtterPlan consumes the published file-format contract directly.
++
++ZIP bundles are not supported by this workflow; use an editable directory workspace.
++
++## Compile a workspace
++
++Run `compile-document` with the workspace directory (the suffix need not be `.ssmdoc` if the manifest identifies it):
++
++```bash
++utterplan compile-document story.ssmdoc
++```
++
++It writes one plan and one operational report by default:
++
++```text
++story.ssmdoc/.readio/utterplan/
++├── document-0001.utterplan.toml
++└── compile-report.toml
++```
++
++The report describes the single compilation and is not a FlowPlan. You can override the destination and report path:
++
++```bash
++utterplan compile-document story.ssmdoc \
++  --output-dir build/story-plan \
++  --report build/story-report.toml \
++  --language en-US \
++  --spacy off
++```
++
++Options are `--output-dir`, `--report`, `--language`/`--lang`, `--text-preparation`, `--renderability`, `--spacy`, `--diagnostics`, and `--force`. SSMD header language remains authoritative; pass `--language` as a fallback when the document has no language. Existing plan outputs are protected unless `--force` is supplied. The report may not collide with the plan, manifest, or source document. `compile-document` is a single-workspace command, so it has no chapter selector or `--fail-fast` option.
++
++The existing `compile` and `validate` commands also accept the workspace root or its canonical `document.ssmd.md` file as input. `compile` keeps its normal stdout/`-o` behavior; use `compile-document` when you want the workspace-oriented default output directory and report. `validate` compiles the source for validation without writing a plan.
++
++## Python API
++
++Use `compile_ssmdoc()` for file-backed workspace compilation. The existing `compile_document()` remains the in-memory text API:
++
++```python
++from utterplan import compile_ssmdoc
++
++result = compile_ssmdoc("story.ssmdoc", language="en-US")
++if result.failed:
++    raise RuntimeError(f"workspace compilation failed; see {result.report_path}")
++print(result.plan_path)
++```
++
++The result provides the workspace and source paths, output and report paths, and the one-item batch outcome. Options include `output_dir`, `report`, `language`, `planner_config`, `force`, `diagnostics`, and progress/start callbacks. The default artifacts match the CLI: `.readio/utterplan/document-0001.utterplan.toml` and `compile-report.toml`.
++
++## SSMDDoc is not SSMDBook
++
++An SSMDDoc contains one editable document and produces one canonical FlowPlan. An SSMDBook manifest discovers multiple independent chapter documents; `compile-book` writes one plan per selected chapter and never builds a book-level combined plan. Use [SSMDBook workflows](ssmdbook.md) for book compilation and RenderPlan projection.
++
++Neither workspace workflow changes its source manifest or source documents. UtterPlan stops at semantic FlowPlans; engine selection, G2P, synthesis, and audio remain downstream.
+diff --git a/tests/fixtures/ssmdoc-v1/story.ssmdoc/document.ssmd.md b/tests/fixtures/ssmdoc-v1/story.ssmdoc/document.ssmd.md
+new file mode 100644
+index 0000000..77f8aee
+--- /dev/null
++++ b/tests/fixtures/ssmdoc-v1/story.ssmdoc/document.ssmd.md
+@@ -0,0 +1,6 @@
++---
++ssmd_version: "0.9"
++language: en-US
++---
++
++I have [UtterPlan]{ph="utter plan"} here.
+diff --git a/tests/fixtures/ssmdoc-v1/story.ssmdoc/manifest.json b/tests/fixtures/ssmdoc-v1/story.ssmdoc/manifest.json
+new file mode 100644
+index 0000000..8aad366
+--- /dev/null
++++ b/tests/fixtures/ssmdoc-v1/story.ssmdoc/manifest.json
+@@ -0,0 +1,21 @@
++{
++  "format": "ssmdconvert.document",
++  "schema_version": 1,
++  "ssmd_version": "0.9",
++  "metadata": {
++    "title": "UtterPlan document fixture",
++    "language": "en-US"
++  },
++  "source": {
++    "format": "markdown",
++    "media_type": "text/markdown",
++    "name": "story.md",
++    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
++  },
++  "document": {
++    "id": "document-0001",
++    "path": "document.ssmd.md",
++    "char_count": 87,
++    "sha256": "ed67851d91bb3d82c08020d1cdfef99102632a62dbeea46ee1793cf8fa9a49c3"
++  }
++}
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 599d208..8054476 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -2,6 +2,7 @@ from __future__ import annotations
+
+ import io
+ import json
++import shutil
+ from pathlib import Path
+
+ import pytest
+@@ -147,6 +148,57 @@ def test_compile_auto_detects_ssmd_suffix(
+     assert _payload(capsys)["document"]["format"] == "ssmd"
+
+
++def test_compile_ssmdoc_directory_matches_canonical_file(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    fixture = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
++    workspace = tmp_path / "story.ssmdoc"
++    shutil.copytree(fixture, workspace)
++    source = workspace / "document.ssmd.md"
++
++    assert main(["compile", str(source), "--spacy", "off"]) == 0
++    direct = FlowPlan.from_toml(capsys.readouterr().out)
++    assert main(["compile", str(workspace), "--spacy", "off"]) == 0
++    from_workspace = FlowPlan.from_toml(capsys.readouterr().out)
++
++    assert from_workspace.plan_id == direct.plan_id
++    assert from_workspace.to_dict() == direct.to_dict()
++
++
++def test_validate_accepts_dirty_ssmdoc_workspace(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    fixture = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
++    workspace = tmp_path / "dirty.ssmdoc"
++    shutil.copytree(fixture, workspace)
++    manifest = workspace / "manifest.json"
++    manifest_before = manifest.read_bytes()
++    source = workspace / "document.ssmd.md"
++    source.write_text(
++        '---\nssmd_version: "0.9"\nlanguage: en-US\n---\n\nEdited current document.\n',
++        encoding="utf-8",
++    )
++
++    assert main(["validate", str(workspace)]) == 0
++    captured = capsys.readouterr()
++    assert "valid" in captured.out
++    assert "input format: ssmd" in captured.out
++    assert manifest.read_bytes() == manifest_before
++    assert "Edited current document." in source.read_text(encoding="utf-8")
++
++
++def test_compile_and_validate_reject_arbitrary_directories(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    directory = tmp_path / "not-a-source"
++    directory.mkdir()
++
++    assert main(["compile", str(directory)]) == 1
++    assert "unsupported source directory" in capsys.readouterr().err
++    assert main(["validate", str(directory)]) == 1
++    assert "unsupported source directory" in capsys.readouterr().err
++
++
+ def test_compile_explicit_ssmd_from_stdin(
+     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+ ) -> None:
+diff --git a/tests/test_cli_ssmdoc.py b/tests/test_cli_ssmdoc.py
+new file mode 100644
+index 0000000..243005c
+--- /dev/null
++++ b/tests/test_cli_ssmdoc.py
+@@ -0,0 +1,279 @@
++from __future__ import annotations
++
++import json
++import shutil
++from pathlib import Path
++
++import pytest
++import tomlkit
++
++from utterplan.cli import build_parser, main
++from utterplan.model import FlowPlan
++
++FIXTURE = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
++
++
++def _workspace(
++    tmp_path: Path, name: str = "story.ssmdoc", *, text: str = "Original content."
++) -> Path:
++    root = tmp_path / name
++    shutil.copytree(FIXTURE, root)
++    (root / "document.ssmd.md").write_text(
++        f'---\nssmd_version: "0.9"\nlanguage: en-US\n---\n\n{text}\n',
++        encoding="utf-8",
++    )
++    return root
++
++
++def _report(path: Path) -> dict[str, object]:
++    return dict(tomlkit.parse(path.read_text(encoding="utf-8")))
++
++
++def _plan_text(path: Path) -> str:
++    plan = FlowPlan.load(path)
++    return " ".join(segment.text for unit in plan.flow for segment in unit.segments)
++
++
++def test_compile_document_writes_default_layout_and_keeps_source_unchanged(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    manifest = root / "manifest.json"
++    source = root / "document.ssmd.md"
++    manifest_before = manifest.read_bytes()
++    source_before = source.read_bytes()
++
++    result = main(
++        ["compile-document", str(root), "--text-preparation", "identity", "--spacy", "off"]
++    )
++
++    captured = capsys.readouterr()
++    output_dir = root / ".readio" / "utterplan"
++    plan_path = output_dir / "document-0001.utterplan.toml"
++    report_path = output_dir / "compile-report.toml"
++    assert result == 0
++    assert captured.out == ""
++    assert "UtterPlan document compile" in captured.err
++    assert f"source:    {source}" in captured.err
++    assert "[1/1] document-0001" in captured.err
++    assert "written:   1" in captured.err
++    assert "Original content." in _plan_text(plan_path)
++    report = _report(report_path)
++    assert report["requested"] == 1
++    assert report["written"] == 1
++    assert report["item"][0]["id"] == "document-0001"
++    assert manifest.read_bytes() == manifest_before
++    assert source.read_bytes() == source_before
++
++
++def test_compile_document_uses_manifest_not_directory_suffix(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path, "workspace")
++
++    result = main(
++        ["compile-document", str(root), "--text-preparation", "identity", "--spacy", "off"]
++    )
++
++    assert result == 0
++    capsys.readouterr()
++    assert (root / ".readio/utterplan/document-0001.utterplan.toml").is_file()
++
++
++def test_compile_document_uses_dirty_current_content_without_refreshing_manifest(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    manifest = root / "manifest.json"
++    manifest_before = manifest.read_bytes()
++    source = root / "document.ssmd.md"
++    source.write_text(
++        '---\nssmd_version: "0.9"\nlanguage: en-US\n---\n\nEdited current content.\n',
++        encoding="utf-8",
++    )
++
++    result = main(
++        ["compile-document", str(root), "--text-preparation", "identity", "--spacy", "off"]
++    )
++
++    assert result == 0
++    capsys.readouterr()
++    assert "Edited current content." in _plan_text(
++        root / ".readio/utterplan/document-0001.utterplan.toml"
++    )
++    assert manifest.read_bytes() == manifest_before
++    assert "Edited current content." in source.read_text(encoding="utf-8")
++
++
++def test_compile_document_missing_source_is_a_reported_read_failure(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    (root / "document.ssmd.md").unlink()
++
++    result = main(["compile-document", str(root)])
++
++    captured = capsys.readouterr()
++    report = _report(root / ".readio/utterplan/compile-report.toml")
++    assert result == 1
++    assert "FAILED" in captured.err
++    assert report["item"][0]["status"] == "failed"
++    assert report["item"][0]["stage"] == "read"
++
++
++def test_compile_document_invalid_workspace_fails_before_output_creation(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    manifest = root / "manifest.json"
++    data = json.loads(manifest.read_text(encoding="utf-8"))
++    data["format"] = "ssmdconvert.book"
++    manifest.write_text(json.dumps(data), encoding="utf-8")
++    output_dir = tmp_path / "outside-plans"
++
++    result = main(["compile-document", str(root), "--output-dir", str(output_dir)])
++
++    captured = capsys.readouterr()
++    assert result == 2
++    assert "ssmdconvert.document" in captured.err
++    assert not output_dir.exists()
++
++
++def test_compile_document_output_and_report_overrides(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    output_dir = tmp_path / "build" / "plans"
++    report = tmp_path / "reports" / "compile.toml"
++
++    result = main(
++        [
++            "compile-document",
++            str(root),
++            "--output-dir",
++            str(output_dir),
++            "--report",
++            str(report),
++            "--text-preparation",
++            "identity",
++            "--spacy",
++            "off",
++        ]
++    )
++
++    assert result == 0
++    captured = capsys.readouterr()
++    assert str(output_dir) in captured.err
++    assert (output_dir / "document-0001.utterplan.toml").is_file()
++    assert report.is_file()
++    assert not (root / ".readio/utterplan").exists()
++
++
++def test_compile_document_force_only_replaces_existing_plan(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    output = root / ".readio/utterplan/document-0001.utterplan.toml"
++    output.parent.mkdir(parents=True)
++    output.write_text("sentinel", encoding="utf-8")
++    args = ["compile-document", str(root), "--text-preparation", "identity", "--spacy", "off"]
++
++    assert main(args) == 1
++    capsys.readouterr()
++    assert output.read_text(encoding="utf-8") == "sentinel"
++
++    assert main([*args, "--force"]) == 0
++    captured = capsys.readouterr()
++    assert "Original content." in _plan_text(output)
++    assert "written:   1" in captured.err
++
++
++def test_compile_document_accepts_canonical_document_file(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++
++    result = main(
++        [
++            "compile-document",
++            str(root / "document.ssmd.md"),
++            "--text-preparation",
++            "identity",
++            "--spacy",
++            "off",
++        ]
++    )
++
++    assert result == 0
++    capsys.readouterr()
++    assert (root / ".readio/utterplan/document-0001.utterplan.toml").is_file()
++
++
++def test_compile_document_uses_only_ssmd_language_or_explicit_fallback(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    source = root / "document.ssmd.md"
++    source.write_text('---\nssmd_version: "0.9"\n---\n\nNo language.\n', encoding="utf-8")
++    args = ["compile-document", str(root), "--text-preparation", "identity", "--spacy", "off"]
++
++    assert main(args) == 1
++    capsys.readouterr()
++    item = _report(root / ".readio/utterplan/compile-report.toml")["item"][0]
++    assert item["code"] == "input.language_required"
++
++    assert main([*args, "--language", "en-US"]) == 0
++    capsys.readouterr()
++
++
++def test_compile_document_parser_exposes_only_single_document_options() -> None:
++    parser = build_parser()
++    args = parser.parse_args(
++        [
++            "compile-document",
++            "story.ssmdoc",
++            "--language",
++            "en-US",
++            "--text-preparation",
++            "identity",
++            "--renderability",
++            "strict",
++            "--spacy",
++            "off",
++            "--force",
++            "--diagnostics",
++            "none",
++        ]
++    )
++    assert args.language == "en-US"
++    assert args.text_preparation == "identity"
++    assert args.renderability == "strict"
++    assert args.spacy == "off"
++    assert args.force is True
++    assert args.diagnostics == "none"
++    assert args.output_dir is None
++    with pytest.raises(SystemExit):
++        parser.parse_args(["compile-document", "story.ssmdoc", "--chapters", "1"])
++    with pytest.raises(SystemExit):
++        parser.parse_args(["compile-document", "story.ssmdoc", "--fail-fast"])
++    with pytest.raises(SystemExit):
++        parser.parse_args(["compile-document", "story.ssmdoc", "--input-format", "ssmd"])
++
++
++def test_public_workspace_api_does_not_shadow_core_compile_document() -> None:
++    from utterplan import (
++        DocumentCompileRequest,
++        DocumentCompileResult,
++        DocumentCompileStart,
++        DocumentWorkspaceServiceError,
++        compile_document,
++        compile_ssmdoc,
++    )
++    from utterplan.compiler import compile_document as compile_document_core
++
++    assert DocumentCompileRequest is not None
++    assert DocumentCompileResult is not None
++    assert DocumentCompileStart is not None
++    assert DocumentWorkspaceServiceError is not None
++    assert callable(compile_ssmdoc)
++    assert compile_document is compile_document_core
+diff --git a/tests/test_document_workspace.py b/tests/test_document_workspace.py
+new file mode 100644
+index 0000000..5d833fa
+--- /dev/null
++++ b/tests/test_document_workspace.py
+@@ -0,0 +1,248 @@
++from __future__ import annotations
++
++import json
++import shutil
++from pathlib import Path
++
++import pytest
++import tomlkit
++
++from utterplan.config import LinguisticsConfig, PlannerConfig
++from utterplan.document_workspace import (
++    DocumentCompileStart,
++    DocumentWorkspaceServiceError,
++    compile_ssmdoc,
++)
++from utterplan.model import FlowPlan
++
++FIXTURE = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
++
++
++def _ssmd(text: str, *, language: str | None = "en-US") -> str:
++    header = '---\nssmd_version: "0.9"\n'
++    if language is not None:
++        header += f"language: {language}\n"
++    return f"{header}---\n\n{text}\n"
++
++
++def _workspace(
++    tmp_path: Path, name: str = "story.ssmdoc", *, text: str = "Original content."
++) -> Path:
++    root = tmp_path / name
++    shutil.copytree(FIXTURE, root)
++    (root / "document.ssmd.md").write_text(_ssmd(text), encoding="utf-8")
++    return root
++
++
++def _config() -> PlannerConfig:
++    return PlannerConfig(
++        language="en-US",
++        text_preparation="identity",
++        linguistics=LinguisticsConfig(use_spacy=False),
++    )
++
++
++def _report(path: Path) -> dict[str, object]:
++    return dict(tomlkit.parse(path.read_text(encoding="utf-8")))
++
++
++def _plan_text(path: Path) -> str:
++    plan = FlowPlan.load(path)
++    return " ".join(segment.text for unit in plan.flow for segment in unit.segments)
++
++
++def test_compile_ssmdoc_writes_default_plan_and_one_item_report_without_source_changes(
++    tmp_path: Path,
++) -> None:
++    root = _workspace(tmp_path)
++    manifest = root / "manifest.json"
++    source = root / "document.ssmd.md"
++    manifest_before = manifest.read_bytes()
++    source_before = source.read_bytes()
++    starts: list[DocumentCompileStart] = []
++    progress = []
++
++    result = compile_ssmdoc(
++        root,
++        planner_config=_config(),
++        on_start=starts.append,
++        on_progress=progress.append,
++    )
++
++    output_dir = root / ".readio" / "utterplan"
++    assert result.exit_code == 0
++    assert result.failed == 0
++    assert result.document_id == "document-0001"
++    assert result.plan_path == output_dir / "document-0001.utterplan.toml"
++    assert result.report_path == output_dir / "compile-report.toml"
++    assert result.plan_path.is_file()
++    assert result.report_path.is_file()
++    assert "Original content." in _plan_text(result.plan_path)
++    assert manifest.read_bytes() == manifest_before
++    assert source.read_bytes() == source_before
++    assert len(starts) == 1 and starts[0].document_id == "document-0001"
++    assert starts[0].dirty is None
++    assert len(progress) == 1 and progress[0].status == "written"
++    report = _report(result.report_path)
++    assert report["requested"] == 1
++    assert report["written"] == 1
++    assert report["failed"] == 0
++    assert report["item"][0]["id"] == "document-0001"
++    assert report["item"][0]["source"] == str(source)
++
++
++def test_compile_ssmdoc_uses_edited_content_with_stale_digest(tmp_path: Path) -> None:
++    root = _workspace(tmp_path, text="Original content.")
++    manifest = root / "manifest.json"
++    manifest_before = manifest.read_bytes()
++    source = root / "document.ssmd.md"
++    source.write_text(_ssmd("Edited current content."), encoding="utf-8")
++    source_before = source.read_bytes()
++
++    result = compile_ssmdoc(root, planner_config=_config())
++
++    assert result.exit_code == 0
++    assert "Edited current content." in _plan_text(result.plan_path)
++    assert manifest.read_bytes() == manifest_before
++    assert source.read_bytes() == source_before
++
++
++def test_missing_document_is_a_reported_read_failure(tmp_path: Path) -> None:
++    root = _workspace(tmp_path)
++    (root / "document.ssmd.md").unlink()
++
++    result = compile_ssmdoc(root, planner_config=_config())
++
++    assert result.exit_code == 1
++    assert not result.plan_path.exists()
++    item = _report(result.report_path)["item"][0]
++    assert item["status"] == "failed"
++    assert item["stage"] == "read"
++
++
++def test_invalid_ssmd_is_a_reported_compile_failure_without_plan(tmp_path: Path) -> None:
++    root = _workspace(tmp_path)
++    source = root / "document.ssmd.md"
++    source.write_text('---\nssmd_version: "0.8"\n---\n\nBad dialect.\n', encoding="utf-8")
++
++    result = compile_ssmdoc(root, planner_config=_config())
++
++    assert result.exit_code == 1
++    assert not result.plan_path.exists()
++    item = _report(result.report_path)["item"][0]
++    assert item["status"] == "failed"
++    assert item["stage"] == "compile"
++
++
++def test_existing_plan_is_protected_unless_force_is_used(tmp_path: Path) -> None:
++    root = _workspace(tmp_path)
++    output = root / ".readio" / "utterplan" / "document-0001.utterplan.toml"
++    output.parent.mkdir(parents=True)
++    output.write_text("sentinel", encoding="utf-8")
++
++    protected = compile_ssmdoc(root, planner_config=_config())
++
++    assert protected.exit_code == 1
++    assert output.read_text(encoding="utf-8") == "sentinel"
++    assert _report(protected.report_path)["item"][0]["status"] == "failed"
++
++    forced = compile_ssmdoc(root, planner_config=_config(), force=True)
++
++    assert forced.exit_code == 0
++    assert "Original content." in _plan_text(output)
++
++
++def test_output_override_and_report_override_do_not_create_default_layout(tmp_path: Path) -> None:
++    root = _workspace(tmp_path)
++    output_dir = tmp_path / "build" / "plans"
++    report = tmp_path / "reports" / "document.toml"
++
++    result = compile_ssmdoc(
++        root,
++        output_dir=output_dir,
++        report=report,
++        planner_config=_config(),
++    )
++
++    assert result.exit_code == 0
++    assert result.output_dir == output_dir
++    assert result.report_path == report
++    assert result.plan_path.is_file()
++    assert report.is_file()
++    assert not (root / ".readio" / "utterplan").exists()
++
++
++def test_output_collisions_are_rejected_before_creating_directories(tmp_path: Path) -> None:
++    root = _workspace(tmp_path)
++    output_dir = tmp_path / "collision-plans"
++    plan_path = output_dir / "document-0001.utterplan.toml"
++
++    with pytest.raises(DocumentWorkspaceServiceError, match="report path collides"):
++        compile_ssmdoc(
++            root,
++            output_dir=output_dir,
++            report=plan_path,
++            planner_config=_config(),
++        )
++    assert not output_dir.exists()
++
++    with pytest.raises(DocumentWorkspaceServiceError, match="overwrite source workspace"):
++        compile_ssmdoc(
++            root,
++            output_dir=output_dir,
++            report=root / "manifest.json",
++            planner_config=_config(),
++        )
++    assert not output_dir.exists()
++
++    with pytest.raises(DocumentWorkspaceServiceError, match="overwrite source workspace"):
++        compile_ssmdoc(
++            root,
++            output_dir=output_dir,
++            report=root / "document.ssmd.md",
++            planner_config=_config(),
++        )
++    assert not output_dir.exists()
++
++
++def test_invalid_manifest_is_rejected_before_output_creation(tmp_path: Path) -> None:
++    root = _workspace(tmp_path)
++    manifest = root / "manifest.json"
++    data = json.loads(manifest.read_text(encoding="utf-8"))
++    data["format"] = "ssmdconvert.book"
++    manifest.write_text(json.dumps(data), encoding="utf-8")
++    output_dir = tmp_path / "invalid-plans"
++
++    with pytest.raises(DocumentWorkspaceServiceError, match="ssmdconvert.document"):
++        compile_ssmdoc(root, output_dir=output_dir, planner_config=_config())
++    assert not output_dir.exists()
++
++
++def test_ssmd_language_is_authority_and_manifest_language_is_not_fallback(tmp_path: Path) -> None:
++    root = _workspace(tmp_path)
++    result = compile_ssmdoc(root, planner_config=_config())
++    assert result.exit_code == 0
++
++    no_header_language = _workspace(tmp_path, "no-language.ssmdoc")
++    source = no_header_language / "document.ssmd.md"
++    source.write_text(_ssmd("No declared language.", language=None), encoding="utf-8")
++    missing_fallback = compile_ssmdoc(no_header_language, planner_config=_config())
++    assert missing_fallback.exit_code == 1
++    assert _report(missing_fallback.report_path)["item"][0]["code"] == "input.language_required"
++
++    with_fallback = compile_ssmdoc(
++        no_header_language,
++        language="en-US",
++        planner_config=_config(),
++        force=True,
++    )
++    assert with_fallback.exit_code == 0
++
++
++def test_canonical_document_path_is_accepted_by_service(tmp_path: Path) -> None:
++    root = _workspace(tmp_path)
++
++    result = compile_ssmdoc(root / "document.ssmd.md", planner_config=_config())
++
++    assert result.exit_code == 0
++    assert result.workspace == root.resolve()
+diff --git a/tests/test_source_input.py b/tests/test_source_input.py
+new file mode 100644
+index 0000000..1b28fee
+--- /dev/null
++++ b/tests/test_source_input.py
+@@ -0,0 +1,104 @@
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++import pytest
++
++from utterplan.source_input import SourceInputError, load_source_path
++
++FIXTURE = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
++SSMD = '---\nssmd_version: "0.9"\nlanguage: en-US\n---\n\nA sentence.\n'
++
++
++def test_loads_ssmdoc_directory_as_current_ssmd_document() -> None:
++    loaded = load_source_path(FIXTURE)
++
++    assert loaded.text == (FIXTURE / "document.ssmd.md").read_text(encoding="utf-8")
++    assert loaded.input_format == "ssmd"
++    assert loaded.source_path == FIXTURE / "document.ssmd.md"
++    assert loaded.workspace_root == FIXTURE.resolve()
++    assert loaded.workspace_kind == "ssmdoc"
++
++
++def test_loads_canonical_ssmdoc_document_file() -> None:
++    loaded = load_source_path(FIXTURE / "document.ssmd.md")
++
++    assert loaded.input_format == "ssmd"
++    assert loaded.workspace_root == FIXTURE.resolve()
++    assert loaded.workspace_kind == "ssmdoc"
++
++
++def test_rejects_unsupported_directory(tmp_path: Path) -> None:
++    directory = tmp_path / "ordinary"
++    directory.mkdir()
++
++    with pytest.raises(SourceInputError, match="unsupported source directory"):
++        load_source_path(directory)
++
++
++def test_rejects_ssmdbook_as_source_directory(tmp_path: Path) -> None:
++    directory = tmp_path / "book"
++    directory.mkdir()
++    (directory / "manifest.json").write_text(
++        json.dumps({"format": "ssmdconvert.book"}), encoding="utf-8"
++    )
++
++    with pytest.raises(SourceInputError, match="ssmdconvert.document"):
++        load_source_path(directory)
++
++
++def test_standalone_files_keep_existing_auto_detection(tmp_path: Path) -> None:
++    ssmd_path = tmp_path / "chapter.ssmd.md"
++    ssmd_path.write_text(SSMD, encoding="utf-8")
++    plain_path = tmp_path / "chapter.txt"
++    plain_path.write_text("Plain source.", encoding="utf-8")
++
++    assert load_source_path(ssmd_path).input_format == "ssmd"
++    assert load_source_path(plain_path).input_format == "plain"
++
++
++def test_standalone_markdown_detection_and_explicit_override(tmp_path: Path) -> None:
++    path = tmp_path / "chapter.md"
++    path.write_text(SSMD, encoding="utf-8")
++
++    assert load_source_path(path).input_format == "ssmd"
++    assert load_source_path(path, requested_format="plain").input_format == "plain"
++    assert load_source_path(path, requested_format="ssmd").input_format == "ssmd"
++
++
++def test_workspace_format_cannot_be_overridden_to_plain() -> None:
++    with pytest.raises(SourceInputError, match="SSMDDoc workspace input is SSMD"):
++        load_source_path(FIXTURE, requested_format="plain")
++
++
++def test_missing_canonical_document_stays_a_read_error(tmp_path: Path) -> None:
++    root = tmp_path / "missing.ssmdoc"
++    root.mkdir()
++    (root / "manifest.json").write_text(
++        json.dumps(
++            {
++                "format": "ssmdconvert.document",
++                "schema_version": 1,
++                "ssmd_version": "0.9",
++                "document": {
++                    "id": "document-0001",
++                    "path": "document.ssmd.md",
++                    "sha256": "a" * 64,
++                    "char_count": 0,
++                },
++            }
++        ),
++        encoding="utf-8",
++    )
++
++    with pytest.raises(FileNotFoundError):
++        load_source_path(root)
++
++
++def test_invalid_utf8_standalone_file_keeps_unicode_error(tmp_path: Path) -> None:
++    path = tmp_path / "invalid.ssmd"
++    path.write_bytes(b"\xff")
++
++    with pytest.raises(UnicodeDecodeError):
++        load_source_path(path)
+diff --git a/tests/test_ssmdoc.py b/tests/test_ssmdoc.py
+new file mode 100644
+index 0000000..a9007dc
+--- /dev/null
++++ b/tests/test_ssmdoc.py
+@@ -0,0 +1,250 @@
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++import pytest
++
++from utterplan.ssmdoc import (
++    SSMDDocError,
++    load_ssmdoc_index,
++    resolve_ssmdoc_root,
++    ssmdoc_document_path,
++)
++
++FIXTURE = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
++DOCUMENT_TEXT = '---\nssmd_version: "0.9"\nlanguage: en-US\n---\n\nA sentence.\n'
++
++
++def _document(
++    *,
++    document_id: object = "document-0001",
++    path: object = "document.ssmd.md",
++    sha256: object = "a" * 64,
++    char_count: object = 42,
++) -> dict[str, object]:
++    return {
++        "id": document_id,
++        "path": path,
++        "char_count": char_count,
++        "sha256": sha256,
++    }
++
++
++def _manifest(**updates: object) -> dict[str, object]:
++    result: dict[str, object] = {
++        "format": "ssmdconvert.document",
++        "schema_version": 1,
++        "ssmd_version": "0.9",
++        "metadata": {"title": "Example", "language": "en-US"},
++        "document": _document(),
++    }
++    result.update(updates)
++    return result
++
++
++def _write_manifest(root: Path, data: object | str | bytes) -> Path:
++    root.mkdir(parents=True, exist_ok=True)
++    manifest_path = root / "manifest.json"
++    if isinstance(data, bytes):
++        manifest_path.write_bytes(data)
++    elif isinstance(data, str):
++        manifest_path.write_text(data, encoding="utf-8")
++    else:
++        manifest_path.write_text(json.dumps(data), encoding="utf-8")
++    return manifest_path
++
++
++def test_ssmdconvert_document_v1_fixture_is_supported() -> None:
++    index = load_ssmdoc_index(FIXTURE)
++
++    assert index.root == FIXTURE.resolve()
++    assert index.document_id == "document-0001"
++    assert index.relative_path == "document.ssmd.md"
++    assert index.expected_char_count == 87
++    assert (
++        index.expected_sha256 == "ed67851d91bb3d82c08020d1cdfef99102632a62dbeea46ee1793cf8fa9a49c3"
++    )
++    assert ssmdoc_document_path(index) == FIXTURE / "document.ssmd.md"
++
++
++def test_resolves_ssmdoc_root_and_canonical_document_file(tmp_path: Path) -> None:
++    root = tmp_path / "named-without-extension"
++    _write_manifest(root, _manifest())
++
++    assert resolve_ssmdoc_root(root) == root.resolve()
++    assert resolve_ssmdoc_root(root / "document.ssmd.md") == root.resolve()
++    assert load_ssmdoc_index(root / "document.ssmd.md").root == root.resolve()
++
++
++def test_root_detection_uses_manifest_not_suffix(tmp_path: Path) -> None:
++    root = tmp_path / "ordinary-name"
++    _write_manifest(root, _manifest())
++
++    assert resolve_ssmdoc_root(root) == root.resolve()
++
++
++def test_rejects_directory_without_manifest(tmp_path: Path) -> None:
++    root = tmp_path / "story.ssmdoc"
++    root.mkdir()
++
++    with pytest.raises(SSMDDocError, match="expected manifest.json with format"):
++        resolve_ssmdoc_root(root)
++
++
++def test_rejects_ssmdbook_manifest_as_ssmdoc(tmp_path: Path) -> None:
++    root = tmp_path / "book.ssmdbook"
++    _write_manifest(root, {"format": "ssmdconvert.book", "schema_version": 1})
++
++    with pytest.raises(SSMDDocError, match="expected manifest.json with format"):
++        load_ssmdoc_index(root)
++
++
++def test_rejects_wrong_format_manifest(tmp_path: Path) -> None:
++    root = tmp_path / "wrong-format"
++    _write_manifest(root, _manifest(format="other.format"))
++
++    with pytest.raises(SSMDDocError, match="ssmdconvert.document"):
++        load_ssmdoc_index(root)
++
++
++@pytest.mark.parametrize(
++    ("payload", "message"),
++    [
++        ([], "root must be a JSON object"),
++        (b"\xff", "invalid ssmdoc manifest"),
++        ("{", "invalid ssmdoc manifest"),
++        ('{"format":"ssmdconvert.document","value":NaN}', "non-standard JSON constant"),
++        ('{"format":"ssmdconvert.document","value":Infinity}', "non-standard JSON constant"),
++        ('{"format":"ssmdconvert.document","value":-Infinity}', "non-standard JSON constant"),
++    ],
++)
++def test_rejects_invalid_manifest_json(
++    tmp_path: Path, payload: object | str | bytes, message: str
++) -> None:
++    root = tmp_path / "bad-json"
++    _write_manifest(root, payload)
++
++    with pytest.raises(SSMDDocError, match=message):
++        load_ssmdoc_index(root)
++
++
++@pytest.mark.parametrize(
++    ("field", "value", "message"),
++    [
++        ("format", "ssmdconvert.book", "ssmdconvert.document"),
++        ("schema_version", 2, "schema_version"),
++        ("schema_version", True, "schema_version"),
++        ("ssmd_version", "1.0", "ssmd_version"),
++        ("document", None, "document must be an object"),
++    ],
++)
++def test_rejects_unsupported_manifest_header(
++    tmp_path: Path, field: str, value: object, message: str
++) -> None:
++    root = tmp_path / "unsupported-header"
++    _write_manifest(root, _manifest(**{field: value}))
++
++    with pytest.raises(SSMDDocError, match=message):
++        load_ssmdoc_index(root)
++
++
++@pytest.mark.parametrize(
++    ("field", "manifest_key", "value", "message"),
++    [
++        ("document_id", "id", "other-document", "document.id"),
++        ("path", "path", "other.ssmd.md", "document.path"),
++        ("sha256", "sha256", "A" * 64, "sha256"),
++        ("sha256", "sha256", "abc", "sha256"),
++        ("char_count", "char_count", True, "char_count"),
++        ("char_count", "char_count", -1, "char_count"),
++    ],
++)
++def test_rejects_invalid_document_fields(
++    tmp_path: Path, field: str, manifest_key: str, value: object, message: str
++) -> None:
++    root = tmp_path / "invalid-document"
++    document = _document()
++    document[manifest_key] = value
++    _write_manifest(root, _manifest(document=document))
++
++    with pytest.raises(SSMDDocError, match=message):
++        load_ssmdoc_index(root)
++
++
++@pytest.mark.parametrize(
++    "unsafe_path",
++    [
++        "/document.ssmd.md",
++        "C:/document.ssmd.md",
++        "C:document.ssmd.md",
++        "..\\document.ssmd.md",
++        "../document.ssmd.md",
++        "./document.ssmd.md",
++        "document//ssmd.md",
++        "document.ssmd.md/",
++        "document\x00.ssmd.md",
++        "document\\ssmd.md",
++    ],
++)
++def test_rejects_unsafe_or_non_normalized_document_paths(tmp_path: Path, unsafe_path: str) -> None:
++    root = tmp_path / "unsafe-path"
++    _write_manifest(root, _manifest(document=_document(path=unsafe_path)))
++
++    with pytest.raises(SSMDDocError):
++        load_ssmdoc_index(root)
++
++
++def test_manifest_size_is_bounded_before_json_parsing(tmp_path: Path) -> None:
++    root = tmp_path / "large-manifest"
++    _write_manifest(root, b" " * (2 * 1024 * 1024 + 1))
++
++    with pytest.raises(SSMDDocError, match="2 MiB size limit"):
++        load_ssmdoc_index(root)
++
++
++def test_missing_document_can_be_returned_for_compile_read_failure(tmp_path: Path) -> None:
++    root = tmp_path / "missing-document"
++    _write_manifest(root, _manifest())
++
++    index = load_ssmdoc_index(root)
++
++    assert ssmdoc_document_path(index) == root / "document.ssmd.md"
++
++
++def test_rejects_existing_non_file_document(tmp_path: Path) -> None:
++    root = tmp_path / "directory-document"
++    _write_manifest(root, _manifest())
++    (root / "document.ssmd.md").mkdir()
++
++    with pytest.raises(SSMDDocError, match="not a regular file"):
++        ssmdoc_document_path(load_ssmdoc_index(root))
++
++
++def test_rejects_document_symlink_escape(tmp_path: Path) -> None:
++    root = tmp_path / "symlink-workspace"
++    _write_manifest(root, _manifest())
++    outside = tmp_path / "outside.ssmd.md"
++    outside.write_text(DOCUMENT_TEXT, encoding="utf-8")
++    link = root / "document.ssmd.md"
++    try:
++        link.symlink_to(outside)
++    except (OSError, NotImplementedError) as exc:
++        pytest.skip(f"symlinks unavailable: {exc}")
++
++    with pytest.raises(SSMDDocError, match="escapes workspace root"):
++        ssmdoc_document_path(load_ssmdoc_index(root))
++
++
++def test_rejects_manifest_symlink_escape(tmp_path: Path) -> None:
++    root = tmp_path / "manifest-link-workspace"
++    root.mkdir()
++    outside = tmp_path / "manifest.json"
++    outside.write_text(json.dumps(_manifest()), encoding="utf-8")
++    try:
++        (root / "manifest.json").symlink_to(outside)
++    except (OSError, NotImplementedError) as exc:
++        pytest.skip(f"symlinks unavailable: {exc}")
++
++    with pytest.raises(SSMDDocError, match="cannot read ssmdoc manifest"):
++        load_ssmdoc_index(root)
+diff --git a/utterplan/__init__.py b/utterplan/__init__.py
+index cd137c3..ff30127 100644
+--- a/utterplan/__init__.py
++++ b/utterplan/__init__.py
+@@ -41,6 +41,14 @@ from .config import (
+     PlannerConfig,
+     SSMDConfig,
+ )
++from .document_workspace import (
++    DocumentCompileRequest,
++    DocumentCompileResult,
++    DocumentCompileStart,
++    DocumentCompileStartCallback,
++    DocumentWorkspaceServiceError,
++    compile_ssmdoc,
++)
+ from .exceptions import (
+     ConfigurationError,
+     LanguagePlanError,
+@@ -134,6 +142,12 @@ __all__ = [
+     "BookRenderStart",
+     "BookRenderStartCallback",
+     "BookServiceError",
++    "DocumentCompileRequest",
++    "DocumentCompileResult",
++    "DocumentCompileStart",
++    "DocumentCompileStartCallback",
++    "DocumentWorkspaceServiceError",
++    "compile_ssmdoc",
+     "BookReplanError",
+     "BookReplanRequest",
+     "BookReplanResult",
+diff --git a/utterplan/cli.py b/utterplan/cli.py
+index 09df68a..591857e 100644
+--- a/utterplan/cli.py
++++ b/utterplan/cli.py
+@@ -26,6 +26,13 @@ from .book_replan import BookReplanStart, ReplanOutcome
+ from .book_replan import replan_book as _replan_book_service
+ from .compiler import InputFormat, PreparationTrace, compile_document
+ from .config import LinguisticsConfig, PlannerConfig
++from .document_workspace import (
++    DocumentCompileStart,
++    DocumentWorkspaceServiceError,
++)
++from .document_workspace import (
++    compile_ssmdoc as _compile_ssmdoc_service,
++)
+ from .exceptions import PlanFormatError, PlanRenderabilityError, UtterPlanError
+ from .explain import format_explanation
+ from .migration import MigrationResult, migrate_plan_data
+@@ -34,6 +41,8 @@ from .preview import PreviewChunk, preview_plan
+ from .renderability import format_renderability_error
+ from .renderplan_batch import RenderOutcome
+ from .renderplan_export import build_render_plan, format_render_plan_explanation
++from .source_input import _format_for_path as _format_source_path
++from .source_input import load_source_path
+ from .trace_codec import loads_trace
+ from .versioning import CURRENT_SCHEMA_VERSION, V5_SCHEMA_VERSION, V6_SCHEMA_VERSION
+
+@@ -43,6 +52,7 @@ _EXAMPLES = """examples:
+   utterplan compile plain.txt --input-format plain --language de-DE --stdout
+   utterplan compile-many chapters/*.ssmd --output-dir build/plans
+   utterplan compile-book chapters --chapters 5-17
++  utterplan compile-document story.ssmdoc
+   utterplan validate chapter.utterplan.toml
+   utterplan preview chapter.utterplan.toml --chunk-by sentence --pause-policy native
+   utterplan render-plan chapter.utterplan.toml --profile voice.renderprofile.toml -o chapter.renderplan.toml
+@@ -216,6 +226,51 @@ def build_parser() -> argparse.ArgumentParser:
+         default="warnings",
+         help="diagnostic detail verbosity (default: warnings)",
+     )
++    document_parser = commands.add_parser(
++        "compile-document",
++        help="compile one editable ssmdconvert.document workspace",
++        formatter_class=argparse.RawDescriptionHelpFormatter,
++        epilog=(
++            "examples:\n"
++            "  utterplan compile-document story.ssmdoc\n"
++            "  utterplan compile-document . --spacy off\n"
++            "  utterplan compile-document story.ssmdoc --output-dir build/utterplan --force"
++        ),
++    )
++    document_parser.add_argument(
++        "input", type=Path, help="SSMDDoc workspace root or its canonical document.ssmd.md file"
++    )
++    document_parser.add_argument(
++        "--output-dir",
++        type=Path,
++        help="plan output directory (default: <ssmdoc>/.readio/utterplan)",
++    )
++    document_parser.add_argument("--language", "--lang", dest="language")
++    document_parser.add_argument(
++        "--text-preparation", choices=("auto", "ssmd", "spokenform", "identity"), default="auto"
++    )
++    document_parser.add_argument(
++        "--renderability",
++        choices=("strict", "repair"),
++        default="repair",
++        help="safely repair isolated punctuation by default; strict rejects every repair opportunity",
++    )
++    document_parser.add_argument(
++        "--spacy",
++        choices=("auto", "off", "sm", "md", "lg", "trf"),
++        default="auto",
++        help="linguistic-resource policy; default auto uses a compatible local spaCy model when available and falls back safely",
++    )
++    document_parser.add_argument(
++        "--force", action="store_true", help="replace an existing plan file"
++    )
++    document_parser.add_argument("--report", type=Path, help="TOML operational report path")
++    document_parser.add_argument(
++        "--diagnostics",
++        choices=("warnings", "all", "none"),
++        default="warnings",
++        help="diagnostic detail verbosity (default: warnings)",
++    )
+     validate_parser = commands.add_parser(
+         "validate", help="validate a source document or saved semantic plan"
+     )
+@@ -433,18 +488,6 @@ def build_parser() -> argparse.ArgumentParser:
+     return parser
+
+
+-def _declares_ssmd_version(source: str) -> bool:
+-    try:
+-        from ssmd.frontmatter import FrontMatterError, parse_front_matter
+-    except ImportError:
+-        return False
+-    try:
+-        front_matter = parse_front_matter(source)
+-    except FrontMatterError:
+-        return False
+-    return front_matter.present and "ssmd_version" in front_matter.data
+-
+-
+ def _ssmd_header_language(source: str) -> str | None:
+     try:
+         from ssmd.frontmatter import FrontMatterError, parse_front_matter
+@@ -458,6 +501,11 @@ def _ssmd_header_language(source: str) -> str | None:
+     return language.strip() if isinstance(language, str) and language.strip() else None
+
+
++def _format_for_path(path: Path, source: str) -> InputFormat:
++    """Keep the legacy CLI auto-detection helper as a compatibility shim."""
++    return _format_source_path(path, source, "auto")
++
++
+ def _language_fallback(source: str, input_format: InputFormat, requested: str | None) -> str:
+     if requested is not None:
+         if not requested.strip():
+@@ -471,26 +519,15 @@ def _language_fallback(source: str, input_format: InputFormat, requested: str |
+     raise ValueError("plain input requires --language")
+
+
+-def _format_for_path(path: Path, source: str) -> InputFormat:
+-    lower_name = path.name.lower()
+-    if lower_name.endswith((".ssmd.md", ".ssmd")):
+-        return "ssmd"
+-    if path.suffix.lower() == ".md" and _declares_ssmd_version(source):
+-        return "ssmd"
+-    return "plain"
+-
+-
+ def _read_compile_input(args: argparse.Namespace) -> tuple[str, InputFormat]:
++    requested_format = (
++        "auto" if args.input_format == "auto" else _map_input_format(args.input_format)
++    )
+     if args.file is not None:
+         if args.text:
+             raise ValueError("--file cannot be combined with positional text")
+-        source = args.file.read_text(encoding="utf-8")
+-        input_format = (
+-            _format_for_path(args.file, source)
+-            if args.input_format == "auto"
+-            else _map_input_format(args.input_format)
+-        )
+-        return source, input_format
++        loaded = load_source_path(args.file, requested_format=requested_format)
++        return loaded.text, loaded.input_format
+
+     if not args.text:
+         if sys.stdin.isatty():
+@@ -505,14 +542,13 @@ def _read_compile_input(args: argparse.Namespace) -> tuple[str, InputFormat]:
+
+     if len(args.text) == 1:
+         candidate = Path(args.text[0])
+-        if candidate.is_file():
+-            source = candidate.read_text(encoding="utf-8")
+-            input_format = (
+-                _format_for_path(candidate, source)
+-                if args.input_format == "auto"
+-                else _map_input_format(args.input_format)
+-            )
+-            return source, input_format
++        canonical_workspace_path = candidate.name == "document.ssmd.md" and (
++            (candidate.parent / "manifest.json").exists()
++            or (candidate.parent / "manifest.json").is_symlink()
++        )
++        if candidate.exists() or candidate.is_symlink() or canonical_workspace_path:
++            loaded = load_source_path(candidate, requested_format=requested_format)
++            return loaded.text, loaded.input_format
+
+     return " ".join(args.text), _map_input_format(args.input_format, default="plain")
+
+@@ -812,6 +848,58 @@ def _compile_book(args: argparse.Namespace) -> int:
+     return result.exit_code
+
+
++def _compile_document(args: argparse.Namespace) -> int:
++    written = 0
++
++    def start(progress: DocumentCompileStart) -> None:
++        print("UtterPlan document compile", file=sys.stderr)
++        print(f"  workspace: {progress.workspace}", file=sys.stderr)
++        print(f"  document:  {progress.document_id}", file=sys.stderr)
++        print(f"  source:    {progress.source_path}", file=sys.stderr)
++        print(f"  output:    {progress.output_dir}", file=sys.stderr)
++        if progress.dirty is not None:
++            status = "dirty" if progress.dirty else "clean"
++            print(f"  status:    {status}", file=sys.stderr)
++
++    def report_progress(outcome: CompileOutcome) -> None:
++        nonlocal written
++        print(f"[{outcome.index}/1] {outcome.id}  {outcome.source_label}", file=sys.stderr)
++        if outcome.status == "written":
++            written += 1
++            mode = outcome.preparation_mode or "unknown"
++            linguistics = "degraded" if outcome.degraded_linguistics else "full"
++            print(f"       preparation: {mode}; linguistics: {linguistics}", file=sys.stderr)
++            _print_batch_diagnostics(outcome, verbosity=args.diagnostics)
++            print(f"       wrote {outcome.output}", file=sys.stderr)
++        elif outcome.status == "failed":
++            print("       FAILED", file=sys.stderr)
++            if outcome.error_message:
++                for line in outcome.error_message.splitlines():
++                    print(f"       {line}", file=sys.stderr)
++
++    try:
++        result = _compile_ssmdoc_service(
++            args.input,
++            output_dir=args.output_dir,
++            report=args.report,
++            language=args.language,
++            planner_config=_planner_config_from_batch_args(args),
++            force=args.force,
++            diagnostics=args.diagnostics,
++            on_progress=report_progress,
++            on_start=start,
++        )
++    except DocumentWorkspaceServiceError as exc:
++        raise _CliUsageError(str(exc)) from exc
++
++    print("UtterPlan compile summary", file=sys.stderr)
++    print("  requested: 1", file=sys.stderr)
++    print(f"  written:   {written}", file=sys.stderr)
++    print(f"  failed:    {result.failed}", file=sys.stderr)
++    print(f"  report:    {result.report_path}", file=sys.stderr)
++    return result.exit_code
++
++
+ def _render_book(args: argparse.Namespace) -> int:
+     selected_ids: tuple[str, ...] = ()
+     written = 0
+@@ -1200,12 +1288,14 @@ def _validate(args: argparse.Namespace) -> int:
+         print(f"warnings: {len(plan.warnings)}")
+         return 0
+
+-    source = path.read_text(encoding="utf-8")
+-    input_format = (
+-        _format_for_path(path, source)
+-        if args.input_format == "auto"
+-        else _map_input_format(args.input_format)
++    loaded = load_source_path(
++        path,
++        requested_format=(
++            "auto" if args.input_format == "auto" else _map_input_format(args.input_format)
++        ),
+     )
++    source = loaded.text
++    input_format = loaded.input_format
+     fallback_language = _language_fallback(source, input_format, args.language)
+     config = PlannerConfig(
+         language=fallback_language,
+@@ -1292,6 +1382,8 @@ def main(argv: list[str] | None = None) -> int:
+             return _compile_many(args)
+         if args.command == "compile-book":
+             return _compile_book(args)
++        if args.command == "compile-document":
++            return _compile_document(args)
+         if args.command == "render-book":
+             return _render_book(args)
+         if args.command == "replan-book":
+diff --git a/utterplan/document_workspace.py b/utterplan/document_workspace.py
+new file mode 100644
+index 0000000..b15cd13
+--- /dev/null
++++ b/utterplan/document_workspace.py
+@@ -0,0 +1,194 @@
++"""Orchestration services for compiling editable SSMDDoc workspaces."""
++
++from __future__ import annotations
++
++from collections.abc import Callable
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Literal
++
++from .batch import BatchProgressCallback, CompileOutcome, CompileRequest, compile_to_files
++from .config import PlannerConfig
++from .ssmdoc import SSMDDocError, load_ssmdoc_index, ssmdoc_document_path
++
++
++class DocumentWorkspaceServiceError(ValueError):
++    """A document workspace request is invalid or unsafe to execute."""
++
++
++@dataclass(frozen=True, slots=True)
++class DocumentCompileRequest:
++    """Options for compiling one editable SSMDDoc workspace."""
++
++    workspace: Path
++    output_dir: Path | None = None
++    report: Path | None = None
++    language: str | None = None
++    force: bool = False
++    diagnostics: Literal["errors", "warnings", "all", "none"] = "errors"
++    planner_config: PlannerConfig | None = None
++
++    def __post_init__(self) -> None:
++        object.__setattr__(self, "workspace", Path(self.workspace))
++        if self.output_dir is not None:
++            object.__setattr__(self, "output_dir", Path(self.output_dir))
++        if self.report is not None:
++            object.__setattr__(self, "report", Path(self.report))
++        if self.diagnostics not in {"errors", "warnings", "all", "none"}:
++            raise ValueError("diagnostics must be 'errors', 'warnings', 'all', or 'none'")
++
++
++@dataclass(frozen=True, slots=True)
++class DocumentCompileStart:
++    """Resolved document source and artifact locations announced before compilation."""
++
++    workspace: Path
++    document_id: str
++    source_path: Path
++    output_dir: Path
++    report_path: Path
++    dirty: bool | None = None
++
++
++@dataclass(frozen=True, slots=True)
++class DocumentCompileResult:
++    """Resolved artifacts and the single document compilation outcome."""
++
++    workspace: Path
++    document_id: str
++    source_path: Path
++    output_dir: Path
++    plan_path: Path
++    report_path: Path
++    outcome: CompileOutcome
++
++    @property
++    def failed(self) -> int:
++        return int(self.outcome.status == "failed")
++
++    @property
++    def exit_code(self) -> int:
++        return 1 if self.failed else 0
++
++
++DocumentCompileStartCallback = Callable[[DocumentCompileStart], None]
++
++
++def compile_ssmdoc(
++    workspace: str | Path,
++    *,
++    output_dir: str | Path | None = None,
++    report: str | Path | None = None,
++    language: str | None = None,
++    planner_config: PlannerConfig | None = None,
++    force: bool = False,
++    diagnostics: Literal["errors", "warnings", "all", "none"] = "errors",
++    on_progress: BatchProgressCallback | None = None,
++    on_start: DocumentCompileStartCallback | None = None,
++) -> DocumentCompileResult:
++    """Compile the current canonical SSMD document and write a one-item report."""
++    request = DocumentCompileRequest(
++        workspace=Path(workspace),
++        output_dir=Path(output_dir) if output_dir is not None else None,
++        report=Path(report) if report is not None else None,
++        language=language,
++        planner_config=planner_config,
++        force=force,
++        diagnostics=diagnostics,
++    )
++    try:
++        index = load_ssmdoc_index(request.workspace)
++        source_path = ssmdoc_document_path(index)
++    except SSMDDocError as exc:
++        raise DocumentWorkspaceServiceError(str(exc)) from exc
++
++    output_path = request.output_dir or (index.root / ".readio" / "utterplan")
++    plan_path = output_path / f"{index.document_id}.utterplan.toml"
++    report_path = request.report or (output_path / "compile-report.toml")
++    _preflight_outputs(index.manifest_path, source_path, output_path, plan_path, report_path)
++
++    compile_request = CompileRequest(
++        id=index.document_id,
++        source=source_path,
++        output=plan_path,
++        input_format="ssmd",
++        fallback_language=request.language,
++        source_label=str(source_path),
++        require_language=request.language is None,
++    )
++    config = request.planner_config or PlannerConfig(language=request.language or "en-US")
++    if on_start is not None:
++        on_start(
++            DocumentCompileStart(
++                workspace=index.root,
++                document_id=index.document_id,
++                source_path=source_path,
++                output_dir=output_path,
++                report_path=report_path,
++            )
++        )
++
++    outcomes = tuple(
++        compile_to_files(
++            [compile_request],
++            config=config,
++            fail_fast=False,
++            force=request.force,
++            report_path=report_path,
++            on_progress=on_progress,
++        )
++    )
++    outcome = outcomes[0]
++    return DocumentCompileResult(
++        workspace=index.root,
++        document_id=index.document_id,
++        source_path=source_path,
++        output_dir=output_path,
++        plan_path=plan_path,
++        report_path=report_path,
++        outcome=outcome,
++    )
++
++
++def _preflight_outputs(
++    manifest_path: Path,
++    source_path: Path,
++    output_dir: Path,
++    plan_path: Path,
++    report_path: Path,
++) -> None:
++    resolved_manifest = manifest_path.resolve(strict=False)
++    resolved_source = source_path.resolve(strict=False)
++    resolved_plan = plan_path.expanduser().resolve(strict=False)
++    resolved_report = report_path.expanduser().resolve(strict=False)
++
++    if resolved_plan == resolved_report:
++        raise DocumentWorkspaceServiceError(
++            f"document report path collides with plan output: {report_path}"
++        )
++    for output in (resolved_plan, resolved_report):
++        if output in {resolved_manifest, resolved_source}:
++            raise DocumentWorkspaceServiceError(
++                f"document output would overwrite source workspace content: {output}"
++            )
++
++    expanded_output_dir = output_dir.expanduser()
++    if expanded_output_dir.exists() and not expanded_output_dir.is_dir():
++        raise DocumentWorkspaceServiceError(
++            f"document output directory is not a directory: {expanded_output_dir}"
++        )
++    for output_path in (plan_path, report_path):
++        if output_path.exists() and output_path.is_dir():
++            raise DocumentWorkspaceServiceError(
++                f"document output path is a directory when a file is expected: {output_path}"
++            )
++
++
++__all__ = [
++    "DocumentCompileRequest",
++    "DocumentCompileResult",
++    "DocumentCompileStart",
++    "DocumentCompileStartCallback",
++    "DocumentWorkspaceServiceError",
++    "compile_ssmdoc",
++]
+diff --git a/utterplan/source_input.py b/utterplan/source_input.py
+new file mode 100644
+index 0000000..7873e0c
+--- /dev/null
++++ b/utterplan/source_input.py
+@@ -0,0 +1,121 @@
++"""Centralized path loading for standalone documents and SSMDDoc workspaces."""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Literal
++
++from .compiler import InputFormat
++from .ssmdoc import SSMDDocError, load_ssmdoc_index, ssmdoc_document_path
++
++RequestedInputFormat = Literal["auto", "plain", "ssmd"]
++
++
++class SourceInputError(ValueError):
++    """A source path is unsupported or conflicts with its declared format."""
++
++
++@dataclass(frozen=True, slots=True)
++class LoadedSourceInput:
++    """Decoded source text and its resolved format/path provenance."""
++
++    text: str
++    input_format: InputFormat
++    source_path: Path
++    source_label: str
++    workspace_root: Path | None = None
++    workspace_kind: Literal["ssmdoc"] | None = None
++
++
++def load_source_path(
++    path: str | Path,
++    *,
++    requested_format: RequestedInputFormat = "auto",
++) -> LoadedSourceInput:
++    """Read a source file or current document from an SSMDDoc workspace."""
++    input_path = Path(path).expanduser()
++    workspace_root: Path | None = None
++    workspace_kind: Literal["ssmdoc"] | None = None
++
++    if input_path.is_dir():
++        try:
++            index = load_ssmdoc_index(input_path)
++            source_path = ssmdoc_document_path(index)
++        except SSMDDocError as exc:
++            raise SourceInputError(f"unsupported source directory {input_path}: {exc}") from exc
++        workspace_root = index.root
++        workspace_kind = "ssmdoc"
++    elif input_path.name == "document.ssmd.md" and _manifest_exists(input_path.parent):
++        index = load_ssmdoc_index(input_path)
++        source_path = ssmdoc_document_path(index)
++        workspace_root = index.root
++        workspace_kind = "ssmdoc"
++    else:
++        source_path = input_path
++        if not source_path.is_file():
++            raise SourceInputError(f"source path is not a regular file: {source_path}")
++
++    if workspace_kind is not None:
++        if requested_format == "plain":
++            raise SourceInputError(
++                "SSMDDoc workspace input is SSMD; --input-format plain is not supported"
++            )
++        input_format: InputFormat = "ssmd"
++    else:
++        text = source_path.read_text(encoding="utf-8")
++        input_format = _format_for_path(source_path, text, requested_format)
++        return LoadedSourceInput(
++            text=text,
++            input_format=input_format,
++            source_path=source_path,
++            source_label=str(source_path),
++        )
++
++    text = source_path.read_text(encoding="utf-8")
++    return LoadedSourceInput(
++        text=text,
++        input_format=input_format,
++        source_path=source_path,
++        source_label=str(source_path),
++        workspace_root=workspace_root,
++        workspace_kind=workspace_kind,
++    )
++
++
++def _manifest_exists(root: Path) -> bool:
++    manifest_path = root / "manifest.json"
++    return manifest_path.exists() or manifest_path.is_symlink()
++
++
++def _format_for_path(
++    path: Path, source: str, requested_format: RequestedInputFormat
++) -> InputFormat:
++    if requested_format != "auto":
++        return requested_format
++    lower_name = path.name.lower()
++    if lower_name.endswith((".ssmd.md", ".ssmd")):
++        return "ssmd"
++    if path.suffix.lower() == ".md" and _declares_ssmd_version(source):
++        return "ssmd"
++    return "plain"
++
++
++def _declares_ssmd_version(source: str) -> bool:
++    try:
++        from ssmd.frontmatter import FrontMatterError, parse_front_matter
++    except ImportError:
++        return False
++    try:
++        front_matter = parse_front_matter(source)
++    except FrontMatterError:
++        return False
++    return front_matter.present and "ssmd_version" in front_matter.data
++
++
++__all__ = [
++    "LoadedSourceInput",
++    "RequestedInputFormat",
++    "SourceInputError",
++    "load_source_path",
++]
+diff --git a/utterplan/ssmdoc.py b/utterplan/ssmdoc.py
+new file mode 100644
+index 0000000..05185a8
+--- /dev/null
++++ b/utterplan/ssmdoc.py
+@@ -0,0 +1,191 @@
++"""Read-only discovery and safe path resolution for editable SSMDDoc workspaces."""
++
++from __future__ import annotations
++
++import json
++import re
++from dataclasses import dataclass
++from pathlib import Path, PurePosixPath, PureWindowsPath
++from typing import Any
++
++_DOCUMENT_FORMAT = "ssmdconvert.document"
++_DOCUMENT_SCHEMA_VERSION = 1
++_SSMD_VERSION = "0.9"
++_DOCUMENT_ID = "document-0001"
++_DOCUMENT_PATH = "document.ssmd.md"
++_MAX_MANIFEST_BYTES = 2 * 1024 * 1024
++_MAX_DOCUMENT_BYTES = 64 * 1024 * 1024
++_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
++
++
++class SSMDDocError(ValueError):
++    """An SSMDDoc workspace is invalid or unsafe."""
++
++
++@dataclass(frozen=True, slots=True)
++class SSMDDocIndex:
++    """Validated, read-only document-workspace manifest data."""
++
++    root: Path
++    manifest_path: Path
++    document_id: str
++    relative_path: str
++    expected_sha256: str
++    expected_char_count: int
++
++
++def resolve_ssmdoc_root(path: str | Path) -> Path:
++    """Resolve a manifest-authorized workspace root or its canonical document path."""
++    input_path = Path(path).expanduser()
++    try:
++        if input_path.is_dir():
++            root = input_path.resolve(strict=True)
++            if _has_document_manifest(root):
++                return root
++        elif input_path.name == _DOCUMENT_PATH and input_path.parent.is_dir():
++            root = input_path.parent.resolve(strict=True)
++            if _has_document_manifest(root):
++                return root
++    except SSMDDocError:
++        raise
++    except (OSError, RuntimeError) as exc:
++        raise SSMDDocError(f"cannot inspect ssmdoc input {input_path}: {exc}") from exc
++
++    raise SSMDDocError(
++        f"not an ssmdoc workspace: {path}\n"
++        "expected manifest.json with format 'ssmdconvert.document'"
++    )
++
++
++def load_ssmdoc_index(path: str | Path) -> SSMDDocIndex:
++    """Read and validate the public SSMDDoc v1 manifest without reading the document."""
++    root = resolve_ssmdoc_root(path)
++    manifest_path = root / "manifest.json"
++    data = _read_manifest(root)
++
++    if data.get("format") != _DOCUMENT_FORMAT:
++        raise SSMDDocError("unsupported ssmdoc format; expected 'ssmdconvert.document'")
++    schema_version = data.get("schema_version")
++    if type(schema_version) is not int or schema_version != _DOCUMENT_SCHEMA_VERSION:
++        raise SSMDDocError("unsupported ssmdoc schema_version; expected 1")
++    if data.get("ssmd_version") != _SSMD_VERSION:
++        raise SSMDDocError("unsupported ssmdoc ssmd_version; expected '0.9'")
++
++    document = data.get("document")
++    if not isinstance(document, dict):
++        raise SSMDDocError("ssmdoc manifest document must be an object")
++    document_id = document.get("id")
++    relative_path = document.get("path")
++    expected_sha256 = document.get("sha256")
++    expected_char_count = document.get("char_count")
++
++    if document_id != _DOCUMENT_ID:
++        raise SSMDDocError(f"unsupported ssmdoc document.id; expected '{_DOCUMENT_ID}'")
++    if not isinstance(relative_path, str) or not relative_path:
++        raise SSMDDocError(
++            "ssmdoc document.path must be a non-empty normalized relative POSIX path"
++        )
++    _validate_relative_document_path(relative_path)
++    if relative_path != _DOCUMENT_PATH:
++        raise SSMDDocError(f"unsupported ssmdoc document.path; expected '{_DOCUMENT_PATH}'")
++    if not isinstance(expected_sha256, str) or _SHA256_RE.fullmatch(expected_sha256) is None:
++        raise SSMDDocError("ssmdoc document.sha256 must be 64 lowercase hexadecimal characters")
++    if type(expected_char_count) is not int or expected_char_count < 0:
++        raise SSMDDocError("ssmdoc document.char_count must be a non-negative integer")
++
++    return SSMDDocIndex(
++        root=root,
++        manifest_path=manifest_path,
++        document_id=document_id,
++        relative_path=relative_path,
++        expected_sha256=expected_sha256,
++        expected_char_count=expected_char_count,
++    )
++
++
++def ssmdoc_document_path(index: SSMDDocIndex) -> Path:
++    """Return the canonical document path after enforcing containment and file safety."""
++    _validate_relative_document_path(index.relative_path)
++    if index.relative_path != _DOCUMENT_PATH:
++        raise SSMDDocError(f"unsupported ssmdoc document.path; expected '{_DOCUMENT_PATH}'")
++
++    try:
++        root = index.root.resolve(strict=True)
++        source = root.joinpath(*PurePosixPath(index.relative_path).parts)
++        resolved = source.resolve(strict=False)
++        resolved.relative_to(root)
++        exists_or_link = source.exists() or source.is_symlink()
++        if exists_or_link:
++            if not resolved.is_file():
++                raise SSMDDocError(f"ssmdoc document is not a regular file: {index.relative_path}")
++            if resolved.stat().st_size > _MAX_DOCUMENT_BYTES:
++                raise SSMDDocError("ssmdoc document.ssmd.md exceeds the 64 MiB size limit")
++    except SSMDDocError:
++        raise
++    except (OSError, RuntimeError, ValueError) as exc:
++        raise SSMDDocError(
++            f"ssmdoc document path escapes workspace root: {index.relative_path}"
++        ) from exc
++    return source
++
++
++def _has_document_manifest(root: Path) -> bool:
++    manifest_path = root / "manifest.json"
++    if not manifest_path.exists() and not manifest_path.is_symlink():
++        return False
++    data = _read_manifest(root)
++    return data.get("format") == _DOCUMENT_FORMAT
++
++
++def _read_manifest(root: Path) -> dict[str, Any]:
++    manifest_path = root / "manifest.json"
++    try:
++        resolved_manifest = manifest_path.resolve(strict=True)
++        resolved_manifest.relative_to(root)
++        if not resolved_manifest.is_file():
++            raise SSMDDocError(f"ssmdoc manifest is not a regular file: {manifest_path}")
++        if resolved_manifest.stat().st_size > _MAX_MANIFEST_BYTES:
++            raise SSMDDocError("ssmdoc manifest.json exceeds the 2 MiB size limit")
++        with resolved_manifest.open("rb") as stream:
++            raw = stream.read(_MAX_MANIFEST_BYTES + 1)
++    except SSMDDocError:
++        raise
++    except (OSError, RuntimeError, ValueError) as exc:
++        raise SSMDDocError(f"cannot read ssmdoc manifest {manifest_path}: {exc}") from exc
++
++    if len(raw) > _MAX_MANIFEST_BYTES:
++        raise SSMDDocError("ssmdoc manifest.json exceeds the 2 MiB size limit")
++    try:
++        data = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant)
++    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
++        raise SSMDDocError(f"invalid ssmdoc manifest.json: {exc}") from exc
++    if not isinstance(data, dict):
++        raise SSMDDocError("ssmdoc manifest root must be a JSON object")
++    return data
++
++
++def _validate_relative_document_path(value: str) -> None:
++    if "\x00" in value:
++        raise SSMDDocError("ssmdoc document.path must not contain NUL")
++    if "\\" in value:
++        raise SSMDDocError("ssmdoc document.path must use normalized POSIX separators")
++    path = PurePosixPath(value)
++    if path.is_absolute() or PureWindowsPath(value).drive:
++        raise SSMDDocError("ssmdoc document.path must be a relative POSIX path")
++    if any(part in {".", ".."} for part in path.parts):
++        raise SSMDDocError("ssmdoc document.path must not contain '.' or '..' components")
++    if path.as_posix() != value:
++        raise SSMDDocError("ssmdoc document.path must be a normalized relative POSIX path")
++
++
++def _reject_json_constant(value: str) -> Any:
++    raise ValueError(f"non-standard JSON constant {value!r}")
++
++
++__all__ = [
++    "SSMDDocError",
++    "SSMDDocIndex",
++    "load_ssmdoc_index",
++    "resolve_ssmdoc_root",
++    "ssmdoc_document_path",
++]
