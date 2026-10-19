@@ -48,8 +48,8 @@ def test_compile_document_writes_default_layout_and_keeps_source_unchanged(
     )
 
     captured = capsys.readouterr()
-    output_dir = root / ".readio" / "utterplan"
-    plan_path = output_dir / "document-0001.utterplan.toml"
+    output_dir = root / "utterplan"
+    plan_path = output_dir / "document.utterplan.toml"
     report_path = output_dir / "compile-report.toml"
     assert result == 0
     assert captured.out == ""
@@ -64,6 +64,11 @@ def test_compile_document_writes_default_layout_and_keeps_source_unchanged(
     assert report["item"][0]["id"] == "document-0001"
     assert manifest.read_bytes() == manifest_before
     assert source.read_bytes() == source_before
+    assert {entry.name for entry in root.iterdir()} == {
+        "manifest.json",
+        "document.ssmd.md",
+        "utterplan",
+    }
 
 
 def test_compile_document_uses_manifest_not_directory_suffix(
@@ -77,7 +82,7 @@ def test_compile_document_uses_manifest_not_directory_suffix(
 
     assert result == 0
     capsys.readouterr()
-    assert (root / ".readio/utterplan/document-0001.utterplan.toml").is_file()
+    assert (root / "utterplan/document.utterplan.toml").is_file()
 
 
 def test_compile_document_uses_dirty_current_content_without_refreshing_manifest(
@@ -99,13 +104,13 @@ def test_compile_document_uses_dirty_current_content_without_refreshing_manifest
     assert result == 0
     capsys.readouterr()
     assert "Edited current content." in _plan_text(
-        root / ".readio/utterplan/document-0001.utterplan.toml"
+        root / "utterplan/document.utterplan.toml"
     )
     assert manifest.read_bytes() == manifest_before
     assert "Edited current content." in source.read_text(encoding="utf-8")
 
 
-def test_compile_document_missing_source_is_a_reported_read_failure(
+def test_compile_document_missing_source_fails_before_output_creation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = _workspace(tmp_path)
@@ -114,12 +119,9 @@ def test_compile_document_missing_source_is_a_reported_read_failure(
     result = main(["compile-document", str(root)])
 
     captured = capsys.readouterr()
-    report = _report(root / ".readio/utterplan/compile-report.toml")
-    assert result == 1
-    assert "FAILED" in captured.err
-    assert report["item"][0]["status"] == "failed"
-    assert report["item"][0]["stage"] == "read"
-
+    assert result == 2
+    assert "document is missing" in captured.err
+    assert not (root / "utterplan").exists()
 
 def test_compile_document_invalid_workspace_fails_before_output_creation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -164,16 +166,16 @@ def test_compile_document_output_and_report_overrides(
     assert result == 0
     captured = capsys.readouterr()
     assert str(output_dir) in captured.err
-    assert (output_dir / "document-0001.utterplan.toml").is_file()
+    assert (output_dir / "document.utterplan.toml").is_file()
     assert report.is_file()
-    assert not (root / ".readio/utterplan").exists()
+    assert not (root / "utterplan").exists()
 
 
 def test_compile_document_force_only_replaces_existing_plan(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = _workspace(tmp_path)
-    output = root / ".readio/utterplan/document-0001.utterplan.toml"
+    output = root / "utterplan/document.utterplan.toml"
     output.parent.mkdir(parents=True)
     output.write_text("sentinel", encoding="utf-8")
     args = ["compile-document", str(root), "--text-preparation", "identity", "--spacy", "off"]
@@ -206,7 +208,7 @@ def test_compile_document_accepts_canonical_document_file(
 
     assert result == 0
     capsys.readouterr()
-    assert (root / ".readio/utterplan/document-0001.utterplan.toml").is_file()
+    assert (root / "utterplan/document.utterplan.toml").is_file()
 
 
 def test_compile_document_uses_only_ssmd_language_or_explicit_fallback(
@@ -219,7 +221,7 @@ def test_compile_document_uses_only_ssmd_language_or_explicit_fallback(
 
     assert main(args) == 1
     capsys.readouterr()
-    item = _report(root / ".readio/utterplan/compile-report.toml")["item"][0]
+    item = _report(root / "utterplan/compile-report.toml")["item"][0]
     assert item["code"] == "input.language_required"
 
     assert main([*args, "--language", "en-US"]) == 0

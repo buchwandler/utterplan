@@ -43,6 +43,8 @@ def load_source_path(
             index = load_ssmdoc_index(input_path)
             source_path = ssmdoc_document_path(index)
         except SSMDDocError as exc:
+            if isinstance(exc.__cause__, FileNotFoundError):
+                raise exc.__cause__ from None
             raise SourceInputError(f"unsupported source directory {input_path}: {exc}") from exc
         workspace_root = index.root
         workspace_kind = "ssmdoc"

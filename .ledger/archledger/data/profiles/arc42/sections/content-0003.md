@@ -7,7 +7,7 @@ section: context_and_scope
 title: Context and Scope
 order: 30
 status: accepted
-version: 3
+version: 4
 body_format: markdown
 ---
 
@@ -22,7 +22,7 @@ TTSReady
     ^
 UtterPlan
     ^
-Readio / VoiceRender / other FlowPlan consumers
+Downstream FlowPlan consumers
 ```
 
 UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
@@ -37,9 +37,9 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
 - **spaCy** optionally enriches tokens (best effort, `sm`/`md`/`lg`/`trf` preference;
   UtterPlan never downloads models and falls back to deterministic tokens).
 - **RenderPlan** defines the shared profile/plan contract used by the optional
-  projection; **VoiceRender** creates engine-backed profiles and owns runtime
-  validation, preflight, and speech execution; **Readio** and other consumers
-  consume FlowPlan downstream.
+  projection; downstream renderers consume portable RenderProfiles and RenderPlans,
+  while other downstream consumers consume FlowPlans. Engine selection, preflight,
+  and speech execution are outside UtterPlan.
 
 ## In scope
 

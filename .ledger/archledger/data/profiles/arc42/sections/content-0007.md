@@ -7,7 +7,7 @@ section: deployment_view
 title: Deployment View
 order: 70
 status: accepted
-version: 3
+version: 4
 body_format: markdown
 ---
 
@@ -18,8 +18,8 @@ or audio dependencies:
   dynamically derived from Git tags by setuptools-scm and is independent of the
   plan schema version.
 - **Installation shapes.** Installed as a library (`pip install utterplan`) for
-  consumer pipelines such as Readio, or with the `utterplan` CLI for direct SSMDBook
-  workflows. Development installs use `pip install -e '.[dev,docs]'`.
+  downstream FlowPlan consumers, or with the `utterplan` CLI for direct SSMDBook and
+  SSMDDoc workflows. Development installs use `pip install -e '.[dev,docs]'`.
 - **Optional linguistic enrichment.** spaCy models are preferred in `sm`, `md`,
   `lg`, `trf` order when already installed; UtterPlan never downloads models and
   continues with deterministic fallback tokens when spaCy or every compatible local
@@ -27,12 +27,12 @@ or audio dependencies:
 - **No runtime services.** Everything runs in-process; there is no server, daemon,
   network fetch, or audio device access. Media references and extension names in
   plans are data only.
-- **Downstream placement.** Consumers (Readio, VoiceRender, PyKokoro-based
-  renderers) import UtterPlan, never the reverse. Renderers add engines, model
-  runtimes, G2P, synthesis, and audio on their side of the boundary.
+- **Downstream placement.** Consumers of UtterPlan's portable FlowPlan and optional
+  RenderPlan contracts add engines, model runtimes, G2P, synthesis, and audio on their
+  side of the boundary; UtterPlan does not import those packages.
 - **Documentation.** Sphinx docs build from `docs/` with
   `sphinx-build -W --keep-going -b html docs docs/_build/html`.
 - **Quality gate.** `python -m pytest -q`, `ruff check .`, and `mypy utterplan` run
   against the self-contained repository test suite.
 
-- **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes derived plans under the reserved `.readio/utterplan/` directory without changing source files.
+- **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes semantic plans and its report directly under `<workspace>/utterplan/`; `render-document` writes profile-specific artifacts directly under `<workspace>/renderplan/` without changing source files.

@@ -32,6 +32,8 @@ from .ssmdbook import (
     select_ssmdbook_chapters,
     selected_chapter_path,
 )
+from .workspace_paths import renderplan_output_name as _renderplan_output_name
+from .workspace_paths import utterplan_output_name as _utterplan_output_name
 
 
 class BookServiceError(ValueError):
@@ -540,20 +542,6 @@ def _new_book_renderplan_set(
     )
 
 
-def _source_output_stem(source: Path) -> str:
-    lower_name = source.name.lower()
-    for suffix in (".ssmd.md", ".ssmd", ".md"):
-        if lower_name.endswith(suffix):
-            return source.name[: -len(suffix)]
-    return source.stem
-
-
-def _utterplan_output_name(source: Path) -> str:
-    return f"{_source_output_stem(source)}.utterplan.toml"
-
-
-def _renderplan_output_name(source: Path) -> str:
-    return f"{_source_output_stem(source)}.renderplan.toml"
 
 
 def _path_is_within(path: Path, parent: Path) -> bool:

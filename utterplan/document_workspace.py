@@ -17,6 +17,7 @@ from .model import FlowPlan
 from .renderplan_export import build_render_plan
 from .renderplan_workspace import profile_fingerprint, render_variant_label
 from .ssmdoc import SSMDDocError, load_ssmdoc_index, ssmdoc_document_path
+from .workspace_paths import renderplan_output_name, utterplan_output_name
 
 
 class DocumentWorkspaceServiceError(ValueError):
@@ -109,9 +110,17 @@ def compile_ssmdoc(
     except SSMDDocError as exc:
         raise DocumentWorkspaceServiceError(str(exc)) from exc
 
-    output_path = request.output_dir or (index.root / ".readio" / "utterplan")
-    plan_path = output_path / f"{index.document_id}.utterplan.toml"
-    report_path = request.report or (output_path / "compile-report.toml")
+    output_path = (
+        request.output_dir.expanduser()
+        if request.output_dir is not None
+        else index.root / "utterplan"
+    )
+    plan_path = output_path / utterplan_output_name(source_path)
+    report_path = (
+        request.report.expanduser()
+        if request.report is not None
+        else output_path / "compile-report.toml"
+    )
     _preflight_outputs(index.manifest_path, source_path, output_path, plan_path, report_path)
 
     compile_request = CompileRequest(
@@ -201,66 +210,179 @@ DocumentRenderStartCallback = Callable[[DocumentRenderStart], None]
 
 
 def render_ssmdoc(
-    workspace: str | Path, *, profile: str | Path, variant: str | None = None,
-    utterplan_dir: str | Path | None = None, output_root: str | Path | None = None,
-    report: str | Path | None = None, force: bool = False,
+    workspace: str | Path,
+    *,
+    profile: str | Path,
+    variant: str | None = None,
+    utterplan_dir: str | Path | None = None,
+    output_root: str | Path | None = None,
+    report: str | Path | None = None,
+    force: bool = False,
     on_start: DocumentRenderStartCallback | None = None,
 ) -> DocumentRenderResult:
-    """Project the already-compiled canonical document FlowPlan to one RenderPlan."""
+    """Project the saved document FlowPlan to one profile-specific RenderPlan."""
     try:
         index = load_ssmdoc_index(workspace)
+        source_path = ssmdoc_document_path(index)
+        if variant is not None and (
+            "/" in variant or "\\" in variant or "\x00" in variant or variant in {".", ".."}
+        ):
+            raise DocumentWorkspaceServiceError(
+                "render variant label must not contain path separators or traversal"
+            )
+
+        plan_dir = (
+            Path(utterplan_dir).expanduser().resolve(strict=False)
+            if utterplan_dir is not None
+            else index.root / "utterplan"
+        )
+        source_plan_path = plan_dir / utterplan_output_name(source_path)
+        if not source_plan_path.is_file():
+            raise DocumentWorkspaceServiceError(
+                f"No UtterPlan found at {source_plan_path}.\n"
+                "Run `utterplan compile-document <workspace>` first."
+            )
+        source_plan = FlowPlan.load(source_plan_path)
+
         profile_path = Path(profile).expanduser().resolve(strict=True)
         active_profile = renderplan_codec.load_profile(profile_path)
         profile_id = active_profile.profile_id or active_profile.computed_id()
-        variant_name = f"{render_variant_label(profile_path, variant)}--{profile_fingerprint(profile_id)}"
-        plan_dir = Path(utterplan_dir).expanduser() if utterplan_dir is not None else index.root / ".readio" / "utterplan"
-        source_plan_path = plan_dir / f"{index.document_id}.utterplan.toml"
-        source_plan = FlowPlan.load(source_plan_path)
-        variant_root = Path(output_root).expanduser() if output_root is not None else index.root / ".readio" / "renderplan"
+        variant_name = (
+            f"{render_variant_label(profile_path, variant)}--{profile_fingerprint(profile_id)}"
+        )
+        variant_root = (
+            Path(output_root).expanduser().resolve(strict=False)
+            if output_root is not None
+            else index.root / "renderplan"
+        )
         variant_dir = variant_root / variant_name
         snapshot_path = variant_dir / "renderprofile.toml"
-        renderplan_path = variant_dir / f"{index.document_id}.renderplan.toml"
-        report_path = Path(report).expanduser() if report is not None else variant_dir / "render-report.toml"
+        renderplan_path = variant_dir / renderplan_output_name(source_path)
+        report_path = (
+            Path(report).expanduser().resolve(strict=False)
+            if report is not None
+            else variant_dir / "render-report.toml"
+        )
+
         if variant_root.exists() and not variant_root.is_dir():
-            raise DocumentWorkspaceServiceError(f"RenderPlan output root is not a directory: {variant_root}")
-        if report_path.resolve(strict=False) in {renderplan_path.resolve(strict=False), snapshot_path.resolve(strict=False)}:
-            raise DocumentWorkspaceServiceError("render report path collides with a document output")
-        protected = {index.manifest_path.resolve(strict=True), ssmdoc_document_path(index).resolve(strict=True), profile_path, source_plan_path.resolve(strict=True)}
-        if any(path.resolve(strict=False) in protected for path in (renderplan_path, snapshot_path, report_path)):
-            raise DocumentWorkspaceServiceError("document projection output would overwrite an input")
+            raise DocumentWorkspaceServiceError(
+                f"RenderPlan output root is not a directory: {variant_root}"
+            )
+        if variant_dir.is_symlink():
+            raise DocumentWorkspaceServiceError(
+                f"refusing to write through a variant directory symlink: {variant_dir}"
+            )
+        if variant_dir.exists() and not variant_dir.is_dir():
+            raise DocumentWorkspaceServiceError(f"variant path is not a directory: {variant_dir}")
+
+        resolved_plan_dir = plan_dir.resolve(strict=False)
+        resolved_variant_dir = variant_dir.resolve(strict=False)
+        if (
+            resolved_variant_dir == resolved_plan_dir
+            or resolved_variant_dir in resolved_plan_dir.parents
+            or resolved_plan_dir in resolved_variant_dir.parents
+        ):
+            raise DocumentWorkspaceServiceError(
+                "RenderPlan output must not overlap the UtterPlan input directory"
+            )
+
+        output_paths = (renderplan_path, snapshot_path, report_path)
+        resolved_outputs = tuple(path.resolve(strict=False) for path in output_paths)
+        if len(set(resolved_outputs)) != len(resolved_outputs):
+            raise DocumentWorkspaceServiceError("render output paths collide")
+        protected_inputs = {
+            index.manifest_path.resolve(strict=True),
+            source_path.resolve(strict=True),
+            profile_path,
+            source_plan_path.resolve(strict=True),
+        }
+        if any(
+            output == protected or protected in output.parents
+            for output in resolved_outputs
+            for protected in protected_inputs
+        ):
+            raise DocumentWorkspaceServiceError(
+                "document projection output would overwrite an input"
+            )
+        for path in output_paths:
+            if path.is_symlink():
+                raise DocumentWorkspaceServiceError(f"render output must not be a symlink: {path}")
+            if path.exists() and path.is_dir():
+                raise DocumentWorkspaceServiceError(f"metadata output is a directory: {path}")
+
+        has_matching_snapshot = False
         if variant_dir.exists():
-            if not variant_dir.is_dir():
-                raise DocumentWorkspaceServiceError(f"variant path is not a directory: {variant_dir}")
             nonempty = next(variant_dir.iterdir(), None) is not None
             if nonempty and not snapshot_path.is_file():
-                raise DocumentWorkspaceServiceError(f"refusing to adopt unknown non-empty variant directory: {variant_dir}")
+                raise DocumentWorkspaceServiceError(
+                    f"refusing to adopt unknown non-empty variant directory: {variant_dir}"
+                )
             if snapshot_path.exists():
+                if snapshot_path.is_symlink():
+                    raise DocumentWorkspaceServiceError(
+                        f"render profile snapshot must not be a symlink: {snapshot_path}"
+                    )
                 existing_profile = renderplan_codec.load_profile(snapshot_path)
                 existing_id = existing_profile.profile_id or existing_profile.computed_id()
                 if existing_id != profile_id:
-                    raise DocumentWorkspaceServiceError("existing variant snapshot has a different profile identity")
+                    raise DocumentWorkspaceServiceError(
+                        "existing variant snapshot has a different profile identity"
+                    )
+                has_matching_snapshot = True
             if renderplan_path.exists() and not force:
-                raise DocumentWorkspaceServiceError(f"RenderPlan already exists (use --force): {renderplan_path}")
-        if variant_dir.resolve(strict=False) == plan_dir.resolve(strict=False) or variant_dir.resolve(strict=False).is_relative_to(plan_dir.resolve(strict=False)):
-            raise DocumentWorkspaceServiceError("RenderPlan output must not overlap the UtterPlan input directory")
-        for path in (renderplan_path, snapshot_path, report_path):
-            if path.exists() and path.is_dir():
-                raise DocumentWorkspaceServiceError(f"metadata output is a directory: {path}")
-        if on_start:
-            on_start(DocumentRenderStart(index.root, index.document_id, source_plan_path, profile_path, profile_id, variant_name, variant_dir, renderplan_path, report_path))
+                raise DocumentWorkspaceServiceError(
+                    f"RenderPlan already exists (use --force): {renderplan_path}"
+                )
+
         plan = build_render_plan(source_plan, active_profile).with_identity()
+        if on_start is not None:
+            on_start(
+                DocumentRenderStart(
+                    index.root,
+                    index.document_id,
+                    source_plan_path,
+                    profile_path,
+                    profile_id,
+                    variant_name,
+                    variant_dir,
+                    renderplan_path,
+                    report_path,
+                )
+            )
+
         variant_dir.mkdir(parents=True, exist_ok=True)
-        renderplan_codec.save_profile(active_profile, snapshot_path)
+        if not has_matching_snapshot:
+            renderplan_codec.save_profile(active_profile, snapshot_path)
         renderplan_codec.save_plan(plan, renderplan_path)
         report_data: dict[str, Any] = {
-            "format": "utterplan-document-render-report", "version": 1, "complete": True,
-            "workspace": str(index.root.resolve()), "document_id": index.document_id,
-            "source_plan": str(source_plan_path.resolve()), "source_plan_id": source_plan.plan_id,
-            "profile": str(profile_path), "profile_id": profile_id, "variant": variant_name,
-            "renderplan": str(renderplan_path.resolve()), "render_plan_id": plan.plan_id,
+            "format": "utterplan.render-document-report",
+            "version": 1,
+            "status": "ok",
+            "workspace": str(index.root.resolve()),
+            "document_id": index.document_id,
+            "profile": str(profile_path),
+            "profile_id": profile_id,
+            "variant": variant_name,
+            "source_plan": str(source_plan_path.resolve()),
+            "source_plan_id": source_plan.plan_id,
+            "render_plan": str(renderplan_path.resolve()),
+            "render_plan_id": plan.plan_id,
         }
         atomic_write_text(report_path, tomlkit.dumps(report_data), create_parent=True)
-        return DocumentRenderResult(index.root, index.document_id, source_plan_path, source_plan.plan_id, profile_path, profile_id, variant_name, variant_dir, snapshot_path, renderplan_path, plan.plan_id, report_path)
+        return DocumentRenderResult(
+            index.root,
+            index.document_id,
+            source_plan_path,
+            source_plan.plan_id,
+            profile_path,
+            profile_id,
+            variant_name,
+            variant_dir,
+            snapshot_path,
+            renderplan_path,
+            plan.plan_id,
+            report_path,
+        )
     except (SSMDDocError, OSError, RuntimeError, ValueError, TypeError) as exc:
         if isinstance(exc, DocumentWorkspaceServiceError):
             raise
@@ -276,30 +398,39 @@ def _preflight_outputs(
 ) -> None:
     resolved_manifest = manifest_path.resolve(strict=False)
     resolved_source = source_path.resolve(strict=False)
+    resolved_output_dir = output_dir.expanduser().resolve(strict=False)
     resolved_plan = plan_path.expanduser().resolve(strict=False)
     resolved_report = report_path.expanduser().resolve(strict=False)
+    protected_inputs = (resolved_manifest, resolved_source)
 
+    if resolved_output_dir in protected_inputs or any(
+        protected in resolved_output_dir.parents for protected in protected_inputs
+    ):
+        raise DocumentWorkspaceServiceError(
+            "document output directory overlaps a source workspace file"
+        )
+    if output_dir.expanduser().exists() and not output_dir.expanduser().is_dir():
+        raise DocumentWorkspaceServiceError(
+            f"document output directory is not a directory: {output_dir.expanduser()}"
+        )
     if resolved_plan == resolved_report:
         raise DocumentWorkspaceServiceError(
             f"document report path collides with plan output: {report_path}"
         )
     for output in (resolved_plan, resolved_report):
-        if output in {resolved_manifest, resolved_source}:
+        if output == resolved_output_dir:
+            raise DocumentWorkspaceServiceError(
+                f"document output path collides with output directory: {output}"
+            )
+        if any(output == protected or protected in output.parents for protected in protected_inputs):
             raise DocumentWorkspaceServiceError(
                 f"document output would overwrite source workspace content: {output}"
             )
-
-    expanded_output_dir = output_dir.expanduser()
-    if expanded_output_dir.exists() and not expanded_output_dir.is_dir():
-        raise DocumentWorkspaceServiceError(
-            f"document output directory is not a directory: {expanded_output_dir}"
-        )
     for output_path in (plan_path, report_path):
         if output_path.exists() and output_path.is_dir():
             raise DocumentWorkspaceServiceError(
                 f"document output path is a directory when a file is expected: {output_path}"
             )
-
 
 __all__ = [
     "DocumentCompileRequest",

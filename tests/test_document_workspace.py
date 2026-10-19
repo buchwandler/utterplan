@@ -69,11 +69,11 @@ def test_compile_ssmdoc_writes_default_plan_and_one_item_report_without_source_c
         on_progress=progress.append,
     )
 
-    output_dir = root / ".readio" / "utterplan"
+    output_dir = root / "utterplan"
     assert result.exit_code == 0
     assert result.failed == 0
     assert result.document_id == "document-0001"
-    assert result.plan_path == output_dir / "document-0001.utterplan.toml"
+    assert result.plan_path == output_dir / "document.utterplan.toml"
     assert result.report_path == output_dir / "compile-report.toml"
     assert result.plan_path.is_file()
     assert result.report_path.is_file()
@@ -107,18 +107,14 @@ def test_compile_ssmdoc_uses_edited_content_with_stale_digest(tmp_path: Path) ->
     assert source.read_bytes() == source_before
 
 
-def test_missing_document_is_a_reported_read_failure(tmp_path: Path) -> None:
+def test_missing_document_fails_before_creating_derived_outputs(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
     (root / "document.ssmd.md").unlink()
 
-    result = compile_ssmdoc(root, planner_config=_config())
+    with pytest.raises(DocumentWorkspaceServiceError, match="document is missing"):
+        compile_ssmdoc(root, planner_config=_config())
 
-    assert result.exit_code == 1
-    assert not result.plan_path.exists()
-    item = _report(result.report_path)["item"][0]
-    assert item["status"] == "failed"
-    assert item["stage"] == "read"
-
+    assert not (root / "utterplan").exists()
 
 def test_invalid_ssmd_is_a_reported_compile_failure_without_plan(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
@@ -136,7 +132,7 @@ def test_invalid_ssmd_is_a_reported_compile_failure_without_plan(tmp_path: Path)
 
 def test_existing_plan_is_protected_unless_force_is_used(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
-    output = root / ".readio" / "utterplan" / "document-0001.utterplan.toml"
+    output = root / "utterplan" / "document.utterplan.toml"
     output.parent.mkdir(parents=True)
     output.write_text("sentinel", encoding="utf-8")
 
@@ -168,14 +164,15 @@ def test_output_override_and_report_override_do_not_create_default_layout(tmp_pa
     assert result.output_dir == output_dir
     assert result.report_path == report
     assert result.plan_path.is_file()
+    assert result.plan_path == output_dir / "document.utterplan.toml"
     assert report.is_file()
-    assert not (root / ".readio" / "utterplan").exists()
+    assert not (root / "utterplan").exists()
 
 
 def test_output_collisions_are_rejected_before_creating_directories(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
     output_dir = tmp_path / "collision-plans"
-    plan_path = output_dir / "document-0001.utterplan.toml"
+    plan_path = output_dir / "document.utterplan.toml"
 
     with pytest.raises(DocumentWorkspaceServiceError, match="report path collides"):
         compile_ssmdoc(
@@ -203,6 +200,15 @@ def test_output_collisions_are_rejected_before_creating_directories(tmp_path: Pa
             planner_config=_config(),
         )
     assert not output_dir.exists()
+    source = root / "document.ssmd.md"
+    for unsafe_output_dir in (source, source / "nested"):
+        with pytest.raises(DocumentWorkspaceServiceError, match="output directory overlaps"):
+            compile_ssmdoc(
+                root,
+                output_dir=unsafe_output_dir,
+                planner_config=_config(),
+            )
+    assert not (root / "utterplan").exists()
 
 
 def test_invalid_manifest_is_rejected_before_output_creation(tmp_path: Path) -> None:

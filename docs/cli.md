@@ -135,9 +135,21 @@ utterplan compile-document INPUT [--output-dir PATH] [--language LANGUAGE]
   [--force] [--report PATH] [--diagnostics {warnings,all,none}]
 ```
 
-The default output directory is `<workspace>/.readio/utterplan/`, containing `document-0001.utterplan.toml` and `compile-report.toml`. `--output-dir` and `--report` override those locations. Existing plan files require `--force`; output collisions with the source or manifest are rejected. A document header's language is authoritative; `--language`/`--lang` is a fallback when it is absent.
+The default output directory is `<workspace>/utterplan/`, containing `document.utterplan.toml` and `compile-report.toml`. `--output-dir` and `--report` override those locations. Existing plan files require `--force`; output collisions with the source or manifest are rejected. A document header's language is authoritative; `--language`/`--lang` is a fallback when it is absent.
 
 Editable content wins over the stored manifest digest: compilation reads the current `document.ssmd.md` but never modifies the manifest or source. The command has no `--input-format`, chapter selection, or `--fail-fast`; it handles one document. The existing `compile` and `validate` commands also accept the workspace root or canonical document path, while `compile` retains its normal stdout/`-o` behavior. This is not `compile-book`: an SSMDDoc creates one plan, while an SSMDBook orchestrates independent chapter plans. ZIP bundles are not supported and `ssmdconvert` is not a runtime dependency. See the [SSMDDoc guide](ssmdoc.md) for format validation and the `compile_ssmdoc()` Python API.
+
+## Project an SSMDDoc RenderPlan
+
+`render-document` projects the already-saved single-document UtterPlan through an explicit RenderProfile. It never compiles implicitly:
+
+```text
+utterplan render-document INPUT --profile PROFILE
+  [--utterplan-dir PATH] [--output-root PATH] [--variant LABEL]
+  [--force] [--report PATH]
+```
+
+By default it reads `<workspace>/utterplan/document.utterplan.toml` and writes a profile-fingerprinted variant under `<workspace>/renderplan/<label>--<profile-id-prefix>/`, containing `renderprofile.toml`, `document.renderplan.toml`, and `render-report.toml`. `--variant` changes only the readable label; the profile fingerprint remains part of the directory identity. A profile mismatch or ambiguous existing snapshot is rejected even with `--force`. This is a one-document projection, not a book-set workflow. See the [SSMDDoc guide](ssmdoc.md).
 
 ## Compile chapters from an SSMDBook workspace
 

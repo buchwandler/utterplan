@@ -1,6 +1,6 @@
 ---
 title: "Architecture Documentation"
-version: 2
+version: 3
 generator: "archledger 0.4.0"
 arc42_template_version: "9.0-EN"
 ---
@@ -50,7 +50,7 @@ FlowPlan v7 (paragraph-local units, segments, boundaries, authored pauses)
 Downstream chunking / token-budget / pause choices
        |
        v
-Readio / VoiceRender / other FlowPlan consumers
+Downstream FlowPlan consumers
        |
        v
 G2P / synthesis / audio (downstream)
@@ -62,7 +62,7 @@ workspaces without changing book content.
 
 ## Document workspaces
 
-An editable `ssmdconvert.document` v1 workspace (`.ssmdoc`) is another source path for the one-document compiler. `compile-document` discovers its canonical current SSMD document and writes one FlowPlan plus an operational report under `.readio/utterplan/`; it does not create a book or alter workspace source material.
+An editable `ssmdconvert.document` v1 workspace (`.ssmdoc`) is another source path for the one-document compiler. `compile-document` discovers its canonical current SSMD document and writes one FlowPlan plus an operational report under `<workspace>/utterplan/`; `render-document` projects that saved plan with an explicit profile into `<workspace>/renderplan/<label>--<profile-id-prefix>/`. Neither command creates book-set semantics or alters workspace source material.
 
 ## Requirements Overview
 
@@ -125,7 +125,7 @@ TTSReady
     ^
 UtterPlan
     ^
-Readio / VoiceRender / other FlowPlan consumers
+Downstream FlowPlan consumers
 ```
 
 UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
@@ -140,9 +140,9 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
 - **spaCy** optionally enriches tokens (best effort, `sm`/`md`/`lg`/`trf` preference;
   UtterPlan never downloads models and falls back to deterministic tokens).
 - **RenderPlan** defines the shared profile/plan contract used by the optional
-  projection; **VoiceRender** creates engine-backed profiles and owns runtime
-  validation, preflight, and speech execution; **Readio** and other consumers
-  consume FlowPlan downstream.
+  projection; downstream renderers consume portable RenderProfiles and RenderPlans,
+  while other downstream consumers consume FlowPlans. Engine selection, preflight,
+  and speech execution are outside UtterPlan.
 
 ## In scope
 
@@ -173,6 +173,8 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
 - An editable `.ssmdoc` directory is discovered by its `ssmdconvert.document` v1 manifest, not by its directory suffix. Its canonical `document.ssmd.md` is the current compiler input.
 - The workspace remains one document to one FlowPlan. Manifest digests are provenance only for editable directories: UtterPlan compiles current content and never refreshes the manifest or edits the source.
 - `compile-document` is single-document convenience, not book orchestration. ZIP bundles, fake chapters, and an `ssmdconvert` runtime dependency are outside the contract.
+
+
 
 ## Business Context
 
@@ -267,6 +269,8 @@ TOML.
 
 `ssmdoc.py` performs read-only manifest discovery and canonical path safety checks; `source_input.py` centralizes standalone-file and `.ssmdoc` source loading; and `document_workspace.py` delegates one stable `document-0001` CompileRequest to the existing batch persistence/report path. The CLI and public package API expose `compile-document` and `compile_ssmdoc()` without shadowing the in-memory `compile_document()` compiler.
 
+
+
 <!-- archledger: no accepted records for this section yet -->
 
 # Runtime View
@@ -346,11 +350,24 @@ not calculate renderer-specific metrics.
 ```text
 ssmdconvert.document v1 manifest + current document.ssmd.md
     -> utterplan compile-document
-    -> one FlowPlan at .readio/utterplan/document-0001.utterplan.toml
+    -> one FlowPlan at utterplan/document.utterplan.toml
        + one compile-report.toml
 ```
 
 The manifest validates the workspace contract and safe canonical path; SSMD 0.9 content is compiled by the existing single-document path. A stale stored digest does not block editable-directory compilation, and UtterPlan does not modify source material or model the document as a chapter.
+
+## Scenario: project a RenderPlan from an editable SSMDDoc workspace
+
+```text
+saved FlowPlan + explicit RenderProfile
+    -> utterplan render-document
+    -> one profile-specific RenderPlan at renderplan/<label>--<profile-id-prefix>/document.renderplan.toml
+       + canonical renderprofile.toml snapshot + render-report.toml
+```
+
+The command projects the existing plan without compiling source or invoking a renderer. Profile identity is embedded in the variant path, and a mismatched or ambiguous profile snapshot is rejected; source files and the SSMDDoc manifest remain unchanged.
+
+
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -363,8 +380,8 @@ or audio dependencies:
   dynamically derived from Git tags by setuptools-scm and is independent of the
   plan schema version.
 - **Installation shapes.** Installed as a library (`pip install utterplan`) for
-  consumer pipelines such as Readio, or with the `utterplan` CLI for direct SSMDBook
-  workflows. Development installs use `pip install -e '.[dev,docs]'`.
+  downstream FlowPlan consumers, or with the `utterplan` CLI for direct SSMDBook and
+  SSMDDoc workflows. Development installs use `pip install -e '.[dev,docs]'`.
 - **Optional linguistic enrichment.** spaCy models are preferred in `sm`, `md`,
   `lg`, `trf` order when already installed; UtterPlan never downloads models and
   continues with deterministic fallback tokens when spaCy or every compatible local
@@ -372,15 +389,17 @@ or audio dependencies:
 - **No runtime services.** Everything runs in-process; there is no server, daemon,
   network fetch, or audio device access. Media references and extension names in
   plans are data only.
-- **Downstream placement.** Consumers (Readio, VoiceRender, PyKokoro-based
-  renderers) import UtterPlan, never the reverse. Renderers add engines, model
-  runtimes, G2P, synthesis, and audio on their side of the boundary.
+- **Downstream placement.** Consumers of UtterPlan's portable FlowPlan and optional
+  RenderPlan contracts add engines, model runtimes, G2P, synthesis, and audio on their
+  side of the boundary; UtterPlan does not import those packages.
 - **Documentation.** Sphinx docs build from `docs/` with
   `sphinx-build -W --keep-going -b html docs docs/_build/html`.
 - **Quality gate.** `python -m pytest -q`, `ruff check .`, and `mypy utterplan` run
   against the self-contained repository test suite.
 
-- **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes derived plans under the reserved `.readio/utterplan/` directory without changing source files.
+- **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes semantic plans and its report directly under `<workspace>/utterplan/`; `render-document` writes profile-specific artifacts directly under `<workspace>/renderplan/` without changing source files.
+
+
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -463,6 +482,8 @@ repair opportunity. Neither mode guesses a symbol's pronunciation or crosses
 semantic blockers. Blocked planning outcomes may be reviewed through the separate
 `utterplan.planning-attempt.v1` inspect-only artifact; such candidates remain
 drafts and never become canonical plans.
+
+
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -550,6 +571,8 @@ drafts and never become canonical plans.
   failures; terminal diagnostics default to warnings with `all`/`none` overrides;
   batch and book reports retain every diagnostic; typed progress callbacks expose
   long-running planning without changing the plan.
+
+
 
 ## Quality Requirements Overview
 

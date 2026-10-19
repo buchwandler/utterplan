@@ -6,7 +6,7 @@ UtterPlan can compile an editable `.ssmdoc` workspace as one SSMD 0.9 document. 
 
 A workspace is identified by a `manifest.json` whose `format` is `ssmdconvert.document` and whose `schema_version` is `1`. UtterPlan supports the v1 contract and expects the canonical document entry to identify `document-0001` at the normalized relative path `document.ssmd.md`. The source is SSMD 0.9.
 
-The current `document.ssmd.md` is authoritative. Its manifest digest and character count are metadata, not a lock: if you edit the document and its recorded digest becomes stale, UtterPlan compiles the current file. It never rewrites the manifest, refreshes hashes, or edits source content. The `.readio/utterplan/` directory is reserved for derived UtterPlan artifacts.
+The current `document.ssmd.md` is authoritative. Its manifest digest and character count are metadata, not a lock: if you edit the document and its recorded digest becomes stale, UtterPlan compiles the current file. It never rewrites the manifest, refreshes hashes, or edits source content. Semantic plans and reports are written directly under the workspace's visible `utterplan/` directory; profile-specific RenderPlans are written directly under `renderplan/`. These are derived artifacts, not manifest members.
 
 Discovery and path handling are deliberately strict. The manifest must be valid UTF-8 JSON within the 2 MiB limit, and the document is limited to 64 MiB. UtterPlan checks the canonical path and workspace containment, rejects unsupported manifest versions and unsafe paths, and does not follow a document path outside the workspace. It reads no source-media files. `ssmdconvert` is not a runtime dependency: UtterPlan consumes the published file-format contract directly.
 
@@ -23,8 +23,8 @@ utterplan compile-document story.ssmdoc
 It writes one plan and one operational report by default:
 
 ```text
-story.ssmdoc/.readio/utterplan/
-├── document-0001.utterplan.toml
+story.ssmdoc/utterplan/
+├── document.utterplan.toml
 └── compile-report.toml
 ```
 
@@ -55,7 +55,7 @@ if result.failed:
 print(result.plan_path)
 ```
 
-The result provides the workspace and source paths, output and report paths, and the one-item batch outcome. Options include `output_dir`, `report`, `language`, `planner_config`, `force`, `diagnostics`, and progress/start callbacks. The default artifacts match the CLI: `.readio/utterplan/document-0001.utterplan.toml` and `compile-report.toml`.
+The result provides the workspace and source paths, output and report paths, and the one-item batch outcome. Options include `output_dir`, `report`, `language`, `planner_config`, `force`, `diagnostics`, and progress/start callbacks. The default artifacts match the CLI: `utterplan/document.utterplan.toml` and `utterplan/compile-report.toml`.
 
 ## SSMDDoc is not SSMDBook
 
@@ -71,4 +71,4 @@ After `utterplan compile-document .`, project the existing canonical FlowPlan wi
 utterplan render-document . --profile narration.renderprofile.toml
 ```
 
-This writes `.readio/renderplan/<label>--<profile-fingerprint>/renderprofile.toml`, `document-0001.renderplan.toml`, and `render-report.toml`. The printed exact variant can be passed to `voicerender render-document`. A document is never wrapped in a one-chapter book or a RenderPlanSet. Re-run `compile-document` and this projection after source edits; VoiceRender intentionally renders only the selected explicit RenderPlan.
+This writes `renderplan/<label>--<profile-fingerprint>/renderprofile.toml`, `document.renderplan.toml`, and `render-report.toml` directly under the workspace. The printed exact variant can be passed to `voicerender render-document`. A document is never wrapped in a one-chapter book or a RenderPlanSet. Re-run `compile-document` and this projection after source edits; VoiceRender intentionally renders only the selected explicit RenderPlan.

@@ -31,7 +31,11 @@ def test_render_ssmdoc_projects_canonical_flowplan_without_book_index(tmp_path: 
     )
     renderplan_codec.save_profile(profile, profile_path)
     result = render_ssmdoc(root, profile=profile_path)
+    assert result.source_plan_path == root / "utterplan" / "document.utterplan.toml"
+    assert result.variant_dir.parent == root / "renderplan"
+    assert result.renderplan_path.name == "document.renderplan.toml"
     plan = renderplan_codec.load_plan(result.renderplan_path)
+    plan.validate_against_profile(profile)
     flow = FlowPlan.load(result.source_plan_path)
     assert result.variant.startswith("narration--")
     assert result.snapshot_path.is_file()

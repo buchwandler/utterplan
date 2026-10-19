@@ -77,6 +77,47 @@ def test_resolves_ssmdoc_root_and_canonical_document_file(tmp_path: Path) -> Non
     assert load_ssmdoc_index(root / "document.ssmd.md").root == root.resolve()
 
 
+
+def test_supports_manifest_declared_nested_source_and_optional_fields(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    source = root / "content" / "document.ssmd.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(DOCUMENT_TEXT, encoding="utf-8")
+    document = _document(document_id="document-main", path="content/document.ssmd.md")
+    document.pop("sha256")
+    document.pop("char_count")
+    _write_manifest(root, _manifest(document=document, extra_provenance={"source": "test"}))
+
+    index = load_ssmdoc_index(root)
+
+    assert index.document_id == "document-main"
+    assert index.relative_path == "content/document.ssmd.md"
+    assert index.expected_sha256 is None
+    assert index.expected_char_count is None
+    assert index.source_path == source
+    assert resolve_ssmdoc_root(source) == root.resolve()
+    assert load_ssmdoc_index(source).document_id == "document-main"
+    with pytest.raises(SSMDDocError, match="not an ssmdoc workspace"):
+        resolve_ssmdoc_root(root / "content" / "other.ssmd.md")
+
+
+def test_stale_digest_and_character_count_do_not_block_source_resolution(tmp_path: Path) -> None:
+    root = tmp_path / "editable-workspace"
+    source = root / "document.ssmd.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(DOCUMENT_TEXT, encoding="utf-8")
+    _write_manifest(
+        root,
+        _manifest(document=_document(sha256="a" * 64, char_count=0), extra_key="preserved"),
+    )
+
+    index = load_ssmdoc_index(root)
+
+    assert index.expected_sha256 == "a" * 64
+    assert index.expected_char_count == 0
+    assert index.source_path.read_text(encoding="utf-8") == DOCUMENT_TEXT
+
+
 def test_root_detection_uses_manifest_not_suffix(tmp_path: Path) -> None:
     root = tmp_path / "ordinary-name"
     _write_manifest(root, _manifest())
@@ -152,10 +193,14 @@ def test_rejects_unsupported_manifest_header(
 @pytest.mark.parametrize(
     ("field", "manifest_key", "value", "message"),
     [
-        ("document_id", "id", "other-document", "document.id"),
-        ("path", "path", "other.ssmd.md", "document.path"),
+        ("id", "id", "", "document.id"),
+        ("id", "id", 42, "document.id"),
+        ("path", "path", "", "document.path"),
+        ("path", "path", None, "document.path"),
+        ("sha256", "sha256", None, "sha256"),
         ("sha256", "sha256", "A" * 64, "sha256"),
         ("sha256", "sha256", "abc", "sha256"),
+        ("char_count", "char_count", None, "char_count"),
         ("char_count", "char_count", True, "char_count"),
         ("char_count", "char_count", -1, "char_count"),
     ],
@@ -176,10 +221,14 @@ def test_rejects_invalid_document_fields(
     "unsafe_path",
     [
         "/document.ssmd.md",
+        "//server/share/document.ssmd.md",
         "C:/document.ssmd.md",
         "C:document.ssmd.md",
+        "\\\\server\\share\\document.ssmd.md",
         "..\\document.ssmd.md",
         "../document.ssmd.md",
+        "nested/../document.ssmd.md",
+        ".",
         "./document.ssmd.md",
         "document//ssmd.md",
         "document.ssmd.md/",
@@ -203,14 +252,12 @@ def test_manifest_size_is_bounded_before_json_parsing(tmp_path: Path) -> None:
         load_ssmdoc_index(root)
 
 
-def test_missing_document_can_be_returned_for_compile_read_failure(tmp_path: Path) -> None:
+def test_rejects_missing_manifest_referenced_document(tmp_path: Path) -> None:
     root = tmp_path / "missing-document"
     _write_manifest(root, _manifest())
 
-    index = load_ssmdoc_index(root)
-
-    assert ssmdoc_document_path(index) == root / "document.ssmd.md"
-
+    with pytest.raises(SSMDDocError, match="document is missing"):
+        ssmdoc_document_path(load_ssmdoc_index(root))
 
 def test_rejects_existing_non_file_document(tmp_path: Path) -> None:
     root = tmp_path / "directory-document"

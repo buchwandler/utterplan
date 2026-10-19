@@ -7,7 +7,7 @@ section: introduction_and_goals
 title: Introduction and Goals
 order: 10
 status: accepted
-version: 3
+version: 4
 body_format: markdown
 ---
 
@@ -50,7 +50,7 @@ FlowPlan v7 (paragraph-local units, segments, boundaries, authored pauses)
 Downstream chunking / token-budget / pause choices
        |
        v
-Readio / VoiceRender / other FlowPlan consumers
+Downstream FlowPlan consumers
        |
        v
 G2P / synthesis / audio (downstream)
@@ -62,4 +62,4 @@ workspaces without changing book content.
 
 ## Document workspaces
 
-An editable `ssmdconvert.document` v1 workspace (`.ssmdoc`) is another source path for the one-document compiler. `compile-document` discovers its canonical current SSMD document and writes one FlowPlan plus an operational report under `.readio/utterplan/`; it does not create a book or alter workspace source material.
+An editable `ssmdconvert.document` v1 workspace (`.ssmdoc`) is another source path for the one-document compiler. `compile-document` discovers its canonical current SSMD document and writes one FlowPlan plus an operational report under `<workspace>/utterplan/`; `render-document` projects that saved plan with an explicit profile into `<workspace>/renderplan/<label>--<profile-id-prefix>/`. Neither command creates book-set semantics or alters workspace source material.

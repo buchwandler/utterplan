@@ -9,7 +9,7 @@ UtterPlan is the canonical, engine-independent semantic compiler from one SSMD
 document (or explicitly selected plain-text document) to an executable speech
 plan. It produces deterministic prepared text, paragraph-local flow units, safe boundary opportunities, authored pause intents, and segment-local
 semantics, portable document metadata, and typed directives for
-independent downstream consumers such as Readio, VoiceRender, and other FlowPlan users. Its book commands read the SSMDBook manifest only for chapter discovery, never modify the manifest or source chapters, and write derived plans to separate directories. It uses TTSReady for written-to-spoken preparation and stops before G2P, synthesis, and audio.
+independent downstream FlowPlan consumers. Its book commands read the SSMDBook manifest only for chapter discovery, never modify the manifest or source chapters, and write derived plans to separate directories. It uses TTSReady for written-to-spoken preparation and stops before G2P, synthesis, and audio.
 
 ## CLI
 
@@ -49,7 +49,15 @@ Compile one editable `.ssmdoc` directory as one SSMD document and one FlowPlan:
 utterplan compile-document story.ssmdoc
 ```
 
-By default this writes `story.ssmdoc/.readio/utterplan/document-0001.utterplan.toml` and a `compile-report.toml`. The current `document.ssmd.md` is authoritative even if its manifest digest is stale; UtterPlan leaves the source and manifest untouched. This is separate from the multi-chapter SSMDBook workflow below. See the [SSMDDoc workspace guide](docs/ssmdoc.md) for manifest safety, output options, and the Python API.
+By default this writes `story.ssmdoc/utterplan/document.utterplan.toml` and `story.ssmdoc/utterplan/compile-report.toml`. The current `document.ssmd.md` is authoritative even if its manifest digest is stale; UtterPlan leaves the source and manifest untouched. This is separate from the multi-chapter SSMDBook workflow below. See the [SSMDDoc workspace guide](docs/ssmdoc.md) for manifest safety, output options, and the Python API.
+
+Project the saved plan with an explicit RenderProfile:
+
+```bash
+utterplan render-document story.ssmdoc --profile narration.renderprofile.toml
+```
+
+The profile-specific RenderPlan is written to a matching variant directly under `story.ssmdoc/renderplan/`.
 
 Compile a selected chapter range directly from an editable SSMDBook workspace:
 

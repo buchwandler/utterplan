@@ -7,7 +7,7 @@ section: runtime_view
 title: Runtime View
 order: 60
 status: accepted
-version: 3
+version: 4
 body_format: markdown
 ---
 
@@ -86,8 +86,19 @@ not calculate renderer-specific metrics.
 ```text
 ssmdconvert.document v1 manifest + current document.ssmd.md
     -> utterplan compile-document
-    -> one FlowPlan at .readio/utterplan/document-0001.utterplan.toml
+    -> one FlowPlan at utterplan/document.utterplan.toml
        + one compile-report.toml
 ```
 
 The manifest validates the workspace contract and safe canonical path; SSMD 0.9 content is compiled by the existing single-document path. A stale stored digest does not block editable-directory compilation, and UtterPlan does not modify source material or model the document as a chapter.
+
+## Scenario: project a RenderPlan from an editable SSMDDoc workspace
+
+```text
+saved FlowPlan + explicit RenderProfile
+    -> utterplan render-document
+    -> one profile-specific RenderPlan at renderplan/<label>--<profile-id-prefix>/document.renderplan.toml
+       + canonical renderprofile.toml snapshot + render-report.toml
+```
+
+The command projects the existing plan without compiling source or invoking a renderer. Profile identity is embedded in the variant path, and a mismatched or ambiguous profile snapshot is rejected; source files and the SSMDDoc manifest remain unchanged.

@@ -45,6 +45,7 @@ from .source_input import _format_for_path as _format_source_path
 from .source_input import load_source_path
 from .trace_codec import loads_trace
 from .versioning import CURRENT_SCHEMA_VERSION, V5_SCHEMA_VERSION, V6_SCHEMA_VERSION
+from .workspace_paths import utterplan_output_name as _utterplan_output_name
 
 _EXAMPLES = """examples:
   utterplan compile chapter.ssmd.md
@@ -228,22 +229,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     document_parser = commands.add_parser(
         "compile-document",
-        help="compile one editable ssmdconvert.document workspace",
+        help="compile an editable SSMDoc workspace into its canonical UtterPlan",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
             "  utterplan compile-document story.ssmdoc\n"
             "  utterplan compile-document . --spacy off\n"
+            "  utterplan compile-document . --force\n"
             "  utterplan compile-document story.ssmdoc --output-dir build/utterplan --force"
         ),
     )
     document_parser.add_argument(
-        "input", type=Path, help="SSMDDoc workspace root or its canonical document.ssmd.md file"
+        "input", type=Path, help="SSMDoc workspace root or its manifest-declared source file"
     )
     document_parser.add_argument(
         "--output-dir",
         type=Path,
-        help="plan output directory (default: <ssmdoc>/.readio/utterplan)",
+        help="plan output directory (default: <workspace>/utterplan)",
     )
     document_parser.add_argument("--language", "--lang", dest="language")
     document_parser.add_argument(
@@ -362,15 +364,31 @@ def build_parser() -> argparse.ArgumentParser:
     render_plan_parser.add_argument(
         "--json", action="store_true", help="emit the generated plan as machine-readable JSON"
     )
-    render_document_parser = commands.add_parser("render-document", help="project one compiled SSMDDoc FlowPlan")
-    render_document_parser.add_argument("input", type=Path, help="SSMDDoc workspace root")
-    render_document_parser.add_argument("--profile", type=Path, required=True)
-    render_document_parser.add_argument("--variant", help="human label override")
-    render_document_parser.add_argument("--utterplan-dir", type=Path)
-    render_document_parser.add_argument("--output-root", type=Path)
-    render_document_parser.add_argument("--report", type=Path)
-    render_document_parser.add_argument("--force", action="store_true")
-
+    render_document_parser = commands.add_parser(
+        "render-document",
+        help="project an SSMDoc workspace's saved UtterPlan into a profile-specific RenderPlan",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  utterplan render-document story.ssmdoc --profile narration.renderprofile.toml\n"
+            "  utterplan render-document . --profile ../narration.renderprofile.toml"
+        ),
+    )
+    render_document_parser.add_argument(
+        "input", type=Path, help="SSMDoc workspace root or its manifest-declared source file"
+    )
+    render_document_parser.add_argument("--profile", type=Path, required=True, help="RenderProfile TOML file")
+    render_document_parser.add_argument(
+        "--variant", help="safe human-readable variant label; profile fingerprint is always appended"
+    )
+    render_document_parser.add_argument(
+        "--utterplan-dir", type=Path, help="directory containing the saved document UtterPlan"
+    )
+    render_document_parser.add_argument(
+        "--output-root", type=Path, help="RenderPlan variant root (default: <workspace>/renderplan)"
+    )
+    render_document_parser.add_argument("--report", type=Path, help="TOML operational report path")
+    render_document_parser.add_argument("--force", action="store_true", help="replace the existing RenderPlan")
     render_book_parser = commands.add_parser(
         "render-book",
         help="project selected SSMDBook UtterPlans into a profile-specific RenderPlan set",
@@ -582,20 +600,6 @@ def _linguistics_config(policy: str) -> LinguisticsConfig:
     )
 
 
-def _source_output_stem(source: Path) -> str:
-    lower_name = source.name.lower()
-    for suffix in (".ssmd.md", ".ssmd", ".md"):
-        if lower_name.endswith(suffix):
-            return source.name[: -len(suffix)]
-    return source.stem
-
-
-def _utterplan_output_name(source: Path) -> str:
-    return _source_output_stem(source) + ".utterplan.toml"
-
-
-def _renderplan_output_name(source: Path) -> str:
-    return _source_output_stem(source) + ".renderplan.toml"
 
 
 def _planner_config_from_batch_args(args: argparse.Namespace) -> PlannerConfig:
