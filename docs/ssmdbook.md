@@ -102,6 +102,8 @@ utterplan render-book . --profile amy.renderprofile.toml --chapters 5-17
 utterplan render-book . --profile joe.renderprofile.toml --chapters 5-17
 ```
 
+One RenderProfile is the complete cast shared by every selected chapter, not a profile per character or role. Logical role names live in SSMD; the profile's role bindings can target different renderers. Before creating a new variant, `render-book` checks all readable selected UtterPlans together and reports every uncovered role with the affected chapter IDs. See the [README role example](../README.md#logical-roles-and-complete-renderprofiles).
+
 The result has one shared semantic collection and distinct renderer-specific
 variants, for example:
 

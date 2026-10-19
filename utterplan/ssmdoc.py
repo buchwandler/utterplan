@@ -146,9 +146,7 @@ def ssmdoc_document_path(index: SSMDDocIndex) -> Path:
         if resolved.stat().st_size > _MAX_DOCUMENT_BYTES:
             raise SSMDDocError("ssmdoc document exceeds the 64 MiB size limit")
     except OSError as exc:
-        raise SSMDDocError(
-            f"cannot inspect ssmdoc document {index.relative_path}: {exc}"
-        ) from exc
+        raise SSMDDocError(f"cannot inspect ssmdoc document {index.relative_path}: {exc}") from exc
     return source
 
 

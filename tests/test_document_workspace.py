@@ -116,6 +116,7 @@ def test_missing_document_fails_before_creating_derived_outputs(tmp_path: Path) 
 
     assert not (root / "utterplan").exists()
 
+
 def test_invalid_ssmd_is_a_reported_compile_failure_without_plan(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
     source = root / "document.ssmd.md"

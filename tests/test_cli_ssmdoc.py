@@ -103,9 +103,7 @@ def test_compile_document_uses_dirty_current_content_without_refreshing_manifest
 
     assert result == 0
     capsys.readouterr()
-    assert "Edited current content." in _plan_text(
-        root / "utterplan/document.utterplan.toml"
-    )
+    assert "Edited current content." in _plan_text(root / "utterplan/document.utterplan.toml")
     assert manifest.read_bytes() == manifest_before
     assert "Edited current content." in source.read_text(encoding="utf-8")
 
@@ -122,6 +120,7 @@ def test_compile_document_missing_source_fails_before_output_creation(
     assert result == 2
     assert "document is missing" in captured.err
     assert not (root / "utterplan").exists()
+
 
 def test_compile_document_invalid_workspace_fails_before_output_creation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -263,10 +262,17 @@ def test_compile_document_parser_exposes_only_single_document_options() -> None:
 
 
 def test_render_document_parser_has_single_document_options() -> None:
-    args = build_parser().parse_args([
-        "render-document", "story.ssmdoc", "--profile", "voice.renderprofile.toml",
-        "--variant", "narration", "--force",
-    ])
+    args = build_parser().parse_args(
+        [
+            "render-document",
+            "story.ssmdoc",
+            "--profile",
+            "voice.renderprofile.toml",
+            "--variant",
+            "narration",
+            "--force",
+        ]
+    )
     assert args.input == Path("story.ssmdoc")
     assert args.profile == Path("voice.renderprofile.toml")
     assert args.variant == "narration"

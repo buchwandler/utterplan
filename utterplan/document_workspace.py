@@ -16,6 +16,7 @@ from .config import PlannerConfig
 from .model import FlowPlan
 from .renderplan_export import build_render_plan
 from .renderplan_workspace import profile_fingerprint, render_variant_label
+from .role_coverage import assert_profile_role_coverage
 from .ssmdoc import SSMDDocError, load_ssmdoc_index, ssmdoc_document_path
 from .workspace_paths import renderplan_output_name, utterplan_output_name
 
@@ -188,6 +189,9 @@ class DocumentRenderStart:
     variant_dir: Path
     output_path: Path
     report_path: Path
+    required_roles: tuple[str, ...] = ()
+    available_roles: tuple[str, ...] = ()
+    uses_default_role: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +208,10 @@ class DocumentRenderResult:
     renderplan_path: Path
     render_plan_id: str
     report_path: Path
+
+    required_roles: tuple[str, ...] = ()
+    available_roles: tuple[str, ...] = ()
+    uses_default_role: bool = False
 
 
 DocumentRenderStartCallback = Callable[[DocumentRenderStart], None]
@@ -246,6 +254,7 @@ def render_ssmdoc(
 
         profile_path = Path(profile).expanduser().resolve(strict=True)
         active_profile = renderplan_codec.load_profile(profile_path)
+        coverage = assert_profile_role_coverage(source_plan, active_profile)
         profile_id = active_profile.profile_id or active_profile.computed_id()
         variant_name = (
             f"{render_variant_label(profile_path, variant)}--{profile_fingerprint(profile_id)}"
@@ -347,6 +356,9 @@ def render_ssmdoc(
                     variant_dir,
                     renderplan_path,
                     report_path,
+                    coverage.required_roles,
+                    coverage.available_roles,
+                    coverage.uses_default_role,
                 )
             )
 
@@ -382,6 +394,9 @@ def render_ssmdoc(
             renderplan_path,
             plan.plan_id,
             report_path,
+            coverage.required_roles,
+            coverage.available_roles,
+            coverage.uses_default_role,
         )
     except (SSMDDocError, OSError, RuntimeError, ValueError, TypeError) as exc:
         if isinstance(exc, DocumentWorkspaceServiceError):
@@ -422,7 +437,9 @@ def _preflight_outputs(
             raise DocumentWorkspaceServiceError(
                 f"document output path collides with output directory: {output}"
             )
-        if any(output == protected or protected in output.parents for protected in protected_inputs):
+        if any(
+            output == protected or protected in output.parents for protected in protected_inputs
+        ):
             raise DocumentWorkspaceServiceError(
                 f"document output would overwrite source workspace content: {output}"
             )
@@ -431,6 +448,7 @@ def _preflight_outputs(
             raise DocumentWorkspaceServiceError(
                 f"document output path is a directory when a file is expected: {output_path}"
             )
+
 
 __all__ = [
     "DocumentCompileRequest",

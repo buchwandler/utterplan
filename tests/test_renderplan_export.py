@@ -20,7 +20,9 @@ from utterplan import (
     FlowUnit,
     LinguisticsConfig,
     PlannerConfig,
+    SegmentDirectives,
     TokenView,
+    VoiceDirective,
     build_render_plan,
     compile_document,
 )
@@ -262,3 +264,134 @@ def test_render_plan_cli_requires_previous_and_preflight_as_a_pair(tmp_path: Pat
 
     assert result == 2
     assert "--previous and --preflight must be supplied together" in capsys.readouterr().err
+
+
+def _multi_role_source() -> FlowPlan:
+    return FlowPlan(
+        language="en-US",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment(
+                        "Host line.",
+                        "en-US",
+                        directives=SegmentDirectives(voice=VoiceDirective(reference="host")),
+                    ),
+                    FlowSegment(
+                        "Guest line.",
+                        "en-US",
+                        directives=SegmentDirectives(voice=VoiceDirective(reference="guest")),
+                    ),
+                    FlowSegment("Narration line.", "en-US"),
+                )
+            ),
+        ),
+    )
+
+
+def _multi_role_profile(*, include_cast: bool = True) -> RenderProfile:
+    roles = {
+        "narrator": RoleProfile(language="en-US", binding={"renderer": "kokoro"}),
+    }
+    if include_cast:
+        roles.update(
+            {
+                "host": RoleProfile(language="en-US", binding={"renderer": "kitten"}),
+                "guest": RoleProfile(language="en-US", binding={"renderer": "piper"}),
+            }
+        )
+    return RenderProfile(
+        roles=roles,
+        default_role="narrator",
+        planning=PlanningPolicy(split="sentence"),
+        pauses=PausePolicy(mode="manual"),
+    )
+
+
+def test_render_plan_json_reports_role_coverage_metadata(tmp_path: Path, capsys) -> None:
+    source_path = tmp_path / "roles.utterplan.toml"
+    profile_path = tmp_path / "cast.renderprofile.toml"
+    output_path = tmp_path / "roles.renderplan.toml"
+    _multi_role_source().save(source_path)
+    renderplan_codec.save_profile(_multi_role_profile(), profile_path)
+
+    assert (
+        main(
+            [
+                "render-plan",
+                str(source_path),
+                "--profile",
+                str(profile_path),
+                "--output",
+                str(output_path),
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["role_coverage"] == {
+        "default_role": "narrator",
+        "required": ["host", "guest", "narrator"],
+        "available": ["guest", "host", "narrator"],
+        "missing": [],
+        "uses_default_role": True,
+    }
+    assert output_path.is_file()
+
+    human_output_path = tmp_path / "roles-human.renderplan.toml"
+    assert (
+        main(
+            [
+                "render-plan",
+                str(source_path),
+                "--profile",
+                str(profile_path),
+                "--output",
+                str(human_output_path),
+            ]
+        )
+        == 0
+    )
+    human_output = capsys.readouterr()
+    assert "roles: host, guest, narrator" in human_output.err
+    assert "coverage: complete" in human_output.err
+    assert f"wrote {human_output_path}" in human_output.err
+
+
+def test_render_plan_missing_roles_fail_before_output_creation(tmp_path: Path, capsys) -> None:
+    source_path = tmp_path / "roles.utterplan.toml"
+    profile_path = tmp_path / "partial.renderprofile.toml"
+    output_path = tmp_path / "must-not-exist.renderplan.toml"
+    _multi_role_source().save(source_path)
+    renderplan_codec.save_profile(_multi_role_profile(include_cast=False), profile_path)
+
+    assert (
+        main(
+            [
+                "render-plan",
+                str(source_path),
+                "--profile",
+                str(profile_path),
+                "--output",
+                str(output_path),
+            ]
+        )
+        == 1
+    )
+
+    assert "host, guest" in capsys.readouterr().err
+    assert not output_path.exists()
+
+
+def test_inspect_roles_reports_source_inventory_without_profile(tmp_path: Path, capsys) -> None:
+    source_path = tmp_path / "roles.utterplan.toml"
+    _multi_role_source().save(source_path)
+
+    assert main(["inspect", str(source_path), "--roles"]) == 0
+
+    output = capsys.readouterr().out
+    assert "host  1 speech segments" in output
+    assert "guest  1 speech segments" in output
+    assert "required by 1 speech segments" in output

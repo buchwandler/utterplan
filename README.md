@@ -80,6 +80,58 @@ utterplan/
 
 Omit `--chapters` to compile all manifest chapters. Use comma-separated source-number selections for non-contiguous ranges, for example `utterplan compile-book chapters --chapters 1,3-5`. `--diagnostics warnings|all|none` defaults to warnings; failures are always shown and reports retain complete diagnostics. The book root itself is also accepted as input; see the [SSMDBook guide](docs/ssmdbook.md).
 
+## Logical roles and complete RenderProfiles
+
+An SSMD `voice` reference is a **logical role**: a renderer-independent name such as `narrator`, `host`, or `guest`. A **role binding** is the concrete renderer configuration for that name in a RenderProfile. One RenderProfile is the complete cast for one render variant, together with shared planning and pause policy; it may bind different roles to different engines. UtterPlan accepts one `--profile` per projection, not one profile per role, and does not discover engines or voices.
+
+A profile can define a default for speech without an explicit role reference and explicit bindings for other roles:
+
+In SSMD, the source remains renderer-independent; for example:
+
+```markdown
+:::{voice="host"}
+Host line.
+:::
+```
+
+```toml
+default_role = "narrator"
+
+[roles.narrator]
+language = "en-US"
+
+[roles.narrator.binding]
+renderer = "kokoro"
+target_id = "v1.0"
+voice = "af_heart"
+
+[roles.host]
+language = "en-US"
+
+[roles.host.binding]
+renderer = "kitten"
+target_id = "mini-0.8"
+voice = "Jasper"
+
+[roles.guest]
+language = "en-US"
+
+[roles.guest.binding]
+renderer = "piper"
+target_id = "en_US-amy-medium"
+voice = "en_US-amy-medium"
+```
+
+Inspect symbolic role usage without a profile, then project a document or selected book chapters with the same complete cast:
+
+```bash
+utterplan inspect story.utterplan.toml --roles
+utterplan render-document story.ssmdoc --profile printer-cast.renderprofile.toml
+utterplan render-book novel.ssmdbook --profile novel-cast.renderprofile.toml
+```
+
+Projection reports required and available roles and rejects incomplete coverage before writing the RenderPlan variant. The profile and its concrete role bindings remain separate from the source SSMD.
+
 ## From an SSMDBook to RenderPlans
 
 UtterPlan keeps one canonical semantic plan per chapter. A RenderProfile is a

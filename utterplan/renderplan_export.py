@@ -20,6 +20,7 @@ from .model import FlowPlan
 from .renderplan_grouping import group_initial_plan
 from .renderplan_projection import RenderPlanProjectionError, build_source_index
 from .renderplan_replan import replan_flow
+from .role_coverage import assert_profile_role_coverage
 
 
 def build_render_plan(
@@ -30,18 +31,18 @@ def build_render_plan(
     preflight: PreflightReport | None = None,
 ) -> RenderPlan:
     """Project a schema-v7 FlowPlan or refine its matching prior RenderPlan."""
-    index = build_source_index(utterplan)
     if not isinstance(profile, RenderProfile):
         raise RenderPlanProjectionError(
             "RenderPlan construction requires a RenderProfile",
             code="renderplan.profile.type",
         )
+    index = build_source_index(utterplan)
     if (previous_plan is None) != (preflight is None):
         raise RenderPlanProjectionError(
             "replanning requires both previous_plan and preflight; omit both for an initial build",
             code="renderplan.replan.inputs",
         )
-
+    assert_profile_role_coverage(utterplan, profile)
     profile_id = profile.profile_id or profile.computed_id()
     if previous_plan is None:
         flow = group_initial_plan(index, profile)

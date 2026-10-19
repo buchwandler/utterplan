@@ -79,6 +79,29 @@ prior partitions and replaces only exact failed speech occurrences. Backend metr
 remain diagnostics supplied by preflight; UtterPlan does not estimate them. Use
 `utterplan render-plan --explain` to format the already-built decisions.
 
+### Inspect logical role coverage
+
+The public role-coverage helpers expose source inventory independently of projection or renderer bindings. `logical_role_inventory()` counts explicit role references and speech using the profile default; `profile_role_coverage()` compares those requirements with one complete RenderProfile, preserving first-occurrence order for required roles and deterministic sorting for available roles. The returned `LogicalRoleInventory` and `ProfileRoleCoverage` types separate source inventory from profile coverage. Both functions are available from the package root:
+
+```python
+from renderplan.codec import load_profile
+from utterplan import (
+    FlowPlan,
+    logical_role_inventory,
+    profile_role_coverage,
+    assert_profile_role_coverage,
+)
+
+source = FlowPlan.load("chapter.utterplan.toml")
+inventory = logical_role_inventory(source)
+profile = load_profile("cast.renderprofile.toml")
+coverage = assert_profile_role_coverage(source, profile)
+print(inventory.explicit_roles, inventory.explicit_occurrences)
+print(coverage.required_roles, coverage.available_roles, coverage.missing_roles)
+```
+
+Empty and audio-only segments do not require a role. `assert_profile_role_coverage()` raises the normal `renderplan.role.missing` projection error with all missing role names; `build_render_plan()` performs this check before grouping or replanning.
+
 ## Persistable planning attempts
 
 `compile_attempt` and `UtterancePlanner.compile_attempt` expose a finalized planning

@@ -72,3 +72,9 @@ utterplan render-document . --profile narration.renderprofile.toml
 ```
 
 This writes `renderplan/<label>--<profile-fingerprint>/renderprofile.toml`, `document.renderplan.toml`, and `render-report.toml` directly under the workspace. The printed exact variant can be passed to `voicerender render-document`. A document is never wrapped in a one-chapter book or a RenderPlanSet. Re-run `compile-document` and this projection after source edits; VoiceRender intentionally renders only the selected explicit RenderPlan.
+
+### Logical roles and profile coverage
+
+A source-level `voice` name such as `narrator`, `host`, or `guest` is a **logical role**; it does not name an engine voice. The selected RenderProfile's **role binding** supplies the concrete renderer configuration. Treat one RenderProfile as the complete cast for a rendering variant, including its default role and shared planning/pause policy. UtterPlan accepts exactly one profile for this projection; it does not accept one profile per role or discover engines.
+
+Use `utterplan inspect <plan> --roles` to see explicit speech-role counts and whether unqualified speech needs the selected profile's default. `render-document` reports required roles and complete coverage, and rejects any missing roles before creating a new variant directory. The same multi-role RenderProfile format and example are documented in the [README](../README.md#logical-roles-and-complete-renderprofiles).

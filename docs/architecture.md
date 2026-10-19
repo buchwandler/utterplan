@@ -174,8 +174,6 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
 - The workspace remains one document to one FlowPlan. Manifest digests are provenance only for editable directories: UtterPlan compiles current content and never refreshes the manifest or edits the source.
 - `compile-document` is single-document convenience, not book orchestration. ZIP bundles, fake chapters, and an `ssmdconvert` runtime dependency are outside the contract.
 
-
-
 ## Business Context
 
 <!-- archledger: no accepted records for this section yet -->
@@ -268,8 +266,6 @@ TOML.
 ## Document workspace orchestration
 
 `ssmdoc.py` performs read-only manifest discovery and canonical path safety checks; `source_input.py` centralizes standalone-file and `.ssmdoc` source loading; and `document_workspace.py` delegates one stable `document-0001` CompileRequest to the existing batch persistence/report path. The CLI and public package API expose `compile-document` and `compile_ssmdoc()` without shadowing the in-memory `compile_document()` compiler.
-
-
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -367,8 +363,6 @@ saved FlowPlan + explicit RenderProfile
 
 The command projects the existing plan without compiling source or invoking a renderer. Profile identity is embedded in the variant path, and a mismatched or ambiguous profile snapshot is rejected; source files and the SSMDDoc manifest remain unchanged.
 
-
-
 <!-- archledger: no accepted records for this section yet -->
 
 # Deployment View
@@ -398,8 +392,6 @@ or audio dependencies:
   against the self-contained repository test suite.
 
 - **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes semantic plans and its report directly under `<workspace>/utterplan/`; `render-document` writes profile-specific artifacts directly under `<workspace>/renderplan/` without changing source files.
-
-
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -482,8 +474,6 @@ repair opportunity. Neither mode guesses a symbol's pronunciation or crosses
 semantic blockers. Blocked planning outcomes may be reviewed through the separate
 `utterplan.planning-attempt.v1` inspect-only artifact; such candidates remain
 drafts and never become canonical plans.
-
-
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -571,8 +561,6 @@ drafts and never become canonical plans.
   failures; terminal diagnostics default to warnings with `all`/`none` overrides;
   batch and book reports retain every diagnostic; typed progress callbacks expose
   long-running planning without changing the plan.
-
-
 
 ## Quality Requirements Overview
 

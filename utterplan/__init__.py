@@ -127,6 +127,13 @@ from .renderability import (
     preflight_renderability,
 )
 from .renderplan_export import build_render_plan
+from .role_coverage import (
+    LogicalRoleInventory,
+    ProfileRoleCoverage,
+    assert_profile_role_coverage,
+    logical_role_inventory,
+    profile_role_coverage,
+)
 from .versioning import (
     CURRENT_SCHEMA_VERSION,
     FORMAT,
@@ -266,4 +273,9 @@ __all__ = [
     "MigrationResult",
     "MigrationStep",
     "migrate_plan_data",
+    "LogicalRoleInventory",
+    "ProfileRoleCoverage",
+    "logical_role_inventory",
+    "profile_role_coverage",
+    "assert_profile_role_coverage",
 ]

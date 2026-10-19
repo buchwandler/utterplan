@@ -41,6 +41,7 @@ from .preview import PreviewChunk, preview_plan
 from .renderability import format_renderability_error
 from .renderplan_batch import RenderOutcome
 from .renderplan_export import build_render_plan, format_render_plan_explanation
+from .role_coverage import logical_role_inventory, profile_role_coverage
 from .source_input import _format_for_path as _format_source_path
 from .source_input import load_source_path
 from .trace_codec import loads_trace
@@ -377,9 +378,12 @@ def build_parser() -> argparse.ArgumentParser:
     render_document_parser.add_argument(
         "input", type=Path, help="SSMDoc workspace root or its manifest-declared source file"
     )
-    render_document_parser.add_argument("--profile", type=Path, required=True, help="RenderProfile TOML file")
     render_document_parser.add_argument(
-        "--variant", help="safe human-readable variant label; profile fingerprint is always appended"
+        "--profile", type=Path, required=True, help="RenderProfile TOML file"
+    )
+    render_document_parser.add_argument(
+        "--variant",
+        help="safe human-readable variant label; profile fingerprint is always appended",
     )
     render_document_parser.add_argument(
         "--utterplan-dir", type=Path, help="directory containing the saved document UtterPlan"
@@ -388,7 +392,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-root", type=Path, help="RenderPlan variant root (default: <workspace>/renderplan)"
     )
     render_document_parser.add_argument("--report", type=Path, help="TOML operational report path")
-    render_document_parser.add_argument("--force", action="store_true", help="replace the existing RenderPlan")
+    render_document_parser.add_argument(
+        "--force", action="store_true", help="replace the existing RenderPlan"
+    )
     render_book_parser = commands.add_parser(
         "render-book",
         help="project selected SSMDBook UtterPlans into a profile-specific RenderPlan set",
@@ -485,6 +491,11 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser.add_argument("--warnings", action="store_true")
     inspect_parser.add_argument("--boundaries", action="store_true")
     inspect_parser.add_argument("--tokens", action="store_true")
+    inspect_parser.add_argument(
+        "--roles",
+        action="store_true",
+        help="show logical voice roles referenced by speech segments",
+    )
     inspect_parser.add_argument(
         "--semantic-boundaries",
         action="store_true",
@@ -598,8 +609,6 @@ def _linguistics_config(policy: str) -> LinguisticsConfig:
         spacy_model_size=cast(Literal["sm", "md", "lg", "trf"], policy),
         require_spacy=True,
     )
-
-
 
 
 def _planner_config_from_batch_args(args: argparse.Namespace) -> PlannerConfig:
@@ -920,13 +929,23 @@ def _render_document(args: argparse.Namespace) -> int:
         print(f"  document:   {info.document_id}", file=sys.stderr)
         print(f"  profile:    {info.profile_path}", file=sys.stderr)
         print(f"  profile-id: {info.profile_id}", file=sys.stderr)
+        print(f"  roles:      {', '.join(info.required_roles) or 'none'}", file=sys.stderr)
+        print("  coverage:   complete", file=sys.stderr)
         print(f"  variant:    {info.variant}", file=sys.stderr)
         print(f"  renderplan: {info.output_path}", file=sys.stderr)
         print(f"  report:     {info.report_path}", file=sys.stderr)
+
     try:
-        _render_ssmdoc_service(args.input, profile=args.profile, variant=args.variant,
-            utterplan_dir=args.utterplan_dir, output_root=args.output_root, report=args.report,
-            force=args.force, on_start=start)
+        _render_ssmdoc_service(
+            args.input,
+            profile=args.profile,
+            variant=args.variant,
+            utterplan_dir=args.utterplan_dir,
+            output_root=args.output_root,
+            report=args.report,
+            force=args.force,
+            on_start=start,
+        )
     except DocumentWorkspaceServiceError as exc:
         raise _CliUsageError(str(exc)) from exc
     return 0
@@ -945,6 +964,8 @@ def _render_book(args: argparse.Namespace) -> int:
         print(f"  selected:   {len(selected_ids)}", file=sys.stderr)
         print(f"  profile:    {progress.profile_path}", file=sys.stderr)
         print(f"  profile-id: {progress.profile_id}", file=sys.stderr)
+        print(f"  roles:      {', '.join(progress.required_roles) or 'none'}", file=sys.stderr)
+        print("  coverage:   complete", file=sys.stderr)
         print(f"  variant:    {progress.variant}", file=sys.stderr)
         print(f"  utterplans: {progress.utterplan_dir}", file=sys.stderr)
         print(f"  output:     {progress.variant_dir}", file=sys.stderr)
@@ -1371,6 +1392,7 @@ def _render_plan_command(args: argparse.Namespace) -> int:
 
     source = _load_plan_file(args.input)
     profile = renderplan_codec.load_profile(args.profile)
+    coverage = profile_role_coverage(source, profile)
     previous = renderplan_codec.load_plan(args.previous) if args.previous is not None else None
     preflight = (
         renderplan_codec.load_preflight(args.preflight) if args.preflight is not None else None
@@ -1393,15 +1415,25 @@ def _render_plan_command(args: argparse.Namespace) -> int:
             "format": "utterplan-render-plan",
             "version": 1,
             "output": str(args.output),
+            "role_coverage": {
+                "default_role": coverage.default_role,
+                "required": list(coverage.required_roles),
+                "available": list(coverage.available_roles),
+                "missing": list(coverage.missing_roles),
+                "uses_default_role": coverage.uses_default_role,
+            },
             "plan": renderplan_codec.plan_to_dict(plan),
         }
         if explanation is not None:
             payload["explanation"] = explanation
         print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
-    elif explanation is not None:
-        print(explanation, end="")
     else:
-        print(f"wrote {args.output}", file=sys.stderr)
+        print(f"roles: {', '.join(coverage.required_roles) or 'none'}", file=sys.stderr)
+        print("coverage: complete", file=sys.stderr)
+        if explanation is not None:
+            print(explanation, end="")
+        else:
+            print(f"wrote {args.output}", file=sys.stderr)
     return 0
 
 
@@ -1591,6 +1623,20 @@ def _inspect(plan: FlowPlan, args: argparse.Namespace) -> None:
     print(f"Linguistic provenance: {len(plan.linguistics)}")
     print(f"Warnings: {len(plan.warnings)}")
 
+    if args.roles:
+        inventory = logical_role_inventory(plan)
+        print("\nLogical voice roles")
+        print("  explicit:")
+        if inventory.explicit_occurrences:
+            for role, count in inventory.explicit_occurrences.items():
+                print(f"    {role}  {count} speech segments")
+        else:
+            print("    None.")
+        print("  default role:")
+        if inventory.uses_default_role:
+            print(f"    required by {inventory.implicit_occurrences} speech segments")
+        else:
+            print("    not required")
     if args.warnings:
         if not plan.warnings:
             print("No warnings.")

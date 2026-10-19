@@ -26,6 +26,7 @@ from .batch import BatchProgressCallback, CompileOutcome, CompileRequest, compil
 from .config import PlannerConfig
 from .model import FlowPlan
 from .renderplan_batch import RenderOutcome, RenderRequest, new_renderplan_set, render_to_files
+from .role_coverage import profile_role_coverage
 from .ssmdbook import (
     SSMDBookError,
     load_ssmdbook_index,
@@ -87,6 +88,10 @@ class BookRenderStart:
     variant_dir: Path
     utterplan_dir: Path
     selected_chapter_ids: tuple[str, ...]
+
+    required_roles: tuple[str, ...] = ()
+    available_roles: tuple[str, ...] = ()
+    uses_default_role: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -450,10 +455,28 @@ def render_book(
             label, profile_id, profile_path, index.root, utterplan_dir, variant_dir, manifest_path
         )
 
-    # Validate existing source plans before creating collection state.
-    for source_plan_path in source_plans:
+    # Validate readable source plans and aggregate role coverage before creating collection state.
+    required_roles_in_order: list[str] = []
+    missing_roles_by_chapter: dict[str, list[str]] = {}
+    uses_default_role = False
+    for chapter, source_plan_path in zip(chapters_selected, source_plans, strict=True):
         if source_plan_path.is_file():
-            FlowPlan.load(source_plan_path)
+            source_plan = FlowPlan.load(source_plan_path)
+            coverage = profile_role_coverage(source_plan, active_profile)
+            uses_default_role = uses_default_role or coverage.uses_default_role
+            for role in coverage.required_roles:
+                if role not in required_roles_in_order:
+                    required_roles_in_order.append(role)
+            for role in coverage.missing_roles:
+                missing_roles_by_chapter.setdefault(role, []).append(chapter.id)
+    if missing_roles_by_chapter:
+        details = "\n".join(
+            f"  {role}: {', '.join(chapter_ids)}"
+            for role, chapter_ids in missing_roles_by_chapter.items()
+        )
+        raise BookServiceError("RenderProfile does not cover selected book roles:\n" + details)
+    required_roles = tuple(required_roles_in_order)
+    available_roles = tuple(sorted(active_profile.roles))
     if not variant_dir.exists():
         try:
             variant_dir.mkdir(parents=True)
@@ -481,6 +504,9 @@ def render_book(
                 variant_dir=variant_dir,
                 utterplan_dir=utterplan_dir,
                 selected_chapter_ids=tuple(chapter.id for chapter in chapters_selected),
+                required_roles=required_roles,
+                available_roles=available_roles,
+                uses_default_role=uses_default_role,
             )
         )
 
@@ -542,8 +568,6 @@ def _new_book_renderplan_set(
     )
 
 
-
-
 def _path_is_within(path: Path, parent: Path) -> bool:
     try:
         path.relative_to(parent)
@@ -562,6 +586,7 @@ def _render_variant_label(profile_path: Path, override: str | None) -> str:
     from .renderplan_workspace import render_variant_label
 
     return render_variant_label(profile_path, override)
+
 
 __all__ = [
     "BookCompileRequest",

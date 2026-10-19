@@ -50,6 +50,18 @@ require `--force`. `--explain` formats the generated plan and replan decisions; 
 does not invoke planning a second time. `--json` emits a versioned JSON wrapper to
 stdout while the RenderPlan artifact remains TOML at `--output`.
 
+## Logical roles and complete-profile coverage
+
+Role coverage is validated before grouping or replanning. The selected profile must contain every explicit speech role and, when any speech omits a role reference, its `default_role`. Missing roles are reported together as `renderplan.role.missing`; extra profile roles are allowed. The check is renderer-independent and does not add role data to the RenderPlan schema.
+
+Use source-only role inspection without loading a RenderProfile:
+
+```bash
+utterplan inspect chapter.utterplan.toml --roles
+```
+
+The human `render-plan` summary reports required roles and `coverage: complete`. With `--json`, the versioned CLI wrapper includes a `role_coverage` object (`default_role`, `required`, `available`, `missing`, and `uses_default_role`) alongside, but outside, the RenderPlan payload.
+
 ## Input resolution
 
 The rules are deterministic:
@@ -151,6 +163,8 @@ utterplan render-document INPUT --profile PROFILE
 
 By default it reads `<workspace>/utterplan/document.utterplan.toml` and writes a profile-fingerprinted variant under `<workspace>/renderplan/<label>--<profile-id-prefix>/`, containing `renderprofile.toml`, `document.renderplan.toml`, and `render-report.toml`. `--variant` changes only the readable label; the profile fingerprint remains part of the directory identity. A profile mismatch or ambiguous existing snapshot is rejected even with `--force`. This is a one-document projection, not a book-set workflow. See the [SSMDDoc guide](ssmdoc.md).
 
+The start summary also lists the document's required roles and coverage. Coverage is checked before a new variant directory, profile snapshot, or RenderPlan is written; a missing role leaves no partial variant.
+
 ## Compile chapters from an SSMDBook workspace
 
 `compile-book` discovers selected SSMD chapters from an editable `.ssmdbook` manifest and compiles each chapter independently through the batch compiler. Pass either the book directory or its canonical `chapters/` directory:
@@ -197,8 +211,9 @@ utterplan render-book INPUT --profile PROFILE [--chapters SELECTOR]
 `chapters/` directory. `--chapters` uses the same manifest `source_number`
 selector as `compile-book`: `all` (default), one number, an inclusive range, or
 comma-separated selections such as `1,3-5,9`. Chapters remain in manifest order.
-`--profile` is required and is loaded once through the shared RenderPlan codec;
-UtterPlan does not call VoiceRender or probe engines.
+`--profile` is required and is loaded once through the shared RenderPlan codec; UtterPlan does not call VoiceRender or probe engines.
+
+Before initializing a new variant, `render-book` checks role coverage across all readable selected chapter plans. A single incomplete chapter fails the projection with the missing role names and affected chapter IDs; no new profile snapshot or `renderplan-set.toml` is written. The start summary lists the aggregate required roles and complete coverage. Other missing/invalid source-plan behavior is unchanged.
 
 Defaults and behavior:
 

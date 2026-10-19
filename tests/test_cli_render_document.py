@@ -9,7 +9,7 @@ from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
 from renderplan import codec as renderplan_codec
 
 from utterplan.cli import build_parser, main
-from utterplan.model import FlowPlan
+from utterplan.model import FlowPlan, FlowSegment, FlowUnit, SegmentDirectives, VoiceDirective
 
 FIXTURE = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
 SSMD = '---\nssmd_version: "0.9"\nlanguage: en-US\n---\n\nHello there.\n'
@@ -37,13 +37,55 @@ def _workspace(tmp_path: Path, *, compile_plan: bool = True) -> Path:
 def _profile(path: Path, *, voice: str = "amy") -> RenderProfile:
     profile = RenderProfile(
         roles={
-            "narrator": RoleProfile(
-                language="en-US", binding={"engine": "test", "voice": voice}
-            )
+            "narrator": RoleProfile(language="en-US", binding={"engine": "test", "voice": voice})
         },
         default_role="narrator",
         planning=PlanningPolicy(split="sentence", capacity_fallback=("token",)),
         pauses=PausePolicy(mode="manual", durations_ms={"sentence": 250}),
+    )
+    renderplan_codec.save_profile(profile, path)
+    return profile
+
+
+def _multi_role_plan() -> FlowPlan:
+    return FlowPlan(
+        language="en-US",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment(
+                        "Host line.",
+                        "en-US",
+                        directives=SegmentDirectives(voice=VoiceDirective(reference="host")),
+                    ),
+                    FlowSegment(
+                        "Guest line.",
+                        "en-US",
+                        directives=SegmentDirectives(voice=VoiceDirective(reference="guest")),
+                    ),
+                    FlowSegment("Narration line.", "en-US"),
+                )
+            ),
+        ),
+    )
+
+
+def _multi_role_profile(path: Path, *, include_cast: bool) -> RenderProfile:
+    roles = {
+        "narrator": RoleProfile(language="en-US", binding={"engine": "test-narrator"}),
+    }
+    if include_cast:
+        roles.update(
+            {
+                "host": RoleProfile(language="en-US", binding={"engine": "test-host"}),
+                "guest": RoleProfile(language="en-US", binding={"engine": "test-guest"}),
+            }
+        )
+    profile = RenderProfile(
+        roles=roles,
+        default_role="narrator",
+        planning=PlanningPolicy(split="sentence"),
+        pauses=PausePolicy(mode="manual"),
     )
     renderplan_codec.save_profile(profile, path)
     return profile
@@ -87,7 +129,10 @@ def test_render_document_writes_profile_specific_direct_variant_and_report(
     plan = renderplan_codec.load_plan(renderplan_path)
     plan.validate_against_profile(profile)
     assert plan.source_plan_id == FlowPlan.load(source_plan).plan_id
-    assert renderplan_codec.load_profile(snapshot_path).profile_id == renderplan_codec.load_profile(profile_path).profile_id
+    assert (
+        renderplan_codec.load_profile(snapshot_path).profile_id
+        == renderplan_codec.load_profile(profile_path).profile_id
+    )
     report = tomlkit.parse(report_path.read_text(encoding="utf-8"))
     assert report["format"] == "utterplan.render-document-report"
     assert report["status"] == "ok"
@@ -191,16 +236,19 @@ def test_custom_variant_and_output_root_keep_identity_fingerprint(
     output_root = tmp_path / "custom-render-output"
     report_path = tmp_path / "custom-render-report.toml"
 
-    assert _render(
-        root,
-        profile_path,
-        "--variant",
-        "warm",
-        "--output-root",
-        str(output_root),
-        "--report",
-        str(report_path),
-    ) == 0
+    assert (
+        _render(
+            root,
+            profile_path,
+            "--variant",
+            "warm",
+            "--output-root",
+            str(output_root),
+            "--report",
+            str(report_path),
+        )
+        == 0
+    )
     capsys.readouterr()
     profile_id = renderplan_codec.load_profile(profile_path).profile_id
     assert profile_id is not None
@@ -211,7 +259,10 @@ def test_custom_variant_and_output_root_keep_identity_fingerprint(
     assert not (variant_dir / "render-report.toml").exists()
     assert not (root / "renderplan").exists()
 
-def test_unsafe_variant_labels_are_rejected(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+
+def test_unsafe_variant_labels_are_rejected(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     root = _workspace(tmp_path)
     profile_path = tmp_path / "narration.renderprofile.toml"
     _profile(profile_path)
@@ -241,13 +292,63 @@ def test_failed_projection_does_not_initialize_variant(
     assert not (root / "renderplan").exists()
 
 
+def test_render_document_reports_complete_multi_role_coverage(tmp_path: Path, capsys) -> None:
+    root = _workspace(tmp_path)
+    source_plan = root / "utterplan" / "document.utterplan.toml"
+    _multi_role_plan().save(source_plan)
+    profile_path = tmp_path / "cast.renderprofile.toml"
+    _multi_role_profile(profile_path, include_cast=True)
+
+    assert _render(root, profile_path) == 0
+
+    output = capsys.readouterr().err
+    assert "roles:      host, guest, narrator" in output
+    assert "coverage:   complete" in output
+    renderplan_path = _variant_dir(root, profile_path, label="cast") / "document.renderplan.toml"
+    plan = renderplan_codec.load_plan(renderplan_path)
+    assert {speech.role for speech in plan.speech} == {"host", "guest", "narrator"}
+    assert {speech.binding["engine"] for speech in plan.speech} == {
+        "test-host",
+        "test-guest",
+        "test-narrator",
+    }
+
+
+def test_render_document_missing_role_fails_before_variant_creation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _workspace(tmp_path)
+    source_plan = root / "utterplan" / "document.utterplan.toml"
+    _multi_role_plan().save(source_plan)
+    profile_path = tmp_path / "partial.renderprofile.toml"
+    _multi_role_profile(profile_path, include_cast=False)
+
+    assert _render(root, profile_path) == 2
+
+    assert "host, guest" in capsys.readouterr().err
+    assert not (root / "renderplan").exists()
+
+
 def test_render_document_parser_has_no_book_selection_options() -> None:
     parser = build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(
-            ["render-document", "story.ssmdoc", "--profile", "voice.renderprofile.toml", "--chapters", "1"]
+            [
+                "render-document",
+                "story.ssmdoc",
+                "--profile",
+                "voice.renderprofile.toml",
+                "--chapters",
+                "1",
+            ]
         )
     with pytest.raises(SystemExit):
         parser.parse_args(
-            ["render-document", "story.ssmdoc", "--profile", "voice.renderprofile.toml", "--fail-fast"]
+            [
+                "render-document",
+                "story.ssmdoc",
+                "--profile",
+                "voice.renderprofile.toml",
+                "--fail-fast",
+            ]
         )

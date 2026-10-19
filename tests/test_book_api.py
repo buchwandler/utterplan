@@ -27,7 +27,7 @@ from utterplan import (
     replan_book,
 )
 from utterplan.config import LinguisticsConfig, PlannerConfig
-from utterplan.model import FlowPlan
+from utterplan.model import FlowPlan, FlowSegment, FlowUnit, SegmentDirectives, VoiceDirective
 
 
 def _ssmd(text: str) -> str:
@@ -481,3 +481,28 @@ def test_public_book_services_refuse_outputs_inside_source_chapters(tmp_path: Pa
     with pytest.raises(BookServiceError, match="inside source chapters"):
         render_book(root, profile=profile_path, output_root=root / "chapters" / "renderplans")
     assert not (root / "chapters/renderplans").exists()
+
+
+def test_render_book_aggregates_missing_roles_before_variant_initialization(tmp_path: Path) -> None:
+    root = _book(tmp_path / "role-coverage.ssmdbook", (5, 6, 7))
+    utterplan_dir = root / "utterplan"
+    utterplan_dir.mkdir()
+    for number, role in ((5, None), (6, "host"), (7, "guest")):
+        text = f"Chapter {number}."
+        directives = (
+            SegmentDirectives(voice=VoiceDirective(reference=role)) if role else SegmentDirectives()
+        )
+        FlowPlan(
+            language="en-US",
+            flow=(FlowUnit((FlowSegment(text, "en-US", directives=directives),)),),
+        ).save(utterplan_dir / f"chapter-{number:04d}.utterplan.toml")
+    profile_path = root / "narration.renderprofile.toml"
+    _profile(profile_path)
+
+    with pytest.raises(BookServiceError) as raised:
+        render_book(root, profile=profile_path)
+
+    message = str(raised.value)
+    assert "host: chapter-0006" in message
+    assert "guest: chapter-0007" in message
+    assert not (root / "renderplan").exists()

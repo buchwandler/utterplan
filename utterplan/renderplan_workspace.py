@@ -1,4 +1,5 @@
 """Shared profile variant naming for workspace RenderPlan projections."""
+
 from __future__ import annotations
 
 import re

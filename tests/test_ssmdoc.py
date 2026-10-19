@@ -77,7 +77,6 @@ def test_resolves_ssmdoc_root_and_canonical_document_file(tmp_path: Path) -> Non
     assert load_ssmdoc_index(root / "document.ssmd.md").root == root.resolve()
 
 
-
 def test_supports_manifest_declared_nested_source_and_optional_fields(tmp_path: Path) -> None:
     root = tmp_path / "workspace"
     source = root / "content" / "document.ssmd.md"
@@ -258,6 +257,7 @@ def test_rejects_missing_manifest_referenced_document(tmp_path: Path) -> None:
 
     with pytest.raises(SSMDDocError, match="document is missing"):
         ssmdoc_document_path(load_ssmdoc_index(root))
+
 
 def test_rejects_existing_non_file_document(tmp_path: Path) -> None:
     root = tmp_path / "directory-document"

@@ -16,7 +16,14 @@ from renderplan import (
 )
 from renderplan import codec as renderplan_codec
 
-from utterplan import FlowPlan, FlowSegment, FlowUnit, TokenView
+from utterplan import (
+    FlowPlan,
+    FlowSegment,
+    FlowUnit,
+    SegmentDirectives,
+    TokenView,
+    VoiceDirective,
+)
 from utterplan.cli import build_parser, main
 
 
@@ -90,6 +97,32 @@ def _profile(path: Path, voice: str = "amy") -> RenderProfile:
         default_role="narrator",
         planning=PlanningPolicy(split="sentence", capacity_fallback=("token",)),
         pauses=PausePolicy(mode="manual", durations_ms={"sentence": 250}),
+    )
+    renderplan_codec.save_profile(profile, path)
+    return renderplan_codec.load_profile(path)
+
+
+def _write_role_plan(root: Path, chapter: int, role: str | None) -> None:
+    text = f"Chapter {chapter} {role or 'narration'}."
+    directives = (
+        SegmentDirectives(voice=VoiceDirective(reference=role)) if role else SegmentDirectives()
+    )
+    FlowPlan(
+        language="en-US",
+        flow=(FlowUnit((FlowSegment(text, "en-US", directives=directives),)),),
+    ).save(root / "utterplan" / f"chapter-{chapter:04d}.utterplan.toml")
+
+
+def _multi_role_profile(path: Path) -> RenderProfile:
+    profile = RenderProfile(
+        roles={
+            "narrator": RoleProfile(language="en-US", binding={"engine": "kokoro"}),
+            "host": RoleProfile(language="en-US", binding={"engine": "kitten"}),
+            "guest": RoleProfile(language="en-US", binding={"engine": "piper"}),
+        },
+        default_role="narrator",
+        planning=PlanningPolicy(split="sentence"),
+        pauses=PausePolicy(mode="manual"),
     )
     renderplan_codec.save_profile(profile, path)
     return renderplan_codec.load_profile(path)
@@ -206,6 +239,32 @@ def test_render_book_success_matches_single_file_projection(tmp_path: Path, caps
     single_plan = renderplan_codec.load_plan(single_output)
     assert batch_plan == single_plan
     assert batch_plan.plan_id == single_plan.plan_id
+
+
+def test_render_book_reports_multi_role_coverage(tmp_path: Path, capsys) -> None:
+    root = _write_book(tmp_path / "multi-role.ssmdbook", (5, 6, 7))
+    _write_role_plan(root, 5, "host")
+    _write_role_plan(root, 6, "guest")
+    _write_role_plan(root, 7, None)
+    profile_path = root / "cast.renderprofile.toml"
+    profile = _multi_role_profile(profile_path)
+
+    assert _render(root, profile_path) == 0
+
+    output = capsys.readouterr().err
+    assert "roles:      host, guest, narrator" in output
+    assert "coverage:   complete" in output
+    variant = _variant(root, profile, label="cast")
+    collection = load_renderplan_set(variant / "renderplan-set.toml")
+    assert len(collection.chapters) == 3
+    plans = [
+        renderplan_codec.load_plan(variant / chapter.renderplan) for chapter in collection.chapters
+    ]
+    assert {speech.role for plan in plans for speech in plan.speech} == {
+        "host",
+        "guest",
+        "narrator",
+    }
 
 
 def test_render_book_accumulates_successful_chapters_and_replaces_latest_report(
