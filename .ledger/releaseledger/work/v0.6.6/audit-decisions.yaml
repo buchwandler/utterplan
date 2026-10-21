@@ -1,0 +1,45 @@
+rows:
+  - sha: 5ef16474f003b2a28815b0b9258b28e6d8c14490
+    inspected: true
+    inspected_paths:
+      - utterplan/ssmd_bundle.py
+      - utterplan/bundle.py
+      - utterplan/bundle_replan.py
+      - utterplan/cli.py
+      - utterplan/__init__.py
+      - docs/bundles.md
+      - docs/cli.md
+      - README.md
+      - tests/test_ssmd_bundle.py
+      - tests/test_ssmd_bundle_book.py
+      - tests/test_ssmd_bundle_document.py
+      - tests/test_bundle_services.py
+      - tests/test_bundle_replan.py
+    observed_behavior: >-
+      Added a manifest-driven bundle lifecycle that accepts canonical .ssmd-bundle roots,
+      validates safe book or document manifests, selects book items by source number, and
+      provides unified compile, RenderPlan projection, and deterministic replan services.
+      The CLI and public Python API dispatch behavior from manifest.json, keep source
+      content and manifests read-only, and write independent plans, profile variants,
+      reports, and replan updates under bundle-owned output directories.
+    public_impact: public
+    decision: accepted
+    target_entry_key: bundle-lifecycle
+    target_entry_id: null
+    notes: >-
+      Reviewed implementation, CLI/API documentation, safety checks, and focused bundle
+      service tests.
+    stale: false
+  - sha: 5fac9935d4a027747dad80c4ea5c4215d4fb6d57
+    inspected: true
+    inspected_paths:
+      - .github/workflows/tests.yml
+    observed_behavior: >-
+      Updated CI smoke coverage to exercise the renamed bundle render workflow and
+      canonical .ssmd-bundle fixture layout.
+    public_impact: internal
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: CI-only coverage change; omitted from the public changelog.
+    stale: false

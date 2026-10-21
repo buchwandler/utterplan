@@ -1,0 +1,16 @@
+ .github/workflows/tests.yml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index f194d23..5ea3fa1 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -78,7 +78,7 @@ jobs:
+           tests/test_renderplan_batch.py
+           tests/test_renderplan_export.py
+           tests/test_renderplan_replan.py
+-          tests/test_cli_render_book.py
++          tests/test_cli_bundle_render_book.py
+           tests/test_renderplan_dependency_contract.py
+   package-smoke:
+     runs-on: ubuntu-latest

@@ -1,0 +1,60 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.6.6
+git_base_ref: 8173bc8a5ba138c9b27c386cc1e32a70104e3aab
+git_base_sha: 8173bc8a5ba138c9b27c386cc1e32a70104e3aab
+git_head_ref: 5fac9935d4a027747dad80c4ea5c4215d4fb6d57
+git_head_sha: 5fac9935d4a027747dad80c4ea5c4215d4fb6d57
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: Added manifest-driven bundle services for compiling, rendering, and replanning book or document .ssmd-bundle roots
+    status: accepted
+    source_refs:
+      - git:5ef16474f003b2a28815b0b9258b28e6d8c14490
+    paths:
+      - utterplan/ssmd_bundle.py
+      - utterplan/bundle.py
+      - utterplan/bundle_replan.py
+      - utterplan/cli.py
+      - utterplan/__init__.py
+      - docs/bundles.md
+      - tests/test_ssmd_bundle.py
+      - tests/test_ssmd_bundle_book.py
+      - tests/test_ssmd_bundle_document.py
+      - tests/test_bundle_services.py
+      - tests/test_bundle_replan.py
+    sources:
+      - git:5ef16474f003b2a28815b0b9258b28e6d8c14490
+    contributors:
+      - "@holgern"
+  - kind: changed
+    summary: Changed workspace commands to use canonical .ssmd-bundle roots and manifest-dispatched bundle workflows
+    breaking: true
+    status: accepted
+    paths:
+      - docs/bundles.md
+      - docs/cli.md
+      - docs/getting-started.md
+      - README.md
+      - utterplan/cli.py
+      - utterplan/__init__.py
+      - utterplan/ssmd_bundle.py
+    sources:
+      - git:5ef16474f003b2a28815b0b9258b28e6d8c14490
+    contributors:
+      - "@holgern"
+  - kind: internal
+    summary: Improved CI smoke coverage for canonical bundle render workflows
+    internal: true
+    status: accepted
+    source_refs:
+      - git:5fac9935d4a027747dad80c4ea5c4215d4fb6d57
+    paths:
+      - .github/workflows/tests.yml
+    sources:
+      - git:5fac9935d4a027747dad80c4ea5c4215d4fb6d57
+    contributors:
+      - "@holgern"
