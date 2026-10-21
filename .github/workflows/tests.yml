@@ -78,7 +78,7 @@ jobs:
           tests/test_renderplan_batch.py
           tests/test_renderplan_export.py
           tests/test_renderplan_replan.py
-          tests/test_cli_render_book.py
+          tests/test_cli_bundle_render_book.py
           tests/test_renderplan_dependency_contract.py
   package-smoke:
     runs-on: ubuntu-latest
