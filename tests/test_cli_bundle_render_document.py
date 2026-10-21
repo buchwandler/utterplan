@@ -8,21 +8,22 @@ import tomlkit
 from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
 from renderplan import codec as renderplan_codec
 
-from utterplan.cli import build_parser, main
+from utterplan.cli import main
 from utterplan.model import FlowPlan, FlowSegment, FlowUnit, SegmentDirectives, VoiceDirective
 
-FIXTURE = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
+FIXTURE = Path(__file__).parent / "fixtures/document-bundle-v1/story.ssmd-bundle"
 SSMD = '---\nssmd_version: "0.9"\nlanguage: en-US\n---\n\nHello there.\n'
 
 
 def _workspace(tmp_path: Path, *, compile_plan: bool = True) -> Path:
-    root = tmp_path / "workspace"
+    root = tmp_path / "workspace.ssmd-bundle"
     shutil.copytree(FIXTURE, root)
     (root / "document.ssmd.md").write_text(SSMD, encoding="utf-8")
     if compile_plan:
         result = main(
             [
-                "compile-document",
+                "bundle",
+                "compile",
                 str(root),
                 "--text-preparation",
                 "identity",
@@ -98,7 +99,7 @@ def _variant_dir(root: Path, profile_path: Path, *, label: str = "narration") ->
 
 
 def _render(root: Path, profile_path: Path, *options: str) -> int:
-    return main(["render-document", str(root), "--profile", str(profile_path), *options])
+    return main(["bundle", "render", str(root), "--profile", str(profile_path), *options])
 
 
 def test_render_document_writes_profile_specific_direct_variant_and_report(
@@ -134,7 +135,7 @@ def test_render_document_writes_profile_specific_direct_variant_and_report(
         == renderplan_codec.load_profile(profile_path).profile_id
     )
     report = tomlkit.parse(report_path.read_text(encoding="utf-8"))
-    assert report["format"] == "utterplan.render-document-report"
+    assert report["format"] == "utterplan.render-bundle-report"
     assert report["status"] == "ok"
     assert report["source_plan_id"] == plan.source_plan_id
     assert report["render_plan_id"] == plan.plan_id
@@ -157,7 +158,7 @@ def test_missing_utterplan_fails_actionably_without_partial_variant(
     assert _render(root, profile_path) == 2
     captured = capsys.readouterr()
     assert "No UtterPlan found at" in captured.err
-    assert "utterplan compile-document" in captured.err
+    assert "utterplan bundle compile" in captured.err
     assert not (root / "renderplan").exists()
 
 
@@ -284,7 +285,7 @@ def test_failed_projection_does_not_initialize_variant(
     def fail_projection(*_args: object, **_kwargs: object) -> None:
         raise ValueError("projection failed")
 
-    monkeypatch.setattr("utterplan.document_workspace.build_render_plan", fail_projection)
+    monkeypatch.setattr("utterplan._document_service.build_render_plan", fail_projection)
 
     assert _render(root, profile_path) == 2
     captured = capsys.readouterr()
@@ -292,7 +293,7 @@ def test_failed_projection_does_not_initialize_variant(
     assert not (root / "renderplan").exists()
 
 
-def test_render_document_reports_complete_multi_role_coverage(tmp_path: Path, capsys) -> None:
+def test_bundle_render_reports_complete_multi_role_coverage(tmp_path: Path, capsys) -> None:
     root = _workspace(tmp_path)
     source_plan = root / "utterplan" / "document.utterplan.toml"
     _multi_role_plan().save(source_plan)
@@ -329,26 +330,16 @@ def test_render_document_missing_role_fails_before_variant_creation(
     assert not (root / "renderplan").exists()
 
 
-def test_render_document_parser_has_no_book_selection_options() -> None:
-    parser = build_parser()
-    with pytest.raises(SystemExit):
-        parser.parse_args(
-            [
-                "render-document",
-                "story.ssmdoc",
-                "--profile",
-                "voice.renderprofile.toml",
-                "--chapters",
-                "1",
-            ]
-        )
-    with pytest.raises(SystemExit):
-        parser.parse_args(
-            [
-                "render-document",
-                "story.ssmdoc",
-                "--profile",
-                "voice.renderprofile.toml",
-                "--fail-fast",
-            ]
-        )
+def test_document_bundle_render_rejects_non_all_selector(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _workspace(tmp_path)
+    profile_path = tmp_path / "voice.renderprofile.toml"
+    _profile(profile_path)
+
+    result = _render(root, profile_path, "--chapters", "1")
+    captured = capsys.readouterr()
+
+    assert result == 2
+    assert "document bundles only support --chapters all" in captured.err
+    assert not (root / "renderplan").exists()

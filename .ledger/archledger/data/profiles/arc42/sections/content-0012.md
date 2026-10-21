@@ -7,7 +7,7 @@ section: glossary
 title: Glossary
 order: 120
 status: accepted
-version: 3
+version: 4
 body_format: markdown
 ---
 
@@ -32,8 +32,6 @@ body_format: markdown
 | RenderPlan       | Shared renderer-specific plan contract produced by optional projection from a schema-v7 FlowPlan.                                                                                                   |
 | RenderProfile    | A separate renderer configuration; UtterPlan loads shared data without importing VoiceRender.                                                                                                       |
 | VoiceRender      | Consumer that creates engine-backed profiles and owns validation, preflight, G2P, synthesis, and audio.                                                                                             |
-| SSMDBook         | Editable book workspace whose manifest drives chapter discovery; `compile-book`/`render-book` orchestrate per-file workspaces without changing content.                                             |
+| SSMD bundle      | Canonical `.ssmd-bundle/` root whose schema-v1 manifest selects book items or a single document item; all operations use the unified `bundle` lifecycle.                                            |
 | Planning attempt | Inspect-only `utterplan.planning-attempt.v1` artifact for reviewing blocked renderability outcomes; never a canonical plan.                                                                         |
 | plan_id          | Deterministic renderer-independent plan identity; v7 `utterplan-flow-v3` includes boundaries and never hashes TOML formatting.                                                                      |
-
-| SSMDDoc | Editable single-document workspace using the `ssmdconvert.document` v1 manifest; `compile-document` compiles the current canonical SSMD file to one FlowPlan without mutating source. |

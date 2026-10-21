@@ -18,8 +18,9 @@ from renderplan import (
 )
 from renderplan import codec as renderplan_codec
 
-from utterplan import FlowPlan, FlowSegment, FlowUnit, TokenView, render_book
-from utterplan.book_replan import BookReplanError, replan_book
+from utterplan._book_replan import BookReplanError, replan_book
+from utterplan._book_service import render_book
+from utterplan.model import FlowPlan, FlowSegment, FlowUnit, TokenView
 
 
 def _profile(path: Path, fallback: tuple[str, ...] = ("clause", "token")) -> RenderProfile:
@@ -98,7 +99,7 @@ def _setup(
     renderplan_root: Path | None = None,
     voicerender_root: Path | None = None,
 ) -> tuple[Path, str, Path, RenderProfile]:
-    root = _write_book(tmp_path / "book.ssmdbook", numbers, kind=kind)
+    root = _write_book(tmp_path / "book.ssmd-bundle", numbers, kind=kind)
     profile_path = root / "narration.renderprofile.toml"
     profile = _profile(profile_path, fallback)
     active_renderplan_root = renderplan_root or root / "renderplan"
@@ -357,7 +358,7 @@ def test_replan_that_returns_parent_identity_is_a_failure(tmp_path: Path, monkey
     root, variant, variant_dir, _ = _setup(tmp_path, kind="token")
     entry, parent, _ = _active_plan(variant_dir)
     _save_preflight(root / "voicerender", variant, entry.id, parent)
-    monkeypatch.setattr("utterplan.book_replan.build_render_plan", lambda *args, **kwargs: parent)
+    monkeypatch.setattr("utterplan._book_replan.build_render_plan", lambda *args, **kwargs: parent)
 
     result = replan_book(root, variant=variant, chapters="5")
 
@@ -465,7 +466,7 @@ def test_missing_preflight_is_distinguished_from_stale_report(tmp_path: Path) ->
 
 
 def test_variant_and_missing_set_errors_have_actionable_codes(tmp_path: Path) -> None:
-    root = _write_book(tmp_path / "book.ssmdbook", (5,))
+    root = _write_book(tmp_path / "book.ssmd-bundle", (5,))
     with pytest.raises(BookReplanError) as missing_variant:
         replan_book(root, variant="narration--000000000000")
     assert missing_variant.value.code == "renderplan.replan.book.variant_missing"

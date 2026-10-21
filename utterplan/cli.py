@@ -15,24 +15,27 @@ from . import __version__
 from .atomic_io import atomic_write_text
 from .attempts import PlanningAttempt
 from .batch import CompileOutcome, CompileRequest, compile_to_files
-from .book import (
-    BookCompileStart,
-    BookRenderStart,
-    BookServiceError,
+from .bundle import (
+    BundleCompileStart,
+    BundleRenderStart,
+    BundleServiceError,
 )
-from .book import compile_book as _compile_book_service
-from .book import render_book as _render_book_service
-from .book_replan import BookReplanStart, ReplanOutcome
-from .book_replan import replan_book as _replan_book_service
+from .bundle import (
+    compile_bundle as _compile_bundle_service,
+)
+from .bundle import (
+    render_bundle as _render_bundle_service,
+)
+from .bundle_replan import (
+    BundleReplanError,
+    BundleReplanStart,
+    ReplanOutcome,
+)
+from .bundle_replan import (
+    replan_bundle as _replan_bundle_service,
+)
 from .compiler import InputFormat, PreparationTrace, compile_document
 from .config import LinguisticsConfig, PlannerConfig
-from .document_workspace import (
-    DocumentCompileStart,
-    DocumentRenderStart,
-    DocumentWorkspaceServiceError,
-)
-from .document_workspace import compile_ssmdoc as _compile_ssmdoc_service
-from .document_workspace import render_ssmdoc as _render_ssmdoc_service
 from .exceptions import PlanFormatError, PlanRenderabilityError, UtterPlanError
 from .explain import format_explanation
 from .migration import MigrationResult, migrate_plan_data
@@ -50,11 +53,11 @@ from .workspace_paths import utterplan_output_name as _utterplan_output_name
 
 _EXAMPLES = """examples:
   utterplan compile chapter.ssmd.md
-  utterplan compile chapter.ssmd.md -o plans/chapter.utterplan.toml
   utterplan compile plain.txt --input-format plain --language de-DE --stdout
   utterplan compile-many chapters/*.ssmd --output-dir build/plans
-  utterplan compile-book chapters --chapters 5-17
-  utterplan compile-document story.ssmdoc
+  utterplan bundle compile novel.ssmd-bundle --chapters 5-17
+  utterplan bundle render novel.ssmd-bundle --profile narration.renderprofile.toml
+  utterplan bundle replan novel.ssmd-bundle --variant narration--28f616b6fe3b
   utterplan validate chapter.utterplan.toml
   utterplan preview chapter.utterplan.toml --chunk-by sentence --pause-policy native
   utterplan render-plan chapter.utterplan.toml --profile voice.renderprofile.toml -o chapter.renderplan.toml
@@ -176,104 +179,54 @@ def build_parser() -> argparse.ArgumentParser:
         default="warnings",
         help="diagnostic detail verbosity (default: warnings)",
     )
-    book_parser = commands.add_parser(
-        "compile-book",
-        help="compile selected chapters from an ssmdbook workspace",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "examples:\n"
-            "  utterplan compile-book novel.ssmdbook\n"
-            "  utterplan compile-book novel.ssmdbook --chapters 5-17\n"
-            "  utterplan compile-book novel.ssmdbook/chapters --chapters 1,3-5\n"
-            "  utterplan compile-book chapters --chapters 5-17\n"
-            "  utterplan compile-book chapters --chapters 5-17 --output-dir build/plans"
-        ),
+    bundle_parser = commands.add_parser(
+        "bundle",
+        help="compile, render, or replan a manifest-dispatched SSMD bundle",
     )
-    book_parser.add_argument(
-        "input", type=Path, help=".ssmdbook directory or its canonical chapters/ directory"
-    )
-    book_parser.add_argument(
-        "--chapters",
-        default="all",
-        metavar="SELECTOR",
-        help="source chapter selection: all, N, N-M, or comma-separated combinations such as 1,3-5 (default: all)",
-    )
-    book_parser.add_argument(
-        "--output-dir", type=Path, help="plan output directory (default: <ssmdbook>/utterplan)"
-    )
-    book_parser.add_argument("--language", "--lang", dest="language")
-    book_parser.add_argument(
+    bundle_commands = bundle_parser.add_subparsers(dest="bundle_command", required=True)
+
+    bundle_compile = bundle_commands.add_parser("compile", help="compile a book or document bundle")
+    bundle_compile.add_argument("workspace", type=Path, help="canonical NAME.ssmd-bundle directory")
+    bundle_compile.add_argument("--chapters", default="all", metavar="SELECTOR")
+    bundle_compile.add_argument("--output-dir", type=Path)
+    bundle_compile.add_argument("--language", "--lang", dest="language")
+    bundle_compile.add_argument(
         "--text-preparation", choices=("auto", "ssmd", "spokenform", "identity"), default="auto"
     )
-    book_parser.add_argument(
-        "--renderability",
-        choices=("strict", "repair"),
-        default="repair",
-        help="safely repair isolated punctuation by default; strict rejects every repair opportunity",
+    bundle_compile.add_argument("--renderability", choices=("strict", "repair"), default="repair")
+    bundle_compile.add_argument(
+        "--spacy", choices=("auto", "off", "sm", "md", "lg", "trf"), default="auto"
     )
-    book_parser.add_argument(
-        "--spacy",
-        choices=("auto", "off", "sm", "md", "lg", "trf"),
-        default="auto",
-        help="linguistic-resource policy; default auto uses a compatible local spaCy model when available and falls back safely",
+    bundle_compile.add_argument("--force", action="store_true")
+    bundle_compile.add_argument("--fail-fast", action="store_true")
+    bundle_compile.add_argument("--report", type=Path)
+    bundle_compile.add_argument(
+        "--diagnostics", choices=("warnings", "all", "none"), default="warnings"
     )
-    book_parser.add_argument("--force", action="store_true", help="replace existing plan files")
-    book_parser.add_argument(
-        "--fail-fast", action="store_true", help="skip remaining chapters after the first failure"
-    )
-    book_parser.add_argument("--report", type=Path, help="TOML operational report path")
-    book_parser.add_argument(
-        "--diagnostics",
-        choices=("warnings", "all", "none"),
-        default="warnings",
-        help="diagnostic detail verbosity (default: warnings)",
-    )
-    document_parser = commands.add_parser(
-        "compile-document",
-        help="compile an editable SSMDoc workspace into its canonical UtterPlan",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "examples:\n"
-            "  utterplan compile-document story.ssmdoc\n"
-            "  utterplan compile-document . --spacy off\n"
-            "  utterplan compile-document . --force\n"
-            "  utterplan compile-document story.ssmdoc --output-dir build/utterplan --force"
-        ),
-    )
-    document_parser.add_argument(
-        "input", type=Path, help="SSMDoc workspace root or its manifest-declared source file"
-    )
-    document_parser.add_argument(
-        "--output-dir",
-        type=Path,
-        help="plan output directory (default: <workspace>/utterplan)",
-    )
-    document_parser.add_argument("--language", "--lang", dest="language")
-    document_parser.add_argument(
-        "--text-preparation", choices=("auto", "ssmd", "spokenform", "identity"), default="auto"
-    )
-    document_parser.add_argument(
-        "--renderability",
-        choices=("strict", "repair"),
-        default="repair",
-        help="safely repair isolated punctuation by default; strict rejects every repair opportunity",
-    )
-    document_parser.add_argument(
-        "--spacy",
-        choices=("auto", "off", "sm", "md", "lg", "trf"),
-        default="auto",
-        help="linguistic-resource policy; default auto uses a compatible local spaCy model when available and falls back safely",
-    )
-    document_parser.add_argument(
-        "--force", action="store_true", help="replace an existing plan file"
-    )
-    document_parser.add_argument("--report", type=Path, help="TOML operational report path")
-    document_parser.add_argument(
-        "--diagnostics",
-        choices=("warnings", "all", "none"),
-        default="warnings",
-        help="diagnostic detail verbosity (default: warnings)",
-    )
+
+    bundle_render = bundle_commands.add_parser("render", help="render a book or document bundle")
+    bundle_render.add_argument("workspace", type=Path, help="canonical NAME.ssmd-bundle directory")
+    bundle_render.add_argument("--profile", type=Path, required=True)
+    bundle_render.add_argument("--chapters", default="all", metavar="SELECTOR")
+    bundle_render.add_argument("--variant")
+    bundle_render.add_argument("--utterplan-dir", type=Path)
+    bundle_render.add_argument("--output-root", type=Path)
+    bundle_render.add_argument("--report", type=Path)
+    bundle_render.add_argument("--force", action="store_true")
+    bundle_render.add_argument("--fail-fast", action="store_true")
+
+    bundle_replan = bundle_commands.add_parser("replan", help="refine active bundle RenderPlans")
+    bundle_replan.add_argument("workspace", type=Path, help="canonical NAME.ssmd-bundle directory")
+    bundle_replan.add_argument("--variant", required=True, help="exact existing RenderPlan variant")
+    bundle_replan.add_argument("--chapters", default="all", metavar="SELECTOR")
+    bundle_replan.add_argument("--renderplan-root", type=Path)
+    bundle_replan.add_argument("--voicerender-root", type=Path)
+    bundle_replan.add_argument("--report", type=Path)
+    bundle_replan.add_argument("--dry-run", action="store_true")
+    bundle_replan.add_argument("--fail-fast", action="store_true")
+    bundle_replan.add_argument("--explain", action="store_true")
+    bundle_replan.add_argument("--json", action="store_true")
+
     validate_parser = commands.add_parser(
         "validate", help="validate a source document or saved semantic plan"
     )
@@ -364,125 +317,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     render_plan_parser.add_argument(
         "--json", action="store_true", help="emit the generated plan as machine-readable JSON"
-    )
-    render_document_parser = commands.add_parser(
-        "render-document",
-        help="project an SSMDoc workspace's saved UtterPlan into a profile-specific RenderPlan",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "examples:\n"
-            "  utterplan render-document story.ssmdoc --profile narration.renderprofile.toml\n"
-            "  utterplan render-document . --profile ../narration.renderprofile.toml"
-        ),
-    )
-    render_document_parser.add_argument(
-        "input", type=Path, help="SSMDoc workspace root or its manifest-declared source file"
-    )
-    render_document_parser.add_argument(
-        "--profile", type=Path, required=True, help="RenderProfile TOML file"
-    )
-    render_document_parser.add_argument(
-        "--variant",
-        help="safe human-readable variant label; profile fingerprint is always appended",
-    )
-    render_document_parser.add_argument(
-        "--utterplan-dir", type=Path, help="directory containing the saved document UtterPlan"
-    )
-    render_document_parser.add_argument(
-        "--output-root", type=Path, help="RenderPlan variant root (default: <workspace>/renderplan)"
-    )
-    render_document_parser.add_argument("--report", type=Path, help="TOML operational report path")
-    render_document_parser.add_argument(
-        "--force", action="store_true", help="replace the existing RenderPlan"
-    )
-    render_book_parser = commands.add_parser(
-        "render-book",
-        help="project selected SSMDBook UtterPlans into a profile-specific RenderPlan set",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "examples:\n"
-            "  utterplan render-book novel.ssmdbook --profile narration.renderprofile.toml\n"
-            "  utterplan render-book novel.ssmdbook --chapters 5-17 --profile narration.renderprofile.toml\n"
-            "  utterplan render-book chapters --chapters 1,3-5 --profile narration.renderprofile.toml"
-        ),
-    )
-    render_book_parser.add_argument(
-        "input", type=Path, help=".ssmdbook directory or its canonical chapters/ directory"
-    )
-    render_book_parser.add_argument(
-        "--profile", type=Path, required=True, help="shared RenderProfile TOML file"
-    )
-    render_book_parser.add_argument(
-        "--chapters",
-        default="all",
-        metavar="SELECTOR",
-        help="source chapter selection: all, N, N-M, or comma-separated ranges (default: all)",
-    )
-    render_book_parser.add_argument(
-        "--utterplan-dir", type=Path, help="directory of existing .utterplan.toml files"
-    )
-    render_book_parser.add_argument(
-        "--output-root",
-        type=Path,
-        help="RenderPlan collection root (default: <ssmdbook>/renderplan)",
-    )
-    render_book_parser.add_argument(
-        "--variant",
-        help="safe human-readable variant label (profile fingerprint is always appended)",
-    )
-    render_book_parser.add_argument(
-        "--force", action="store_true", help="replace only selected existing RenderPlan files"
-    )
-    render_book_parser.add_argument(
-        "--fail-fast", action="store_true", help="skip later chapters after the first item failure"
-    )
-    render_book_parser.add_argument("--report", type=Path, help="TOML operational report path")
-    replan_book_parser = commands.add_parser(
-        "replan-book",
-        help="refine selected active RenderPlans from matching VoiceRender preflight feedback",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "examples:\n"
-            "  utterplan replan-book novel.ssmdbook --variant narration--28f616b6fe3b --chapters 5\n"
-            "  utterplan replan-book chapters --variant narration--28f616b6fe3b --chapters 5-17"
-        ),
-    )
-    replan_book_parser.add_argument(
-        "input", type=Path, help=".ssmdbook directory or its canonical chapters/ directory"
-    )
-    replan_book_parser.add_argument(
-        "--variant", required=True, help="exact existing RenderPlan variant directory name"
-    )
-    replan_book_parser.add_argument(
-        "--chapters",
-        default="all",
-        metavar="SELECTOR",
-        help="source chapter selection: all, N, N-M, or comma-separated ranges (default: all)",
-    )
-    replan_book_parser.add_argument(
-        "--renderplan-root",
-        type=Path,
-        help="RenderPlan collection root (default: <ssmdbook>/renderplan)",
-    )
-    replan_book_parser.add_argument(
-        "--voicerender-root",
-        type=Path,
-        help="VoiceRender data root (default: <ssmdbook>/voicerender)",
-    )
-    replan_book_parser.add_argument("--report", type=Path, help="TOML operational report path")
-    replan_book_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="validate and plan children without writing plans or set entries",
-    )
-    replan_book_parser.add_argument(
-        "--fail-fast", action="store_true", help="skip later chapters after the first item failure"
-    )
-    replan_book_parser.add_argument(
-        "--explain", action="store_true", help="include existing per-request planning explanations"
-    )
-    replan_book_parser.add_argument(
-        "--json", action="store_true", help="emit structured book replan results as JSON"
     )
     inspect_parser = commands.add_parser("inspect", help="inspect a saved TTS plan")
     inspect_parser.add_argument("input", type=Path)
@@ -580,11 +414,7 @@ def _read_compile_input(args: argparse.Namespace) -> tuple[str, InputFormat]:
 
     if len(args.text) == 1:
         candidate = Path(args.text[0])
-        canonical_workspace_path = candidate.name == "document.ssmd.md" and (
-            (candidate.parent / "manifest.json").exists()
-            or (candidate.parent / "manifest.json").is_symlink()
-        )
-        if candidate.exists() or candidate.is_symlink() or canonical_workspace_path:
+        if candidate.exists() or candidate.is_symlink():
             loaded = load_source_path(candidate, requested_format=requested_format)
             return loaded.text, loaded.input_format
 
@@ -782,18 +612,21 @@ def _compile_many(args: argparse.Namespace) -> int:
     )
 
 
-def _compile_book(args: argparse.Namespace) -> int:
+def _compile_bundle(args: argparse.Namespace) -> int:
     selected_ids: tuple[str, ...] = ()
     written = 0
 
-    def start(progress: BookCompileStart) -> None:
+    def start(progress: BundleCompileStart) -> None:
         nonlocal selected_ids
-        selected_ids = progress.selected_chapter_ids
-        print("UtterPlan book compile", file=sys.stderr)
+        selected_ids = progress.selected_item_ids
+        print("UtterPlan bundle compile", file=sys.stderr)
+        print(f"  kind:      {progress.kind}", file=sys.stderr)
         print(f"  workspace: {progress.workspace}", file=sys.stderr)
-        print(f"  chapters:  {progress.chapter_selector}", file=sys.stderr)
+        if progress.kind == "book":
+            print(f"  chapters:  {progress.selector}", file=sys.stderr)
         print(f"  selected:  {len(selected_ids)}", file=sys.stderr)
         print(f"  output:    {progress.output_dir}", file=sys.stderr)
+        print(f"  report:    {progress.report_path}", file=sys.stderr)
 
     def report_progress(outcome: CompileOutcome) -> None:
         nonlocal written
@@ -814,22 +647,12 @@ def _compile_book(args: argparse.Namespace) -> int:
             if outcome.error_message:
                 for line in outcome.error_message.splitlines():
                     print(f"       {line}", file=sys.stderr)
-            if not args.fail_fast and outcome.index < total:
-                next_id = (
-                    selected_ids[outcome.index]
-                    if outcome.index < len(selected_ids)
-                    else "next chapter"
-                )
-                print(
-                    f"       continuing with {next_id}; {written} plans are already saved",
-                    file=sys.stderr,
-                )
         else:
             print("       skipped after an earlier failure", file=sys.stderr)
 
     try:
-        result = _compile_book_service(
-            args.input,
+        result = _compile_bundle_service(
+            args.workspace,
             chapters=args.chapters,
             output_dir=args.output_dir,
             report=args.report,
@@ -841,168 +664,59 @@ def _compile_book(args: argparse.Namespace) -> int:
             on_progress=report_progress,
             on_start=start,
         )
-    except BookServiceError as exc:
+    except BundleServiceError as exc:
         raise _CliUsageError(str(exc)) from exc
 
-    failed = [outcome for outcome in result.outcomes if outcome.status == "failed"]
-    skipped = sum(outcome.status == "skipped" for outcome in result.outcomes)
-    print("UtterPlan compile summary", file=sys.stderr)
+    print("UtterPlan bundle compile summary", file=sys.stderr)
+    print(f"  kind:      {result.kind}", file=sys.stderr)
     print(f"  requested: {len(result.outcomes)}", file=sys.stderr)
-    print(f"  written:   {written}", file=sys.stderr)
-    print(f"  failed:    {len(failed)}", file=sys.stderr)
-    if skipped:
-        print(f"  skipped:   {skipped}", file=sys.stderr)
-    if failed:
-        print("\nFailed:", file=sys.stderr)
-        for outcome in failed:
-            location = (
-                f":{outcome.line}:{outcome.column}"
-                if outcome.line is not None and outcome.column is not None
-                else ""
-            )
-            code = outcome.error_code or "unknown"
-            print(
-                f"  [{outcome.index}/{len(result.outcomes)}] {outcome.source_label}{location}  {code}",
-                file=sys.stderr,
-            )
-        if written:
-            print(f"\n{written} valid plan files were preserved.", file=sys.stderr)
-    return result.exit_code
-
-
-def _compile_document(args: argparse.Namespace) -> int:
-    written = 0
-
-    def start(progress: DocumentCompileStart) -> None:
-        print("UtterPlan document compile", file=sys.stderr)
-        print(f"  workspace: {progress.workspace}", file=sys.stderr)
-        print(f"  document:  {progress.document_id}", file=sys.stderr)
-        print(f"  source:    {progress.source_path}", file=sys.stderr)
-        print(f"  output:    {progress.output_dir}", file=sys.stderr)
-        if progress.dirty is not None:
-            status = "dirty" if progress.dirty else "clean"
-            print(f"  status:    {status}", file=sys.stderr)
-
-    def report_progress(outcome: CompileOutcome) -> None:
-        nonlocal written
-        print(f"[{outcome.index}/1] {outcome.id}  {outcome.source_label}", file=sys.stderr)
-        if outcome.status == "written":
-            written += 1
-            mode = outcome.preparation_mode or "unknown"
-            linguistics = "degraded" if outcome.degraded_linguistics else "full"
-            print(f"       preparation: {mode}; linguistics: {linguistics}", file=sys.stderr)
-            _print_batch_diagnostics(outcome, verbosity=args.diagnostics)
-            print(f"       wrote {outcome.output}", file=sys.stderr)
-        elif outcome.status == "failed":
-            print("       FAILED", file=sys.stderr)
-            if outcome.error_message:
-                for line in outcome.error_message.splitlines():
-                    print(f"       {line}", file=sys.stderr)
-
-    try:
-        result = _compile_ssmdoc_service(
-            args.input,
-            output_dir=args.output_dir,
-            report=args.report,
-            language=args.language,
-            planner_config=_planner_config_from_batch_args(args),
-            force=args.force,
-            diagnostics=args.diagnostics,
-            on_progress=report_progress,
-            on_start=start,
-        )
-    except DocumentWorkspaceServiceError as exc:
-        raise _CliUsageError(str(exc)) from exc
-
-    print("UtterPlan compile summary", file=sys.stderr)
-    print("  requested: 1", file=sys.stderr)
     print(f"  written:   {written}", file=sys.stderr)
     print(f"  failed:    {result.failed}", file=sys.stderr)
     print(f"  report:    {result.report_path}", file=sys.stderr)
     return result.exit_code
 
 
-def _render_document(args: argparse.Namespace) -> int:
-    def start(info: DocumentRenderStart) -> None:
-        print("UtterPlan document render", file=sys.stderr)
-        print(f"  workspace:  {info.workspace}", file=sys.stderr)
-        print(f"  document:   {info.document_id}", file=sys.stderr)
-        print(f"  profile:    {info.profile_path}", file=sys.stderr)
-        print(f"  profile-id: {info.profile_id}", file=sys.stderr)
-        print(f"  roles:      {', '.join(info.required_roles) or 'none'}", file=sys.stderr)
-        print("  coverage:   complete", file=sys.stderr)
-        print(f"  variant:    {info.variant}", file=sys.stderr)
-        print(f"  renderplan: {info.output_path}", file=sys.stderr)
-        print(f"  report:     {info.report_path}", file=sys.stderr)
-
-    try:
-        _render_ssmdoc_service(
-            args.input,
-            profile=args.profile,
-            variant=args.variant,
-            utterplan_dir=args.utterplan_dir,
-            output_root=args.output_root,
-            report=args.report,
-            force=args.force,
-            on_start=start,
-        )
-    except DocumentWorkspaceServiceError as exc:
-        raise _CliUsageError(str(exc)) from exc
-    return 0
-
-
-def _render_book(args: argparse.Namespace) -> int:
+def _render_bundle(args: argparse.Namespace) -> int:
     selected_ids: tuple[str, ...] = ()
     written = 0
 
-    def start(progress: BookRenderStart) -> None:
+    def start(progress: BundleRenderStart) -> None:
         nonlocal selected_ids
-        selected_ids = progress.selected_chapter_ids
-        print("UtterPlan book render", file=sys.stderr)
-        print(f"  workspace:  {progress.workspace}", file=sys.stderr)
-        print(f"  chapters:   {progress.chapter_selector}", file=sys.stderr)
-        print(f"  selected:   {len(selected_ids)}", file=sys.stderr)
-        print(f"  profile:    {progress.profile_path}", file=sys.stderr)
-        print(f"  profile-id: {progress.profile_id}", file=sys.stderr)
-        print(f"  roles:      {', '.join(progress.required_roles) or 'none'}", file=sys.stderr)
+        selected_ids = progress.selected_item_ids
+        print("UtterPlan bundle render", file=sys.stderr)
+        print(f"  kind:      {progress.kind}", file=sys.stderr)
+        print(f"  workspace: {progress.workspace}", file=sys.stderr)
+        if progress.kind == "book":
+            print(f"  chapters:  {progress.selector}", file=sys.stderr)
+        print(f"  selected:  {len(selected_ids)}", file=sys.stderr)
+        print(f"  profile:   {args.profile}", file=sys.stderr)
+        print(f"  variant:   {progress.variant}", file=sys.stderr)
+        if progress.required_roles:
+            print(f"  roles:      {', '.join(progress.required_roles)}", file=sys.stderr)
         print("  coverage:   complete", file=sys.stderr)
-        print(f"  variant:    {progress.variant}", file=sys.stderr)
-        print(f"  utterplans: {progress.utterplan_dir}", file=sys.stderr)
-        print(f"  output:     {progress.variant_dir}", file=sys.stderr)
+        for path in progress.output_paths:
+            print(f"  output:    {path}", file=sys.stderr)
+        print(f"  report:    {progress.report_path}", file=sys.stderr)
 
     def report_progress(outcome: RenderOutcome) -> None:
         nonlocal written
         total = outcome.total or len(selected_ids)
-        print(
-            f"[{outcome.index}/{total}] {outcome.id}  {outcome.source_plan}",
-            file=sys.stderr,
-        )
+        print(f"[{outcome.index}/{total}] {outcome.id}  {outcome.source_plan}", file=sys.stderr)
         if outcome.status == "written":
             written += 1
             print(f"       wrote {outcome.output}", file=sys.stderr)
         elif outcome.status == "failed":
-            print("       FAILED", file=sys.stderr)
             print(
-                f"       {outcome.error_code or 'unknown'}: "
+                f"       FAILED {outcome.error_code or 'unknown'}: "
                 f"{outcome.error_message or 'projection failed'}",
                 file=sys.stderr,
             )
-            if not args.fail_fast and outcome.index < total:
-                next_id = (
-                    selected_ids[outcome.index]
-                    if outcome.index < len(selected_ids)
-                    else "next chapter"
-                )
-                print(
-                    f"       continuing with {next_id}; {written} RenderPlans are already saved",
-                    file=sys.stderr,
-                )
         else:
             print("       skipped after an earlier failure", file=sys.stderr)
 
     try:
-        result = _render_book_service(
-            args.input,
+        result = _render_bundle_service(
+            args.workspace,
             profile=args.profile,
             chapters=args.chapters,
             variant=args.variant,
@@ -1014,38 +728,38 @@ def _render_book(args: argparse.Namespace) -> int:
             on_progress=report_progress,
             on_start=start,
         )
-    except BookServiceError as exc:
+    except BundleServiceError as exc:
         raise _CliUsageError(str(exc)) from exc
 
-    failed = sum(outcome.status == "failed" for outcome in result.outcomes)
-    skipped = sum(outcome.status == "skipped" for outcome in result.outcomes)
-    print("UtterPlan render summary", file=sys.stderr)
+    print("UtterPlan bundle render summary", file=sys.stderr)
+    print(f"  kind:      {result.kind}", file=sys.stderr)
     print(f"  requested: {len(result.outcomes)}", file=sys.stderr)
     print(f"  written:   {written}", file=sys.stderr)
-    print(f"  failed:    {failed}", file=sys.stderr)
-    if skipped:
-        print(f"  skipped:   {skipped}", file=sys.stderr)
+    print(f"  failed:    {result.failed}", file=sys.stderr)
+    print(f"  report:    {result.report_path}", file=sys.stderr)
     return result.exit_code
 
 
-def _replan_book(args: argparse.Namespace) -> int:
-    start_info: BookReplanStart | None = None
+def _replan_bundle(args: argparse.Namespace) -> int:
+    start_info: BundleReplanStart | None = None
     selected_count = 0
     explanations: dict[int, str] = {}
 
-    def start(progress: BookReplanStart) -> None:
+    def start(progress: BundleReplanStart) -> None:
         nonlocal start_info, selected_count
         start_info = progress
-        selected_count = len(progress.selected_chapter_ids)
+        selected_count = len(progress.selected_item_ids)
         if args.json:
             return
-        print("UtterPlan book replan", file=sys.stderr)
-        print(f"  workspace:   {progress.workspace}", file=sys.stderr)
-        print(f"  variant:     {progress.variant}", file=sys.stderr)
-        print(f"  renderplans: {progress.variant_dir}", file=sys.stderr)
-        print(f"  preflights:  {progress.voicerender_dir}", file=sys.stderr)
-        print(f"  chapters:    {progress.chapter_selector}", file=sys.stderr)
-        print(f"  selected:    {selected_count}", file=sys.stderr)
+        print("UtterPlan bundle replan", file=sys.stderr)
+        print(f"  kind:       {progress.kind}", file=sys.stderr)
+        print(f"  workspace:  {progress.workspace}", file=sys.stderr)
+        print(f"  variant:    {progress.variant}", file=sys.stderr)
+        if progress.kind == "book":
+            print(f"  chapters:   {progress.selector}", file=sys.stderr)
+        print(f"  selected:   {selected_count}", file=sys.stderr)
+        print(f"  active:     {progress.active_reference}", file=sys.stderr)
+        print(f"  preflights: {progress.voicerender_dir}", file=sys.stderr)
 
     def report_progress(outcome: ReplanOutcome) -> None:
         if args.json:
@@ -1079,8 +793,8 @@ def _replan_book(args: argparse.Namespace) -> int:
             print(f"       explanation:\n{explanation}", end="", file=sys.stderr)
 
     try:
-        result = _replan_book_service(
-            args.input,
+        result = _replan_bundle_service(
+            args.workspace,
             variant=args.variant,
             chapters=args.chapters,
             renderplan_root=args.renderplan_root,
@@ -1091,7 +805,7 @@ def _replan_book(args: argparse.Namespace) -> int:
             on_progress=report_progress,
             on_start=start,
         )
-    except BookServiceError as exc:
+    except BundleReplanError as exc:
         raise _CliUsageError(str(exc)) from exc
 
     if args.json:
@@ -1123,15 +837,14 @@ def _replan_book(args: argparse.Namespace) -> int:
         print(
             json.dumps(
                 {
-                    "format": "utterplan-replan-book",
+                    "format": "utterplan-replan-bundle",
                     "version": 1,
+                    "kind": result.kind,
                     "workspace": str(result.workspace),
                     "variant": result.variant,
-                    "variant_dir": str(result.variant_dir),
-                    "set_path": str(result.set_path),
-                    "profile_path": str(result.profile_path),
+                    "active_reference": str(result.active_reference),
                     "report_path": str(result.report_path),
-                    "selected_chapter_ids": list(result.selected_chapter_ids),
+                    "selected_item_ids": list(result.selected_item_ids),
                     "dry_run": result.dry_run,
                     "written": result.written,
                     "planned": result.planned,
@@ -1146,17 +859,16 @@ def _replan_book(args: argparse.Namespace) -> int:
         )
         return result.exit_code
 
-    print("UtterPlan replan summary", file=sys.stderr)
+    print("UtterPlan bundle replan summary", file=sys.stderr)
+    print(f"  kind:      {result.kind}", file=sys.stderr)
     print(f"  requested: {len(result.outcomes)}", file=sys.stderr)
     print(f"  written:   {result.written}", file=sys.stderr)
     if result.dry_run:
-        print(
-            f"  planned:   {result.planned} (dry run; no plans or set entries written)",
-            file=sys.stderr,
-        )
+        print(f"  planned:   {result.planned} (dry run; no plans written)", file=sys.stderr)
     print(f"  failed:    {result.failed}", file=sys.stderr)
     if result.skipped:
         print(f"  skipped:   {result.skipped}", file=sys.stderr)
+    print(f"  active:    {result.active_reference}", file=sys.stderr)
     print(f"  report:    {result.report_path}", file=sys.stderr)
     return result.exit_code
 
@@ -1444,16 +1156,13 @@ def main(argv: list[str] | None = None) -> int:
             return _compile(args)
         if args.command == "compile-many":
             return _compile_many(args)
-        if args.command == "compile-book":
-            return _compile_book(args)
-        if args.command == "compile-document":
-            return _compile_document(args)
-        if args.command == "render-document":
-            return _render_document(args)
-        if args.command == "render-book":
-            return _render_book(args)
-        if args.command == "replan-book":
-            return _replan_book(args)
+        if args.command == "bundle":
+            if args.bundle_command == "compile":
+                return _compile_bundle(args)
+            if args.bundle_command == "render":
+                return _render_bundle(args)
+            if args.bundle_command == "replan":
+                return _replan_bundle(args)
         if args.command == "migrate":
             return _migrate(args)
         if args.command == "validate":

@@ -76,7 +76,7 @@ def test_compile_book_diagnostic_verbosity_keeps_full_report(
     show_info: bool,
     show_warning: bool,
 ) -> None:
-    root = tmp_path / f"diagnostics-{verbosity}.ssmdbook"
+    root = tmp_path / f"diagnostics-{verbosity}.ssmd-bundle"
     _write_book(root, (5,), contents={5: _ssmd("A sentence.")})
     plan = FlowPlan(
         language="en-US",
@@ -100,7 +100,7 @@ def test_compile_book_diagnostic_verbosity_keeps_full_report(
         ),
     )
 
-    result = main(["compile-book", str(root), "--chapters", "5", "--diagnostics", verbosity])
+    result = main(["bundle", "compile", str(root), "--chapters", "5", "--diagnostics", verbosity])
     captured = capsys.readouterr()
     assert result == 0
     assert ("segmentation.token_reanalyzed" in captured.err) is show_info
@@ -127,13 +127,13 @@ def test_compile_book_diagnostic_verbosity_keeps_full_report(
 def test_compile_book_root_range_defaults_to_utterplan_and_writes_v6_plans(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "Platform Decay - Martha Wells.ssmdbook"
+    root = tmp_path / "Platform Decay - Martha Wells.ssmd-bundle"
     contents = {number: _ssmd(f"Chapter {number} content.") for number in range(1, 24)}
     _write_book(root, tuple(range(1, 24)), contents=contents)
     manifest_before = (root / "manifest.json").read_bytes()
 
     result = main(
-        ["compile-book", str(root), "--chapters", "5-17", "--text-preparation", "identity"]
+        ["bundle", "compile", str(root), "--chapters", "5-17", "--text-preparation", "identity"]
     )
 
     captured = capsys.readouterr()
@@ -169,7 +169,7 @@ def test_compile_book_root_range_defaults_to_utterplan_and_writes_v6_plans(
 def test_compile_book_report_records_ssmd_mode_and_repaired_cut_details(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    root = tmp_path / "repair.ssmdbook"
+    root = tmp_path / "repair.ssmd-bundle"
     _write_book(root, (5,), contents={5: _ssmd("lifecycle now")})
 
     def split_inside_token(text: str, **_kwargs: object) -> list[SimpleNamespace]:
@@ -182,7 +182,7 @@ def test_compile_book_report_records_ssmd_mode_and_repaired_cut_details(
     monkeypatch.setitem(
         sys.modules, "phrasplit", SimpleNamespace(split_with_offsets=split_inside_token)
     )
-    result = main(["compile-book", str(root), "--chapters", "5", "--spacy", "off"])
+    result = main(["bundle", "compile", str(root), "--chapters", "5", "--spacy", "off"])
     captured = capsys.readouterr()
 
     assert result == 0
@@ -202,48 +202,33 @@ def test_compile_book_report_records_ssmd_mode_and_repaired_cut_details(
     assert _plan_text(root / "utterplan/chapter-0005.utterplan.toml") == "lifecycle now"
 
 
-def test_compile_book_accepts_chapters_directory_and_preserves_manifest_order(
+def test_compile_rejects_chapters_directory_as_non_root_input(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "book.ssmdbook"
-    contents = {number: _ssmd(f"Chapter {number}.") for number in (5, 7, 6)}
-    _write_book(root, (5, 7, 6), contents=contents)
+    root = tmp_path / "book.ssmd-bundle"
+    _write_book(root, (5,), contents={5: _ssmd("Chapter 5.")})
 
-    result = main(
-        [
-            "compile-book",
-            str(root / "chapters"),
-            "--chapters",
-            "5-7",
-            "--text-preparation",
-            "identity",
-        ]
-    )
-
+    result = main(["bundle", "compile", str(root / "chapters")])
     captured = capsys.readouterr()
-    assert result == 0
-    assert "[1/3] chapter-0005" in captured.err
-    assert "[2/3] chapter-0007" in captured.err
-    assert "[3/3] chapter-0006" in captured.err
-    report = _report(root / "utterplan/compile-report.toml")
-    assert [item["id"] for item in report["item"]] == [
-        "chapter-0005",
-        "chapter-0007",
-        "chapter-0006",
-    ]
+
+    assert result == 2
+    assert "canonical SSMD bundle root" in captured.err
+    assert not (root / "utterplan").exists()
 
 
 def test_compile_book_compiles_dirty_current_content_without_mutating_manifest(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "editable.ssmdbook"
+    root = tmp_path / "editable.ssmd-bundle"
     _write_book(root, (5,), contents={5: _ssmd("Original content.")})
     manifest = root / "manifest.json"
     manifest_before = manifest.read_bytes()
     source = root / "chapters/chapter-0005.ssmd.md"
     source.write_text(_ssmd("Edited workspace content."), encoding="utf-8")
 
-    result = main(["compile-book", str(root), "--chapters", "5", "--text-preparation", "identity"])
+    result = main(
+        ["bundle", "compile", str(root), "--chapters", "5", "--text-preparation", "identity"]
+    )
 
     capsys.readouterr()
     assert result == 0
@@ -254,7 +239,7 @@ def test_compile_book_compiles_dirty_current_content_without_mutating_manifest(
 def test_unselected_missing_or_malformed_chapter_does_not_block_selected_range(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "subset.ssmdbook"
+    root = tmp_path / "subset.ssmd-bundle"
     _write_book(
         root,
         (5, 6, 20),
@@ -263,7 +248,7 @@ def test_unselected_missing_or_malformed_chapter_does_not_block_selected_range(
     (root / "chapters/chapter-0020.ssmd.md").unlink()
 
     result = main(
-        ["compile-book", str(root), "--chapters", "5-6", "--text-preparation", "identity"]
+        ["bundle", "compile", str(root), "--chapters", "5-6", "--text-preparation", "identity"]
     )
 
     capsys.readouterr()
@@ -277,12 +262,12 @@ def test_unselected_missing_or_malformed_chapter_does_not_block_selected_range(
 def test_selector_usage_errors_preflight_before_creating_output(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], selector: str
 ) -> None:
-    root = tmp_path / "invalid-selection.ssmdbook"
+    root = tmp_path / "invalid-selection.ssmd-bundle"
     _write_book(root, (5, 7), contents={5: _ssmd("Five."), 7: _ssmd("Seven.")})
     output_dir = tmp_path / "outside-plans"
 
     result = main(
-        ["compile-book", str(root), "--chapters", selector, "--output-dir", str(output_dir)]
+        ["bundle", "compile", str(root), "--chapters", selector, "--output-dir", str(output_dir)]
     )
 
     captured = capsys.readouterr()
@@ -296,18 +281,20 @@ def test_unrecognized_workspace_is_a_usage_error_without_output_writes(
 ) -> None:
     output_dir = tmp_path / "plans"
 
-    result = main(["compile-book", str(tmp_path / "not-a-book"), "--output-dir", str(output_dir)])
+    result = main(
+        ["bundle", "compile", str(tmp_path / "not-a-book"), "--output-dir", str(output_dir)]
+    )
 
     captured = capsys.readouterr()
     assert result == 2
-    assert "expected manifest.json" in captured.err
+    assert "containing manifest.json" in captured.err
     assert not output_dir.exists()
 
 
 def test_selected_invalid_ssmd_is_reported_and_later_chapters_continue(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "partial.ssmdbook"
+    root = tmp_path / "partial.ssmd-bundle"
     _write_book(
         root,
         (5, 6, 7),
@@ -315,7 +302,7 @@ def test_selected_invalid_ssmd_is_reported_and_later_chapters_continue(
     )
 
     result = main(
-        ["compile-book", str(root), "--chapters", "5-7", "--text-preparation", "identity"]
+        ["bundle", "compile", str(root), "--chapters", "5-7", "--text-preparation", "identity"]
     )
 
     captured = capsys.readouterr()
@@ -326,13 +313,13 @@ def test_selected_invalid_ssmd_is_reported_and_later_chapters_continue(
     report = _report(root / "utterplan/compile-report.toml")
     assert [item["status"] for item in report["item"]] == ["written", "failed", "written"]
     assert report["item"][1]["stage"] == "renderability"
-    assert "continuing with" in captured.err
+    assert "[3/3] chapter-0007" in captured.err
 
 
 def test_fail_fast_skips_remaining_book_chapters(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "fail-fast.ssmdbook"
+    root = tmp_path / "fail-fast.ssmd-bundle"
     _write_book(
         root,
         (5, 6, 7),
@@ -341,7 +328,8 @@ def test_fail_fast_skips_remaining_book_chapters(
 
     result = main(
         [
-            "compile-book",
+            "bundle",
+            "compile",
             str(root),
             "--chapters",
             "5-7",
@@ -361,13 +349,14 @@ def test_fail_fast_skips_remaining_book_chapters(
 def test_existing_plan_is_protected_unless_force_is_used(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "force.ssmdbook"
+    root = tmp_path / "force.ssmd-bundle"
     _write_book(root, (5,), contents={5: _ssmd("Replacement content.")})
     output = root / "utterplan/chapter-0005.utterplan.toml"
     output.parent.mkdir(parents=True)
     output.write_text("keep this", encoding="utf-8")
     args = [
-        "compile-book",
+        "bundle",
+        "compile",
         str(root),
         "--language",
         "en-US",
@@ -389,10 +378,10 @@ def test_existing_plan_is_protected_unless_force_is_used(
 def test_missing_selected_source_is_a_reported_item_failure(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "missing.ssmdbook"
+    root = tmp_path / "missing.ssmd-bundle"
     _write_book(root, (5,))
 
-    result = main(["compile-book", str(root), "--chapters", "5"])
+    result = main(["bundle", "compile", str(root), "--chapters", "5"])
 
     capsys.readouterr()
     assert result == 1
@@ -404,15 +393,15 @@ def test_missing_selected_source_is_a_reported_item_failure(
 def test_unsafe_path_and_symlink_escape_are_usage_errors_before_writes(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "unsafe.ssmdbook"
+    root = tmp_path / "unsafe.ssmd-bundle"
     _write_book(root, (5,), paths={5: "chapters/../outside.ssmd.md"})
-    result = main(["compile-book", str(root)])
+    result = main(["bundle", "compile", str(root)])
     first = capsys.readouterr()
     assert result == 2
     assert not (root / "utterplan").exists()
     assert "chapters" in first.err
 
-    safe_root = tmp_path / "symlink.ssmdbook"
+    safe_root = tmp_path / "symlink.ssmd-bundle"
     _write_book(safe_root, (5,))
     outside = tmp_path / "outside.ssmd.md"
     outside.write_text(_ssmd("Outside."), encoding="utf-8")
@@ -421,7 +410,7 @@ def test_unsafe_path_and_symlink_escape_are_usage_errors_before_writes(
         link.symlink_to(outside)
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"symlinks unavailable: {exc}")
-    result = main(["compile-book", str(safe_root)])
+    result = main(["bundle", "compile", str(safe_root)])
     second = capsys.readouterr()
     assert result == 2
     assert "escapes workspace" in second.err
@@ -431,22 +420,22 @@ def test_unsafe_path_and_symlink_escape_are_usage_errors_before_writes(
 def test_preflights_duplicate_output_and_report_source_collisions(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "collisions.ssmdbook"
+    root = tmp_path / "collisions.ssmd-bundle"
     _write_book(
         root,
         (1, 2),
         contents={1: _ssmd("One."), 2: _ssmd("Two.")},
         paths={1: "chapters/part-a/chapter.ssmd.md", 2: "chapters/part-b/chapter.ssmd.md"},
     )
-    result = main(["compile-book", str(root)])
+    result = main(["bundle", "compile", str(root)])
     captured = capsys.readouterr()
     assert result == 2
     assert "map to the same output" in captured.err
     assert not (root / "utterplan").exists()
 
-    root2 = tmp_path / "report-collision.ssmdbook"
+    root2 = tmp_path / "report-collision.ssmd-bundle"
     _write_book(root2, (5,), contents={5: _ssmd("Five.")})
-    result = main(["compile-book", str(root2), "--report", str(root2 / "manifest.json")])
+    result = main(["bundle", "compile", str(root2), "--report", str(root2 / "manifest.json")])
     captured = capsys.readouterr()
     assert result == 2
     assert "source workspace content" in captured.err
@@ -460,11 +449,12 @@ def test_preflights_duplicate_output_and_report_source_collisions(
 def test_output_and_report_cannot_be_written_into_chapters_directory(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "readonly-source.ssmdbook"
+    root = tmp_path / "readonly-source.ssmd-bundle"
     _write_book(root, (5,), contents={5: _ssmd("Five.")})
     result = main(
         [
-            "compile-book",
+            "bundle",
+            "compile",
             str(root),
             "--output-dir",
             str(root / "chapters" / "plans"),
@@ -478,20 +468,22 @@ def test_output_and_report_cannot_be_written_into_chapters_directory(
 
 def test_compile_book_parser_exposes_shared_options_but_no_input_format() -> None:
     args = build_parser().parse_args(
-        ["compile-book", "book.ssmdbook", "--chapters", "1,3-5", "--language", "en-US"]
+        ["bundle", "compile", "book.ssmd-bundle", "--chapters", "1,3-5", "--language", "en-US"]
     )
     assert args.chapters == "1,3-5"
     assert args.language == "en-US"
     assert args.output_dir is None
     assert args.spacy == "auto"
     with pytest.raises(SystemExit):
-        build_parser().parse_args(["compile-book", "book.ssmdbook", "--input-format", "ssmd"])
+        build_parser().parse_args(
+            ["bundle", "compile", "book.ssmd-bundle", "--input-format", "ssmd"]
+        )
 
 
 def test_default_all_selection_and_explicit_output_directory(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "all-chapters.ssmdbook"
+    root = tmp_path / "all-chapters.ssmd-bundle"
     _write_book(
         root,
         (1, 3, 4, 5, 9),
@@ -501,7 +493,8 @@ def test_default_all_selection_and_explicit_output_directory(
 
     result = main(
         [
-            "compile-book",
+            "bundle",
+            "compile",
             str(root),
             "--output-dir",
             str(output_dir),
@@ -521,13 +514,14 @@ def test_default_all_selection_and_explicit_output_directory(
 def test_report_path_collision_with_plan_output_is_preflighted(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "report-plan-collision.ssmdbook"
+    root = tmp_path / "report-plan-collision.ssmd-bundle"
     _write_book(root, (5,), contents={5: _ssmd("Five.")})
     output_dir = tmp_path / "plans"
 
     result = main(
         [
-            "compile-book",
+            "bundle",
+            "compile",
             str(root),
             "--output-dir",
             str(output_dir),
@@ -545,7 +539,7 @@ def test_report_path_collision_with_plan_output_is_preflighted(
 def test_compile_book_localizes_fallback_boundaries_with_default_settings(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "fallback-boundaries.ssmdbook"
+    root = tmp_path / "fallback-boundaries.ssmd-bundle"
     _write_book(
         root,
         (5, 6),
@@ -555,7 +549,7 @@ def test_compile_book_localizes_fallback_boundaries_with_default_settings(
         },
     )
 
-    result = main(["compile-book", str(root), "--chapters", "5-6", "--spacy", "off"])
+    result = main(["bundle", "compile", str(root), "--chapters", "5-6", "--spacy", "off"])
     capsys.readouterr()
 
     assert result == 0

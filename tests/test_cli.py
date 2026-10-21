@@ -63,8 +63,8 @@ def test_compile_cli_defaults() -> None:
         ["compile", "Hello.", "--lang", "en", "--pause-mode", "auto"],
         ["compile-many", "one.txt", "--output-dir", "plans", "--unit", "sentence"],
         ["compile-many", "one.txt", "--output-dir", "plans", "--pause-mode", "auto"],
-        ["compile-book", "book.ssmdbook", "--unit", "sentence"],
-        ["compile-book", "book.ssmdbook", "--pause-mode", "auto"],
+        ["bundle", "compile", "book.ssmd-bundle", "--unit", "sentence"],
+        ["bundle", "compile", "book.ssmd-bundle", "--pause-mode", "auto"],
     ),
 )
 def test_compilation_commands_reject_removed_renderer_policy_flags(argv: list[str]) -> None:
@@ -79,7 +79,7 @@ def test_spacy_cli_policies_preserve_auto_off_and_required_tiers() -> None:
     assert parser.parse_args(["compile", "Hello.", "--lang", "en"]).spacy == "auto"
     assert parser.parse_args(["compile", "Hello.", "--lang", "en", "--spacy", "off"]).spacy == "off"
     assert parser.parse_args(["compile-many", "one.txt", "--output-dir", "plans"]).spacy == "auto"
-    assert parser.parse_args(["compile-book", "book.ssmdbook"]).spacy == "auto"
+    assert parser.parse_args(["bundle", "compile", "book.ssmd-bundle"]).spacy == "auto"
 
     assert _linguistics_config("auto") == LinguisticsConfig(use_spacy=True, require_spacy=False)
     assert _linguistics_config("off") == LinguisticsConfig(use_spacy=False)
@@ -148,43 +148,42 @@ def test_compile_auto_detects_ssmd_suffix(
     assert _payload(capsys)["document"]["format"] == "ssmd"
 
 
-def test_compile_ssmdoc_directory_matches_canonical_file(
+def test_compile_standalone_source_file_and_reject_bundle_root(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    fixture = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
-    workspace = tmp_path / "story.ssmdoc"
-    shutil.copytree(fixture, workspace)
-    source = workspace / "document.ssmd.md"
+    fixture = Path(__file__).parent / "fixtures/document-bundle-v1/story.ssmd-bundle"
+    bundle = tmp_path / "story.ssmd-bundle"
+    shutil.copytree(fixture, bundle)
+    source = bundle / "document.ssmd.md"
 
     assert main(["compile", str(source), "--spacy", "off"]) == 0
     direct = FlowPlan.from_toml(capsys.readouterr().out)
-    assert main(["compile", str(workspace), "--spacy", "off"]) == 0
-    from_workspace = FlowPlan.from_toml(capsys.readouterr().out)
+    assert direct.source is not None
 
-    assert from_workspace.plan_id == direct.plan_id
-    assert from_workspace.to_dict() == direct.to_dict()
+    assert main(["compile", str(bundle), "--spacy", "off"]) == 1
+    assert "source path is not a regular file" in capsys.readouterr().err
 
 
-def test_validate_accepts_dirty_ssmdoc_workspace(
+def test_validate_rejects_bundle_root_as_non_file_input(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    fixture = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
-    workspace = tmp_path / "dirty.ssmdoc"
-    shutil.copytree(fixture, workspace)
-    manifest = workspace / "manifest.json"
+    fixture = Path(__file__).parent / "fixtures/document-bundle-v1/story.ssmd-bundle"
+    bundle = tmp_path / "dirty.ssmd-bundle"
+    shutil.copytree(fixture, bundle)
+    manifest = bundle / "manifest.json"
     manifest_before = manifest.read_bytes()
-    source = workspace / "document.ssmd.md"
+    source = bundle / "document.ssmd.md"
     source.write_text(
         '---\nssmd_version: "0.9"\nlanguage: en-US\n---\n\nEdited current document.\n',
         encoding="utf-8",
     )
+    source_before = source.read_bytes()
 
-    assert main(["validate", str(workspace)]) == 0
+    assert main(["validate", str(bundle)]) == 1
     captured = capsys.readouterr()
-    assert "valid" in captured.out
-    assert "input format: ssmd" in captured.out
+    assert "source path is not a regular file" in captured.err
     assert manifest.read_bytes() == manifest_before
-    assert "Edited current document." in source.read_text(encoding="utf-8")
+    assert source.read_bytes() == source_before
 
 
 def test_compile_and_validate_reject_arbitrary_directories(
@@ -194,9 +193,9 @@ def test_compile_and_validate_reject_arbitrary_directories(
     directory.mkdir()
 
     assert main(["compile", str(directory)]) == 1
-    assert "unsupported source directory" in capsys.readouterr().err
+    assert "source path is not a regular file" in capsys.readouterr().err
     assert main(["validate", str(directory)]) == 1
-    assert "unsupported source directory" in capsys.readouterr().err
+    assert "source path is not a regular file" in capsys.readouterr().err
 
 
 def test_compile_explicit_ssmd_from_stdin(

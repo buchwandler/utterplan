@@ -9,7 +9,7 @@ scope_path: ""
 render_target: root_agents
 source: cli
 created_version: 18
-modified_version: 35
+modified_version: 40
 tags: []
 origin: ""
 origin_hash: ""
@@ -27,4 +27,4 @@ evidence:
     timestamp: ""
 ---
 
-Book commands (`compile-book`, `render-book`) read the SSMDBook manifest only for chapter discovery, never modify the manifest or source chapters, write derived plans to separate directories, and never build book-level combined plans.
+Bundle commands accept only a canonical <name>.ssmd-bundle/ root and select book or document behavior from manifest.json. Book items are selected by manifest source_number and produce independent plans; document bundles contain one item and support only the all selector. Compilation, RenderPlan projection, and replan leave manifests and source content unchanged and never create a book-level combined plan.

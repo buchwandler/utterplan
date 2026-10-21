@@ -1,2 +1,2 @@
 prune .ledger
-include docs/ssmdoc.md
+include docs/bundles.md

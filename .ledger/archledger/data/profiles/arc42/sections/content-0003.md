@@ -7,7 +7,7 @@ section: context_and_scope
 title: Context and Scope
 order: 30
 status: accepted
-version: 4
+version: 5
 body_format: markdown
 ---
 
@@ -50,8 +50,8 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
 - Canonical segmentation, safe-boundary inventory, authored pause intents, typed
   directives, and markers.
 - Optional provenance trace sidecars and renderer-neutral diagnostics.
-- SSMDBook chapter discovery and per-file orchestration (`compile-book`,
-  `render-book`) without changing manifest or chapter content.
+- Manifest-driven book/document bundle dispatch through the unified `bundle` commands,
+  using only canonical `.ssmd-bundle/` roots and leaving source content unchanged.
 - Optional RenderPlan projection and deterministic replan refinement for stored
   schema-v7 plans.
 
@@ -65,8 +65,13 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
 - Renderer chunking, token-budget, and pause-realization choices.
 - Consumer-specific compatibility testing.
 
-## SSMDDoc source workspace
+## Manifest-driven bundle inputs
 
-- An editable `.ssmdoc` directory is discovered by its `ssmdconvert.document` v1 manifest, not by its directory suffix. Its canonical `document.ssmd.md` is the current compiler input.
-- The workspace remains one document to one FlowPlan. Manifest digests are provenance only for editable directories: UtterPlan compiles current content and never refreshes the manifest or edits the source.
-- `compile-document` is single-document convenience, not book orchestration. ZIP bundles, fake chapters, and an `ssmdconvert` runtime dependency are outside the contract.
+- Bundle commands accept only a canonical `<name>.ssmd-bundle/` root with a
+  `manifest.json`; the format field selects book or document behavior.
+- Book manifests map source-numbered chapters to independent FlowPlans and support
+  manifest-ordered selection.
+- Document manifests map one SSMD 0.9 source to one FlowPlan and accept only the
+  `all` selector.
+- Both kinds use the shared `bundle compile`, `bundle render`, and `bundle replan` lifecycle. Manifest digests remain provenance; current source content is
+  compiled without modifying the manifest or source files.

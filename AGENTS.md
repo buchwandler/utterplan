@@ -23,7 +23,7 @@ This file contains reviewed long-term project memory.
 - Package version and schema version remain independent. Migration preserves a compiled plan; replanning is a separate operation.
 - Optional compiler traces are sidecars; they must never alter executable plan content or identity.
 - UtterPlan parses SSMD 0.9 only; it does not parse SSMD 0.8 or migrate source documents (`ssmd migrate` owns that).
-- Book commands (`compile-book`, `render-book`) read the SSMDBook manifest only for chapter discovery, never modify the manifest or source chapters, write derived plans to separate directories, and never build book-level combined plans.
+- Bundle commands accept only a canonical <name>.ssmd-bundle/ root and select book or document behavior from manifest.json. Book items are selected by manifest source_number and produce independent plans; document bundles contain one item and support only the all selector. Compilation, RenderPlan projection, and replan leave manifests and source content unchanged and never create a book-level combined plan.
 - RenderPlan projection is optional: VoiceRender creates and validates engine-backed RenderProfiles, while UtterPlan projects stored schema-v7 FlowPlans into profile-specific RenderPlans (with `renderplan-set.toml` and reports) and performs deterministic replan refinement only.
 - UtterPlan depends directly on SSMD, PhraseSplit, TTSReady, and the renderplan contract package only; production code does not import Spokenform, and spaCy stays optional best-effort enrichment.
 - Repository tests must be self-contained and must not require sibling consumer checkouts; consumer-specific compatibility testing belongs in the consumer repository.

@@ -73,49 +73,33 @@ utterplan compile-many chapters/*.ssmd --output-dir build/plans
 
 Each output name is derived from its source (`chapter.ssmd` becomes `chapter.utterplan.toml`). The command atomically refreshes `build/plans/compile-report.toml`; use `--report PATH` to choose another location, `--fail-fast` to skip later inputs after a failure, and `--force` to replace existing plans. Duplicate output names and report/output collisions are rejected before writing.
 
-## Compile chapters from an SSMDBook
+## Compile from a bundle
 
-For an editable `.ssmdbook` directory, compile a source-number range without expanding filenames in the shell:
+Book and single-document bundles use the same manifest-driven command. The canonical input is a directory named `<name>.ssmd-bundle/`; UtterPlan determines the kind from `manifest.json`.
 
 ```bash
-cd "Platform Decay - Martha Wells.ssmdbook"
-
-utterplan compile-book chapters --chapters 5-17
+utterplan bundle compile "Platform Decay - Martha Wells.ssmd-bundle" --chapters 5-17
+utterplan bundle compile story.ssmd-bundle
 ```
 
-This writes one independent canonical v7 plan per selected chapter and a TOML report by default:
+Compilation writes one independent schema-v7 FlowPlan per selected item and an operational report under `<bundle>/utterplan/`. Book selectors use manifest source numbers: omit `--chapters` for all chapters, or use a range such as `5-17` or comma-separated selection such as `1,3-5`. A document bundle supports only `--chapters all`. Source manifests and documents remain unchanged. See the [bundle guide](bundles.md) for layouts and safety details.
 
-```text
-utterplan/
-├── compile-report.toml
-├── chapter-0005.utterplan.toml
-├── chapter-0006.utterplan.toml
-├── ...
-└── chapter-0017.utterplan.toml
-```
+Safe punctuation repair is enabled by default for standalone `compile` and `compile-many`. Use `--renderability strict` to reject repair opportunities and inspect their explanation without modifying a plan.
 
-Omit `--chapters` to compile all manifest chapters. Select non-contiguous chapters with a comma-separated selector, for example `utterplan compile-book chapters --chapters 1,3-5`. You can also pass the `.ssmdbook` root instead of `chapters/`, and override the destination with `--output-dir build/plans`. UtterPlan reads the manifest and current selected chapter content but does not modify the book or refresh stale chapter hashes. See the [SSMDBook guide](ssmdbook.md) for selection rules and safety details.
-Safe punctuation repair is enabled by default for both `compile` and `compile-many`. Use `--renderability strict` to reject repair opportunities and inspect their explanation without modifying the plan.
+## Project a bundle for a profile
 
-## Render a book for a profile
-
-After compiling the selected source chapters, project their saved UtterPlans into
-a profile-specific RenderPlan collection:
+Create and validate a RenderProfile with VoiceRender, then project saved bundle plans:
 
 ```bash
 voicerender profile create \
   --engine piper --target en_US-amy-medium --language en-US \
   --offline --output narration.renderprofile.toml
-utterplan render-book . --chapters 5-17 --profile narration.renderprofile.toml
+utterplan bundle render "Platform Decay - Martha Wells.ssmd-bundle" \
+  --chapters 5-17 --profile narration.renderprofile.toml
+utterplan bundle render story.ssmd-bundle --profile narration.renderprofile.toml
 ```
 
-This writes under `renderplan/<label>--<profile-fingerprint>/` and leaves the
-canonical `utterplan/` plans and source book untouched. VoiceRender is needed to
-create/refresh the engine profile and later preflight/render the result, but it is
-not required to run `render-book`; UtterPlan reads the shared RenderPlan profile
-contract. See the [SSMDBook workflow](ssmdbook.md#from-semantic-chapter-plans-to-renderplan-variants),
-[VoiceRender](https://pypi.org/project/voicerender/), and
-[RenderPlan](https://pypi.org/project/renderplan/).
+The resulting profile-specific RenderPlans are written below `<bundle>/renderplan/`; canonical plans and source content remain untouched. VoiceRender is responsible for downstream preflight, synthesis, and audio. See the [bundle guide](bundles.md), [VoiceRender](https://pypi.org/project/voicerender/), and [RenderPlan](https://pypi.org/project/renderplan/).
 
 ## Inspect and validate
 

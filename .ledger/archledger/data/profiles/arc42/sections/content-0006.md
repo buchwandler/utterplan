@@ -7,7 +7,7 @@ section: runtime_view
 title: Runtime View
 order: 60
 status: accepted
-version: 4
+version: 5
 body_format: markdown
 ---
 
@@ -32,36 +32,45 @@ FlowPlan is validated and atomically saved before the next source is processed;
 ordinary failures are reported and later inputs continue unless fail-fast is
 requested. Its TOML report is operational data, not a FlowPlan.
 
-## Scenario: book compile
+## Scenario: compile from a bundle
 
 ```text
-SSMDBook manifest + chapter source
-    -> utterplan compile-book
-    -> independent FlowPlans in utterplan/
+canonical <name>.ssmd-bundle/ + manifest.json + selected source items
+    -> utterplan bundle compile
+    -> one independent schema-v7 FlowPlan per selected item
+       + compile-report.toml under utterplan/
 ```
 
-`compile-book` reads the manifest and selected chapter source to produce each
-canonical semantic FlowPlan under `utterplan/` plus a `compile-report.toml`. It
-never modifies the manifest or chapter files.
+The manifest format determines book or document behavior. Book selectors use
+manifest source numbers and retain manifest order; a document bundle contains one
+item and accepts only the `all` selector. Current source content is authoritative;
+UtterPlan never refreshes the manifest or modifies source files.
 
-## Scenario: book render projection
+## Scenario: bundle RenderPlan projection
 
 ```text
-saved FlowPlans + one RenderProfile
-    -> utterplan render-book (existing RenderPlan projection)
-    -> profile-specific RenderPlans in renderplan/<label>--<profile-id-prefix>/
-       + UtterPlan-owned renderplan-set.toml and render-report.toml
+saved FlowPlans + explicit RenderProfile
+    -> utterplan bundle render
+    -> profile-specific RenderPlans under renderplan/<label>--<profile-fingerprint>/
+       + profile snapshot + report + book collection index when applicable
 ```
 
-`render-book` does not re-read chapter content: it loads already saved plans,
-projects each independently through the existing `build_render_plan()` path, and
-records successful chapter identities in the variant-local `renderplan-set.toml`.
-Variant directories include a readable label and a prefix of the canonical profile
-ID; the profile snapshot and strict set validation prevent mixing profiles or
-adopting unindexed output. RenderProfile + RenderPlan sets then flow to VoiceRender
-for validation, preflight, G2P, synthesis, and audio — all outside UtterPlan.
+Rendering reads saved plans only. Profile identity and role coverage are checked
+before outputs are written. VoiceRender owns downstream preflight, G2P, synthesis,
+and audio; UtterPlan remains engine-independent.
 
-## Scenario: load a saved plan
+## Scenario: bundle replan refinement
+
+```text
+active RenderPlan(s) + matching VoiceRender preflight feedback
+    -> utterplan bundle replan
+    -> deterministic child RenderPlan(s) + selected active-reference updates
+```
+
+Replanning requires the stored profile snapshot and feedback matching the exact
+active plan. Parent RenderPlans, source FlowPlans, profile identity, and unselected
+active references remain unchanged. A dry run validates and reports proposed
+children without changing active state.
 
 ```text
 current plan:
@@ -80,25 +89,3 @@ accepts TOML only and rejects JSON.
 `render-plan --previous-plan`/`build_render_plan(..., previous_plan=..., preflight=...)` refine only failed speech occurrences. Both the exact previous
 RenderPlan and its matching preflight report are required together; UtterPlan does
 not calculate renderer-specific metrics.
-
-## Scenario: compile an editable SSMDDoc workspace
-
-```text
-ssmdconvert.document v1 manifest + current document.ssmd.md
-    -> utterplan compile-document
-    -> one FlowPlan at utterplan/document.utterplan.toml
-       + one compile-report.toml
-```
-
-The manifest validates the workspace contract and safe canonical path; SSMD 0.9 content is compiled by the existing single-document path. A stale stored digest does not block editable-directory compilation, and UtterPlan does not modify source material or model the document as a chapter.
-
-## Scenario: project a RenderPlan from an editable SSMDDoc workspace
-
-```text
-saved FlowPlan + explicit RenderProfile
-    -> utterplan render-document
-    -> one profile-specific RenderPlan at renderplan/<label>--<profile-id-prefix>/document.renderplan.toml
-       + canonical renderprofile.toml snapshot + render-report.toml
-```
-
-The command projects the existing plan without compiling source or invoking a renderer. Profile identity is embedded in the variant path, and a mismatched or ambiguous profile snapshot is rejected; source files and the SSMDDoc manifest remain unchanged.

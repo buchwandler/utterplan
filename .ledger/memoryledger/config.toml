@@ -2,7 +2,7 @@ config_version = 2
 
 [ledger]
 code = "ml"
-version = 39
+version = 40
 
 [render]
 root_agents_path = "AGENTS.md"

@@ -16,7 +16,7 @@ from renderplan import (
 )
 from renderplan import codec as renderplan_codec
 
-from utterplan import FlowPlan, FlowSegment, FlowUnit, TokenView, render_book
+from utterplan import FlowPlan, FlowSegment, FlowUnit, TokenView, render_bundle
 from utterplan.cli import build_parser, main
 
 
@@ -93,20 +93,23 @@ def _prepared(
     renderplan_root: Path | None = None,
     voicerender_root: Path | None = None,
 ) -> tuple[Path, str, Path, RenderProfile]:
-    root = _write_workspace(tmp_path / "book.ssmdbook", numbers)
+    root = _write_workspace(tmp_path / "book.ssmd-bundle", numbers)
     profile_path = root / "narration.renderprofile.toml"
     profile = _profile(profile_path)
-    rendered = render_book(
+    rendered = render_bundle(
         root,
         profile=profile_path,
         output_root=renderplan_root,
     )
+    variant_dir = rendered.outputs[0].parent
     active_voice_root = voicerender_root or root / "voicerender"
-    for chapter in rendered.selected_chapter_ids:
+    for chapter in rendered.selected_item_ids:
         entry = next(
-            item for item in load_renderplan_set(rendered.set_path).chapters if item.id == chapter
+            item
+            for item in load_renderplan_set(variant_dir / "renderplan-set.toml").chapters
+            if item.id == chapter
         )
-        plan = renderplan_codec.load_plan(rendered.variant_dir / entry.renderplan)
+        plan = renderplan_codec.load_plan(variant_dir / entry.renderplan)
         speech = plan.speech[0]
         segment_id = speech.segment_id or speech.computed_id()
         report = PreflightReport(
@@ -141,18 +144,18 @@ def _prepared(
             report,
             active_voice_root / rendered.variant / chapter / "preflight.toml",
         )
-    return root, rendered.variant, rendered.variant_dir, profile
+    return root, rendered.variant, variant_dir, profile
 
 
 def _run(root: Path, variant: str, *options: str) -> int:
-    return main(["replan-book", str(root), "--variant", variant, *options])
+    return main(["bundle", "replan", str(root), "--variant", variant, *options])
 
 
 def test_replan_book_parser_defaults_and_variant_is_required() -> None:
     args = build_parser().parse_args(
-        ["replan-book", "book.ssmdbook", "--variant", "narration--28f616b6fe3b"]
+        ["bundle", "replan", "book.ssmd-bundle", "--variant", "narration--28f616b6fe3b"]
     )
-    assert args.command == "replan-book"
+    assert args.command == "bundle" and args.bundle_command == "replan"
     assert args.chapters == "all"
     assert args.renderplan_root is None
     assert args.voicerender_root is None
@@ -162,7 +165,7 @@ def test_replan_book_parser_defaults_and_variant_is_required() -> None:
     assert args.explain is False
     assert args.json is False
     with pytest.raises(SystemExit):
-        build_parser().parse_args(["replan-book", "book.ssmdbook"])
+        build_parser().parse_args(["bundle", "replan", "book.ssmd-bundle"])
 
 
 def test_replan_book_human_output_explains_active_transition(tmp_path: Path, capsys) -> None:
@@ -172,8 +175,8 @@ def test_replan_book_human_output_explains_active_transition(tmp_path: Path, cap
 
     captured = capsys.readouterr()
     assert result == 0
-    assert "UtterPlan book replan" in captured.err
-    assert "renderplans:" in captured.err
+    assert "UtterPlan bundle replan" in captured.err
+    assert "active:" in captured.err
     assert "preflights:" in captured.err
     assert "previous: sha256:" in captured.err
     assert "replacements: 1" in captured.err
@@ -192,10 +195,10 @@ def test_replan_book_json_reports_same_result_and_explanation(tmp_path: Path, ca
     payload = json.loads(captured.out)
     assert result == 0
     assert captured.err == ""
-    assert payload["format"] == "utterplan-replan-book"
+    assert payload["format"] == "utterplan-replan-bundle"
     assert payload["variant"] == variant
-    assert payload["variant_dir"] == str(variant_dir)
-    assert payload["selected_chapter_ids"] == ["chapter-0005"]
+    assert payload["active_reference"] == str(variant_dir / "renderplan-set.toml")
+    assert payload["selected_item_ids"] == ["chapter-0005"]
     assert payload["written"] == 1
     assert payload["failed"] == 0
     item = payload["outcomes"][0]
@@ -241,7 +244,7 @@ def test_replan_book_supports_custom_roots_and_chapter_ranges(tmp_path: Path, ca
 
     captured = capsys.readouterr()
     assert result == 0
-    assert "selected:    2" in captured.err
+    assert "selected:   2" in captured.err
     assert "[1/2] chapter-0005" in captured.err
     assert "[2/2] chapter-0006" in captured.err
     assert "written:   2" in captured.err

@@ -1,4 +1,4 @@
-"""Public orchestration services for SSMDBook compilation and projection.
+"""Private orchestration helpers for compiling and projecting book bundles.
 
 The services in this module own workspace discovery, chapter selection, artifact
 layout, safety checks, variant identity, and batch report handling. They never
@@ -27,11 +27,11 @@ from .config import PlannerConfig
 from .model import FlowPlan
 from .renderplan_batch import RenderOutcome, RenderRequest, new_renderplan_set, render_to_files
 from .role_coverage import profile_role_coverage
-from .ssmdbook import (
-    SSMDBookError,
-    load_ssmdbook_index,
-    select_ssmdbook_chapters,
-    selected_chapter_path,
+from .ssmd_bundle import (
+    SsmdBundleError,
+    bundle_item_path,
+    load_ssmd_bundle,
+    select_bundle_items,
 )
 from .workspace_paths import renderplan_output_name as _renderplan_output_name
 from .workspace_paths import utterplan_output_name as _utterplan_output_name
@@ -43,7 +43,7 @@ class BookServiceError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class BookCompileRequest:
-    """Options for compiling selected SSMDBook chapters to FlowPlans."""
+    """Options for compiling selected book bundle chapters to FlowPlans."""
 
     book: Path
     chapters: str = "all"
@@ -201,10 +201,10 @@ def compile_book(
         planner_config=planner_config,
     )
     try:
-        index = load_ssmdbook_index(request.book)
-        chapters_selected = select_ssmdbook_chapters(index, request.chapters)
-        sources = [selected_chapter_path(index, chapter) for chapter in chapters_selected]
-    except SSMDBookError as exc:
+        index = load_ssmd_bundle(request.book)
+        chapters_selected = select_bundle_items(index, request.chapters)
+        sources = [bundle_item_path(index, chapter) for chapter in chapters_selected]
+    except SsmdBundleError as exc:
         raise BookServiceError(str(exc)) from exc
 
     output_path = request.output_dir or (index.root / "utterplan")
@@ -308,10 +308,10 @@ def render_book(
         fail_fast=fail_fast,
     )
     try:
-        index = load_ssmdbook_index(request.book)
-        chapters_selected = select_ssmdbook_chapters(index, request.chapters)
-        sources = [selected_chapter_path(index, chapter) for chapter in chapters_selected]
-    except SSMDBookError as exc:
+        index = load_ssmd_bundle(request.book)
+        chapters_selected = select_bundle_items(index, request.chapters)
+        sources = [bundle_item_path(index, chapter) for chapter in chapters_selected]
+    except SsmdBundleError as exc:
         raise BookServiceError(str(exc)) from exc
 
     utterplan_dir_arg = request.utterplan_dir or (index.root / "utterplan")
@@ -520,7 +520,7 @@ def render_book(
                 report_path=report_path,
                 force=request.force,
                 fail_fast=request.fail_fast,
-                chapter_order={chapter.id: order for order, chapter in enumerate(index.chapters)},
+                chapter_order={chapter.id: order for order, chapter in enumerate(index.items)},
                 on_progress=on_progress,
             )
         )

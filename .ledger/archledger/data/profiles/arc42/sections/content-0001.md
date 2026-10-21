@@ -7,7 +7,7 @@ section: introduction_and_goals
 title: Introduction and Goals
 order: 10
 status: accepted
-version: 4
+version: 5
 body_format: markdown
 ---
 
@@ -56,10 +56,14 @@ Downstream FlowPlan consumers
 G2P / synthesis / audio (downstream)
 ```
 
-The compiler still handles one document at a time; the CLI's explicit SSMDBook
-commands (`compile-book`, `render-book`) discover chapters and orchestrate per-file
-workspaces without changing book content.
+The compiler produces one FlowPlan per source item. The `bundle` CLI and public
+services accept a canonical `.ssmd-bundle/` root and dispatch book or document
+behavior from the `manifest.json` format. Compilation and profile-specific
+RenderPlan projection leave source content and manifests unchanged.
 
-## Document workspaces
+## Manifest-driven bundles
 
-An editable `ssmdconvert.document` v1 workspace (`.ssmdoc`) is another source path for the one-document compiler. `compile-document` discovers its canonical current SSMD document and writes one FlowPlan plus an operational report under `<workspace>/utterplan/`; `render-document` projects that saved plan with an explicit profile into `<workspace>/renderplan/<label>--<profile-id-prefix>/`. Neither command creates book-set semantics or alters workspace source material.
+An `ssmdconvert.book` v1 manifest maps chapters to independently compiled items;
+an `ssmdconvert.document` v1 manifest maps one document to one FlowPlan. Both use
+the same root shape and unified `bundle compile`, `bundle render`, and `bundle replan` lifecycle. The manifest format, not the directory contents, determines
+the kind.

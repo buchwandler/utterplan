@@ -189,16 +189,16 @@ jobs:
             > "$RUNNER_TEMP/test.utterplan.toml"
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" validate \
             "$RUNNER_TEMP/test.utterplan.toml"
-          BOOK="$RUNNER_TEMP/render-book.smoke.ssmdbook"
-          mkdir -p "$BOOK/chapters" "$BOOK/utterplan"
-          cat > "$BOOK/chapters/chapter-0001.ssmd.md" <<'EOF'
+          BUNDLE="$RUNNER_TEMP/render-bundle.smoke.ssmd-bundle"
+          mkdir -p "$BUNDLE/chapters" "$BUNDLE/utterplan"
+          cat > "$BUNDLE/chapters/chapter-0001.ssmd.md" <<'EOF'
           ---
           ssmd_version: "0.9"
           language: en-US
           ---
-          Installed wheel render-book smoke.
+          Installed wheel bundle render smoke.
           EOF
-          cat > "$BOOK/manifest.json" <<'EOF'
+          cat > "$BUNDLE/manifest.json" <<'EOF'
           {
             "format": "ssmdconvert.book",
             "schema_version": 1,
@@ -214,9 +214,9 @@ jobs:
           }
           EOF
           "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" compile \
-            "$BOOK/chapters/chapter-0001.ssmd.md" --lang en-us --text-preparation identity \
-            -o "$BOOK/utterplan/chapter-0001.utterplan.toml"
-          "$RUNNER_TEMP/utterplan-wheel-venv/bin/python" - "$BOOK/narration.renderprofile.toml" <<'PY'
+            "$BUNDLE/chapters/chapter-0001.ssmd.md" --lang en-us --text-preparation identity \
+            -o "$BUNDLE/utterplan/chapter-0001.utterplan.toml"
+          "$RUNNER_TEMP/utterplan-wheel-venv/bin/python" - "$BUNDLE/narration.renderprofile.toml" <<'PY'
           import sys
           from pathlib import Path
 
@@ -231,9 +231,9 @@ jobs:
           )
           codec.save_profile(profile, Path(sys.argv[1]))
           PY
-          "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" render-book \
-            "$BOOK" --profile "$BOOK/narration.renderprofile.toml" --chapters 1
-          "$RUNNER_TEMP/utterplan-wheel-venv/bin/python" - "$BOOK" <<'PY'
+          "$RUNNER_TEMP/utterplan-wheel-venv/bin/utterplan" bundle render \
+            "$BUNDLE" --profile "$BUNDLE/narration.renderprofile.toml" --chapters 1
+          "$RUNNER_TEMP/utterplan-wheel-venv/bin/python" - "$BUNDLE" <<'PY'
           import sys
           from pathlib import Path
 

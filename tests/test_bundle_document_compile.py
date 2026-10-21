@@ -7,15 +7,15 @@ from pathlib import Path
 import pytest
 import tomlkit
 
-from utterplan.config import LinguisticsConfig, PlannerConfig
-from utterplan.document_workspace import (
+from utterplan._document_service import (
     DocumentCompileStart,
-    DocumentWorkspaceServiceError,
-    compile_ssmdoc,
+    _compile_document_service,
+    _DocumentBundleServiceError,
 )
+from utterplan.config import LinguisticsConfig, PlannerConfig
 from utterplan.model import FlowPlan
 
-FIXTURE = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
+FIXTURE = Path(__file__).parent / "fixtures/document-bundle-v1/story.ssmd-bundle"
 
 
 def _ssmd(text: str, *, language: str | None = "en-US") -> str:
@@ -26,7 +26,7 @@ def _ssmd(text: str, *, language: str | None = "en-US") -> str:
 
 
 def _workspace(
-    tmp_path: Path, name: str = "story.ssmdoc", *, text: str = "Original content."
+    tmp_path: Path, name: str = "story.ssmd-bundle", *, text: str = "Original content."
 ) -> Path:
     root = tmp_path / name
     shutil.copytree(FIXTURE, root)
@@ -51,7 +51,7 @@ def _plan_text(path: Path) -> str:
     return " ".join(segment.text for unit in plan.flow for segment in unit.segments)
 
 
-def test_compile_ssmdoc_writes_default_plan_and_one_item_report_without_source_changes(
+def test_compile_document_bundle_writes_default_plan_and_one_item_report_without_source_changes(
     tmp_path: Path,
 ) -> None:
     root = _workspace(tmp_path)
@@ -62,7 +62,7 @@ def test_compile_ssmdoc_writes_default_plan_and_one_item_report_without_source_c
     starts: list[DocumentCompileStart] = []
     progress = []
 
-    result = compile_ssmdoc(
+    result = _compile_document_service(
         root,
         planner_config=_config(),
         on_start=starts.append,
@@ -91,7 +91,7 @@ def test_compile_ssmdoc_writes_default_plan_and_one_item_report_without_source_c
     assert report["item"][0]["source"] == str(source)
 
 
-def test_compile_ssmdoc_uses_edited_content_with_stale_digest(tmp_path: Path) -> None:
+def test_compile_document_bundle_uses_edited_content_with_stale_digest(tmp_path: Path) -> None:
     root = _workspace(tmp_path, text="Original content.")
     manifest = root / "manifest.json"
     manifest_before = manifest.read_bytes()
@@ -99,7 +99,7 @@ def test_compile_ssmdoc_uses_edited_content_with_stale_digest(tmp_path: Path) ->
     source.write_text(_ssmd("Edited current content."), encoding="utf-8")
     source_before = source.read_bytes()
 
-    result = compile_ssmdoc(root, planner_config=_config())
+    result = _compile_document_service(root, planner_config=_config())
 
     assert result.exit_code == 0
     assert "Edited current content." in _plan_text(result.plan_path)
@@ -111,8 +111,8 @@ def test_missing_document_fails_before_creating_derived_outputs(tmp_path: Path) 
     root = _workspace(tmp_path)
     (root / "document.ssmd.md").unlink()
 
-    with pytest.raises(DocumentWorkspaceServiceError, match="document is missing"):
-        compile_ssmdoc(root, planner_config=_config())
+    with pytest.raises(_DocumentBundleServiceError, match="bundle item is missing"):
+        _compile_document_service(root, planner_config=_config())
 
     assert not (root / "utterplan").exists()
 
@@ -122,7 +122,7 @@ def test_invalid_ssmd_is_a_reported_compile_failure_without_plan(tmp_path: Path)
     source = root / "document.ssmd.md"
     source.write_text('---\nssmd_version: "0.8"\n---\n\nBad dialect.\n', encoding="utf-8")
 
-    result = compile_ssmdoc(root, planner_config=_config())
+    result = _compile_document_service(root, planner_config=_config())
 
     assert result.exit_code == 1
     assert not result.plan_path.exists()
@@ -137,13 +137,13 @@ def test_existing_plan_is_protected_unless_force_is_used(tmp_path: Path) -> None
     output.parent.mkdir(parents=True)
     output.write_text("sentinel", encoding="utf-8")
 
-    protected = compile_ssmdoc(root, planner_config=_config())
+    protected = _compile_document_service(root, planner_config=_config())
 
     assert protected.exit_code == 1
     assert output.read_text(encoding="utf-8") == "sentinel"
     assert _report(protected.report_path)["item"][0]["status"] == "failed"
 
-    forced = compile_ssmdoc(root, planner_config=_config(), force=True)
+    forced = _compile_document_service(root, planner_config=_config(), force=True)
 
     assert forced.exit_code == 0
     assert "Original content." in _plan_text(output)
@@ -154,7 +154,7 @@ def test_output_override_and_report_override_do_not_create_default_layout(tmp_pa
     output_dir = tmp_path / "build" / "plans"
     report = tmp_path / "reports" / "document.toml"
 
-    result = compile_ssmdoc(
+    result = _compile_document_service(
         root,
         output_dir=output_dir,
         report=report,
@@ -175,8 +175,8 @@ def test_output_collisions_are_rejected_before_creating_directories(tmp_path: Pa
     output_dir = tmp_path / "collision-plans"
     plan_path = output_dir / "document.utterplan.toml"
 
-    with pytest.raises(DocumentWorkspaceServiceError, match="report path collides"):
-        compile_ssmdoc(
+    with pytest.raises(_DocumentBundleServiceError, match="report path collides"):
+        _compile_document_service(
             root,
             output_dir=output_dir,
             report=plan_path,
@@ -184,8 +184,8 @@ def test_output_collisions_are_rejected_before_creating_directories(tmp_path: Pa
         )
     assert not output_dir.exists()
 
-    with pytest.raises(DocumentWorkspaceServiceError, match="overwrite source workspace"):
-        compile_ssmdoc(
+    with pytest.raises(_DocumentBundleServiceError, match="overwrite source workspace"):
+        _compile_document_service(
             root,
             output_dir=output_dir,
             report=root / "manifest.json",
@@ -193,8 +193,8 @@ def test_output_collisions_are_rejected_before_creating_directories(tmp_path: Pa
         )
     assert not output_dir.exists()
 
-    with pytest.raises(DocumentWorkspaceServiceError, match="overwrite source workspace"):
-        compile_ssmdoc(
+    with pytest.raises(_DocumentBundleServiceError, match="overwrite source workspace"):
+        _compile_document_service(
             root,
             output_dir=output_dir,
             report=root / "document.ssmd.md",
@@ -203,8 +203,8 @@ def test_output_collisions_are_rejected_before_creating_directories(tmp_path: Pa
     assert not output_dir.exists()
     source = root / "document.ssmd.md"
     for unsafe_output_dir in (source, source / "nested"):
-        with pytest.raises(DocumentWorkspaceServiceError, match="output directory overlaps"):
-            compile_ssmdoc(
+        with pytest.raises(_DocumentBundleServiceError, match="output directory overlaps"):
+            _compile_document_service(
                 root,
                 output_dir=unsafe_output_dir,
                 planner_config=_config(),
@@ -220,24 +220,26 @@ def test_invalid_manifest_is_rejected_before_output_creation(tmp_path: Path) -> 
     manifest.write_text(json.dumps(data), encoding="utf-8")
     output_dir = tmp_path / "invalid-plans"
 
-    with pytest.raises(DocumentWorkspaceServiceError, match="ssmdconvert.document"):
-        compile_ssmdoc(root, output_dir=output_dir, planner_config=_config())
+    with pytest.raises(
+        _DocumentBundleServiceError, match="bundle manifest chapters must be an array"
+    ):
+        _compile_document_service(root, output_dir=output_dir, planner_config=_config())
     assert not output_dir.exists()
 
 
 def test_ssmd_language_is_authority_and_manifest_language_is_not_fallback(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
-    result = compile_ssmdoc(root, planner_config=_config())
+    result = _compile_document_service(root, planner_config=_config())
     assert result.exit_code == 0
 
-    no_header_language = _workspace(tmp_path, "no-language.ssmdoc")
+    no_header_language = _workspace(tmp_path, "no-language.ssmd-bundle")
     source = no_header_language / "document.ssmd.md"
     source.write_text(_ssmd("No declared language.", language=None), encoding="utf-8")
-    missing_fallback = compile_ssmdoc(no_header_language, planner_config=_config())
+    missing_fallback = _compile_document_service(no_header_language, planner_config=_config())
     assert missing_fallback.exit_code == 1
     assert _report(missing_fallback.report_path)["item"][0]["code"] == "input.language_required"
 
-    with_fallback = compile_ssmdoc(
+    with_fallback = _compile_document_service(
         no_header_language,
         language="en-US",
         planner_config=_config(),
@@ -246,10 +248,10 @@ def test_ssmd_language_is_authority_and_manifest_language_is_not_fallback(tmp_pa
     assert with_fallback.exit_code == 0
 
 
-def test_canonical_document_path_is_accepted_by_service(tmp_path: Path) -> None:
+def test_document_file_path_is_rejected_by_service(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
 
-    result = compile_ssmdoc(root / "document.ssmd.md", planner_config=_config())
+    with pytest.raises(_DocumentBundleServiceError, match="canonical SSMD bundle root"):
+        _compile_document_service(root / "document.ssmd.md", planner_config=_config())
 
-    assert result.exit_code == 0
-    assert result.workspace == root.resolve()
+    assert not (root / "utterplan").exists()

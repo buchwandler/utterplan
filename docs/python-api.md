@@ -210,27 +210,31 @@ from utterplan.renderplan_batch import RenderRequest, new_renderplan_set, render
 
 `render_to_files()` projects schema-v7 `FlowPlan` inputs; grouping, source mapping, export, and replan logic remain UtterPlan-owned.
 
-## Public SSMDBook services
+## Unified bundle services
 
-`compile_book()` and `render_book()` are the public Python counterparts of the `compile-book` and `render-book` commands. They take paths and keyword options directly; callers do not construct `argparse.Namespace`, spawn a subprocess, or reproduce chapter selection, path safety, variant naming, snapshot/set initialization, or report logic. The CLI delegates to these same services.
+`compile_bundle()`, `render_bundle()`, and `replan_bundle()` are the public Python counterparts of `utterplan bundle compile|render|replan`. They accept a canonical `<name>.ssmd-bundle/` path and dispatch book or document behavior from its manifest. The CLI delegates to these services, so selection and path-safety rules are shared.
 
 ```python
-from utterplan import compile_book, render_book
+from utterplan import compile_bundle, replan_bundle, render_bundle
 
-compiled = compile_book(".", chapters="5-17")
-projected = render_book(
-    ".",
+compiled = compile_bundle("novel.ssmd-bundle", chapters="5-17")
+projected = render_bundle(
+    "novel.ssmd-bundle",
     profile="narration.renderprofile.toml",
     chapters="5-17",
 )
+refined = replan_bundle(
+    "novel.ssmd-bundle",
+    variant=projected.variant,
+    chapters="5",
+)
 
-assert compiled.exit_code == projected.exit_code == 0
-print(projected.variant)  # resolved <label>--<profile fingerprint>
+assert compiled.exit_code == projected.exit_code == refined.exit_code == 0
 ```
 
-`BookCompileRequest` / `BookRenderRequest` are immutable option records. Their corresponding result records expose the workspace, selector, selected chapter IDs, artifact and report paths, per-chapter outcomes, `failed`, and `exit_code`; the render result also includes `profile_id`, `variant`, `variant_dir`, snapshot, and set paths. `variant` is authoritative: do not duplicate the label normalization or profile fingerprint algorithm downstream.
+The compile and render services accept paths and keyword options. `chapters` defaults to `"all"`; book bundles select manifest source numbers, while document bundles accept only `"all"`. Rendering requires an explicit `profile`; replanning requires the exact active `variant`. Options include output/report paths, force and fail-fast behavior, compile planning settings, and optional progress/start callbacks. Services do not print.
 
-Optional `on_progress` callbacks receive the existing `CompileOutcome` or `RenderOutcome` for each chapter. Optional `on_start` callbacks receive a resolved book-start record before batch processing. Services do not print. They preserve schema-v7 output and CLI filesystem/report behavior; workspace/path safety errors raise `BookServiceError`, and chapter-level failures are returned as outcomes. Pass `language=` to provide the fallback/required-language override, or supply a `PlannerConfig` with `planner_config=`. See the [SSMDBook guide](ssmdbook) for layouts, safety rules, and CLI/Python examples.
+`BundleCompileResult`, `BundleRenderResult`, and `BundleReplanResult` expose the resolved bundle, manifest-declared kind, selected item IDs, per-item outcomes, generated paths, reports, and exit status. Their start records provide resolved configuration to optional callbacks. Invalid or unsafe shared requests raise `BundleServiceError` or `BundleReplanError`; item-level failures are reported in result outcomes. The package also exports manifest loader, selector, item-path, result, start, and callback types for integrations that need to inspect dispatch results.
 
 ## Planner progress callbacks
 

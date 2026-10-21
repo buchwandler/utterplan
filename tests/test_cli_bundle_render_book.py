@@ -136,7 +136,8 @@ def _render(
 ) -> int:
     return main(
         [
-            "render-book",
+            "bundle",
+            "render",
             str(input_path or root),
             *options,
             "--profile",
@@ -157,15 +158,16 @@ def _report(path: Path) -> dict[str, object]:
 def test_render_book_parser_defaults_and_required_profile() -> None:
     args = build_parser().parse_args(
         [
-            "render-book",
-            "book.ssmdbook",
+            "bundle",
+            "render",
+            "book.ssmd-bundle",
             "--chapters",
             "1,3-5",
             "--profile",
             "narration.renderprofile.toml",
         ]
     )
-    assert args.command == "render-book"
+    assert args.command == "bundle" and args.bundle_command == "render"
     assert args.chapters == "1,3-5"
     assert args.variant is None
     assert args.output_root is None
@@ -174,11 +176,11 @@ def test_render_book_parser_defaults_and_required_profile() -> None:
     assert args.force is False
     assert args.fail_fast is False
     with pytest.raises(SystemExit):
-        build_parser().parse_args(["render-book", "book.ssmdbook"])
+        build_parser().parse_args(["bundle", "render", "book.ssmd-bundle"])
 
 
 def test_render_book_success_matches_single_file_projection(tmp_path: Path, capsys) -> None:
-    root = _write_book(tmp_path / "ordered.ssmdbook", (5, 7, 6))
+    root = _write_book(tmp_path / "ordered.ssmd-bundle", (5, 7, 6))
     profile_path = root / "narration.renderprofile.toml"
     profile = _profile(profile_path)
     manifest_before = (root / "manifest.json").read_bytes()
@@ -191,7 +193,7 @@ def test_render_book_success_matches_single_file_projection(tmp_path: Path, caps
     loaded_set = load_renderplan_set(set_path)
 
     assert result == 0
-    assert "selected:   3" in captured.err
+    assert "selected:  3" in captured.err
     assert [chapter.id for chapter in loaded_set.chapters] == [
         "chapter-0005",
         "chapter-0007",
@@ -242,7 +244,7 @@ def test_render_book_success_matches_single_file_projection(tmp_path: Path, caps
 
 
 def test_render_book_reports_multi_role_coverage(tmp_path: Path, capsys) -> None:
-    root = _write_book(tmp_path / "multi-role.ssmdbook", (5, 6, 7))
+    root = _write_book(tmp_path / "multi-role.ssmd-bundle", (5, 6, 7))
     _write_role_plan(root, 5, "host")
     _write_role_plan(root, 6, "guest")
     _write_role_plan(root, 7, None)
@@ -270,7 +272,7 @@ def test_render_book_reports_multi_role_coverage(tmp_path: Path, capsys) -> None
 def test_render_book_accumulates_successful_chapters_and_replaces_latest_report(
     tmp_path: Path, capsys
 ) -> None:
-    root = _write_book(tmp_path / "incremental.ssmdbook", (5, 6, 7, 8))
+    root = _write_book(tmp_path / "incremental.ssmd-bundle", (5, 6, 7, 8))
     profile_path = root / "narration.renderprofile.toml"
     profile = _profile(profile_path)
 
@@ -290,7 +292,7 @@ def test_render_book_accumulates_successful_chapters_and_replaces_latest_report(
 
 
 def test_different_profile_id_creates_independent_variant(tmp_path: Path, capsys) -> None:
-    root = _write_book(tmp_path / "voices.ssmdbook", (5,))
+    root = _write_book(tmp_path / "voices.ssmd-bundle", (5,))
     amy_path = root / "amy.renderprofile.toml"
     joe_path = root / "joe.renderprofile.toml"
     amy = _profile(amy_path, "amy")
@@ -328,7 +330,7 @@ def test_render_book_missing_plan_continues_or_skips(
     expected_statuses: list[str],
     expected_set: list[str],
 ) -> None:
-    root = _write_book(tmp_path / f"partial-{fail_fast}.ssmdbook", (5, 6, 7), plans=(5, 7))
+    root = _write_book(tmp_path / f"partial-{fail_fast}.ssmd-bundle", (5, 6, 7), plans=(5, 7))
     profile_path = root / "narration.renderprofile.toml"
     profile = _profile(profile_path)
     options = ["--chapters", "5-7"]
@@ -349,11 +351,11 @@ def test_render_book_missing_plan_continues_or_skips(
         chapter.id for chapter in load_renderplan_set(variant / "renderplan-set.toml").chapters
     ] == expected_set
     if not fail_fast:
-        assert "RenderPlans are already saved" in captured.err
+        assert "[3/3] chapter-0007" in captured.err
 
 
 def test_render_book_force_replaces_only_after_success(tmp_path: Path, capsys) -> None:
-    root = _write_book(tmp_path / "force.ssmdbook", (5,))
+    root = _write_book(tmp_path / "force.ssmd-bundle", (5,))
     profile_path = root / "narration.renderprofile.toml"
     profile = _profile(profile_path)
     assert _render(root, profile_path, "--chapters", "5") == 0
@@ -386,7 +388,7 @@ def test_render_book_force_replaces_only_after_success(tmp_path: Path, capsys) -
 def test_render_book_supports_custom_roots_and_sanitizes_variant_label(
     tmp_path: Path, capsys
 ) -> None:
-    root = _write_book(tmp_path / "custom.ssmdbook", (5,))
+    root = _write_book(tmp_path / "custom.ssmd-bundle", (5,))
     custom_plans = tmp_path / "generated-plans"
     _write_book(root, (5,), utterplan_dir=custom_plans)
     profile_path = root / "narration.renderprofile.toml"
@@ -404,7 +406,6 @@ def test_render_book_supports_custom_roots_and_sanitizes_variant_label(
         str(output_root),
         "--variant",
         "../Book Audio/..",
-        input_path=root / "chapters",
     )
     capsys.readouterr()
     variant = output_root / f"book-audio--{profile.profile_id.removeprefix('sha256:')[:12]}"
@@ -421,7 +422,7 @@ def test_render_book_supports_custom_roots_and_sanitizes_variant_label(
 
 
 def test_invalid_profile_and_unsafe_paths_do_not_create_outputs(tmp_path: Path, capsys) -> None:
-    root = _write_book(tmp_path / "unsafe.ssmdbook", (5,))
+    root = _write_book(tmp_path / "unsafe.ssmd-bundle", (5,))
     invalid_profile = root / "invalid.renderprofile.toml"
     invalid_profile.write_text("not valid TOML", encoding="utf-8")
     assert _render(root, invalid_profile, "--chapters", "5") == 2
@@ -454,7 +455,7 @@ def test_invalid_profile_and_unsafe_paths_do_not_create_outputs(tmp_path: Path, 
 def test_render_book_rejects_legacy_plan_before_collection_state_is_written(
     tmp_path: Path, capsys
 ) -> None:
-    root = _write_book(tmp_path / "legacy.ssmdbook", (5,))
+    root = _write_book(tmp_path / "legacy.ssmd-bundle", (5,))
     profile_path = root / "narration.renderprofile.toml"
     _profile(profile_path)
     source_plan = root / "utterplan" / "chapter-0005.utterplan.toml"
@@ -470,7 +471,7 @@ def test_duplicate_source_basenames_are_rejected_before_output_creation(
     tmp_path: Path, capsys
 ) -> None:
     root = _write_book(
-        tmp_path / "duplicates.ssmdbook",
+        tmp_path / "duplicates.ssmd-bundle",
         (5, 6),
         names={
             5: "chapters/part-a/chapter.ssmd.md",
@@ -488,7 +489,7 @@ def test_duplicate_source_basenames_are_rejected_before_output_creation(
 def test_existing_variant_corruption_and_nonempty_unindexed_directory_fail_closed(
     tmp_path: Path, capsys
 ) -> None:
-    root = _write_book(tmp_path / "corrupt.ssmdbook", (5, 6))
+    root = _write_book(tmp_path / "corrupt.ssmd-bundle", (5, 6))
     profile_path = root / "narration.renderprofile.toml"
     profile = _profile(profile_path)
     variant = _variant(root, profile)
@@ -503,7 +504,7 @@ def test_existing_variant_corruption_and_nonempty_unindexed_directory_fail_close
 def test_malformed_set_and_missing_snapshot_fail_closed_even_with_force(
     tmp_path: Path, capsys
 ) -> None:
-    root = _write_book(tmp_path / "provenance.ssmdbook", (5, 6))
+    root = _write_book(tmp_path / "provenance.ssmd-bundle", (5, 6))
     profile_path = root / "narration.renderprofile.toml"
     profile = _profile(profile_path)
     assert _render(root, profile_path, "--chapters", "5") == 0
@@ -527,7 +528,7 @@ def test_malformed_set_and_missing_snapshot_fail_closed_even_with_force(
 def test_existing_set_and_snapshot_mismatches_are_not_bypassed_by_force(
     tmp_path: Path, capsys
 ) -> None:
-    root = _write_book(tmp_path / "mismatch.ssmdbook", (5, 6))
+    root = _write_book(tmp_path / "mismatch.ssmd-bundle", (5, 6))
     profile_a_path = root / "narration.renderprofile.toml"
     profile_b_path = root / "other.renderprofile.toml"
     profile_a = _profile(profile_a_path, "amy")

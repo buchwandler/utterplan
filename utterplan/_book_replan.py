@@ -23,17 +23,17 @@ from renderplan import (
 )
 from renderplan import codec as renderplan_codec
 
+from ._book_service import BookServiceError, _path_is_within
 from .atomic_io import atomic_write_text
-from .book import BookServiceError, _path_is_within
 from .exceptions import UtterPlanError
 from .model import FlowPlan
 from .renderplan_export import build_render_plan
-from .ssmdbook import (
-    SSMDBookChapter,
-    SSMDBookError,
-    SSMDBookIndex,
-    load_ssmdbook_index,
-    select_ssmdbook_chapters,
+from .ssmd_bundle import (
+    BundleItem,
+    SsmdBundleError,
+    SsmdBundleIndex,
+    load_ssmd_bundle,
+    select_bundle_items,
 )
 
 ReplanStatus = Literal["written", "planned", "failed", "skipped", "unchanged"]
@@ -149,8 +149,8 @@ BookReplanStartCallback = Callable[[BookReplanStart], None]
 
 @dataclass(frozen=True, slots=True)
 class _BookContext:
-    index: SSMDBookIndex
-    chapters: tuple[SSMDBookChapter, ...]
+    index: SsmdBundleIndex
+    chapters: tuple[BundleItem, ...]
     renderplan_root: Path
     variant_dir: Path
     set_path: Path
@@ -277,9 +277,9 @@ def replan_book(
 
 def _prepare_book(request: BookReplanRequest) -> _BookContext:
     try:
-        index = load_ssmdbook_index(request.book)
-        selected = select_ssmdbook_chapters(index, request.chapters)
-    except SSMDBookError as exc:
+        index = load_ssmd_bundle(request.book)
+        selected = select_bundle_items(index, request.chapters)
+    except SsmdBundleError as exc:
         code = (
             "renderplan.replan.book.chapter_missing"
             if "missing source number" in str(exc)

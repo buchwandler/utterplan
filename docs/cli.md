@@ -136,188 +136,32 @@ Compile reports use format version 2. Each successful item records its resolved 
 
 Shared planning options include `--language`, `--input-format auto|plain|ssmd`, `--text-preparation`, `--spacy`, and `--renderability`. `--diagnostics warnings|all|none` controls terminal detail (default `warnings`): warnings mode suppresses informational diagnostics, all includes them, and none suppresses non-failure diagnostics. Failures are always reported, and the operational report always retains complete diagnostics. Progress, selected diagnostic details, actionable errors, and final counts are written to stderr. Exit status is 0 if every input succeeds, 1 if any input fails, and 2 for usage errors such as output collisions. `--fail-fast` skips later requests after the first failure but preserves all completed outputs and updates the report.
 
-## Compile one SSMDDoc workspace
+## Manifest-driven bundle lifecycle
 
-`compile-document` reads a single editable `ssmdconvert.document` v1 workspace and compiles its canonical SSMD 0.9 document into one plan. It accepts the workspace root or its canonical `document.ssmd.md` path:
+The `bundle` command is the only workspace entry point. It requires the canonical `<name>.ssmd-bundle/` directory and dispatches from `manifest.json`; chapter directories and document files are not accepted as alternate roots. Supported manifest kinds are book (`ssmdconvert.book`, schema 1) and document (`ssmdconvert.document`, schema 1).
 
 ```text
-utterplan compile-document INPUT [--output-dir PATH] [--language LANGUAGE]
+utterplan bundle compile BUNDLE [--chapters SELECTOR]
+  [--output-dir PATH] [--language LANGUAGE]
   [--text-preparation {auto,ssmd,spokenform,identity}]
   [--renderability {strict,repair}] [--spacy {auto,off,sm,md,lg,trf}]
-  [--force] [--report PATH] [--diagnostics {warnings,all,none}]
-```
+  [--force] [--fail-fast] [--report PATH]
+  [--diagnostics {warnings,all,none}]
 
-The default output directory is `<workspace>/utterplan/`, containing `document.utterplan.toml` and `compile-report.toml`. `--output-dir` and `--report` override those locations. Existing plan files require `--force`; output collisions with the source or manifest are rejected. A document header's language is authoritative; `--language`/`--lang` is a fallback when it is absent.
-
-Editable content wins over the stored manifest digest: compilation reads the current `document.ssmd.md` but never modifies the manifest or source. The command has no `--input-format`, chapter selection, or `--fail-fast`; it handles one document. The existing `compile` and `validate` commands also accept the workspace root or canonical document path, while `compile` retains its normal stdout/`-o` behavior. This is not `compile-book`: an SSMDDoc creates one plan, while an SSMDBook orchestrates independent chapter plans. ZIP bundles are not supported and `ssmdconvert` is not a runtime dependency. See the [SSMDDoc guide](ssmdoc.md) for format validation and the `compile_ssmdoc()` Python API.
-
-## Project an SSMDDoc RenderPlan
-
-`render-document` projects the already-saved single-document UtterPlan through an explicit RenderProfile. It never compiles implicitly:
-
-```text
-utterplan render-document INPUT --profile PROFILE
-  [--utterplan-dir PATH] [--output-root PATH] [--variant LABEL]
-  [--force] [--report PATH]
-```
-
-By default it reads `<workspace>/utterplan/document.utterplan.toml` and writes a profile-fingerprinted variant under `<workspace>/renderplan/<label>--<profile-id-prefix>/`, containing `renderprofile.toml`, `document.renderplan.toml`, and `render-report.toml`. `--variant` changes only the readable label; the profile fingerprint remains part of the directory identity. A profile mismatch or ambiguous existing snapshot is rejected even with `--force`. This is a one-document projection, not a book-set workflow. See the [SSMDDoc guide](ssmdoc.md).
-
-The start summary also lists the document's required roles and coverage. Coverage is checked before a new variant directory, profile snapshot, or RenderPlan is written; a missing role leaves no partial variant.
-
-## Compile chapters from an SSMDBook workspace
-
-`compile-book` discovers selected SSMD chapters from an editable `.ssmdbook` manifest and compiles each chapter independently through the batch compiler. Pass either the book directory or its canonical `chapters/` directory:
-
-```bash
-utterplan compile-book novel.ssmdbook --chapters 5-17
-utterplan compile-book novel.ssmdbook/chapters --chapters 1,3-5
-```
-
-The workflow used from inside the workspace is:
-
-```bash
-cd "Platform Decay - Martha Wells.ssmdbook"
-
-utterplan compile-book chapters --chapters 5-17
-```
-
-`--chapters` selects manifest `source_number` values, not filenames or manifest indexes. It accepts `all` (the default), one number, inclusive ranges, or comma-separated combinations such as `1,3-5,9`. Duplicate selections do not duplicate work, and selected chapters always follow manifest array order. A selected missing source number or malformed selector is rejected before compilation.
-
-By default, plans and the operational report are written to `<book-root>/utterplan/`. Use `--output-dir PATH` to override the destination. One canonical v7 `.utterplan.toml` plan is written per selected chapter, plus `compile-report.toml`. Existing plans are protected unless `--force` is given; `--fail-fast` skips later chapters after the first failure. `--report PATH` overrides the report location. Duplicate output names, report/plan collisions, and writes into the source `chapters/` directory or over `manifest.json` are rejected before writing.
-
-Shared planning options are `--language`/`--lang`, `--text-preparation`, `--renderability`, `--spacy`, and `--diagnostics warnings|all|none` (default `warnings`). The diagnostics option controls terminal verbosity; failures are always reported, and the operational report retains all diagnostic details. Chapter documents are SSMD 0.9 by contract, so `compile-book` does not accept `--input-format`. The manifest is read-only: edited chapter content is compiled as it currently exists even if its recorded digest is stale, and UtterPlan never refreshes the manifest or chapter hashes. Only selected chapter files are opened, so an unrelated broken chapter outside the selection does not block the request.
-
-The version-2 compile report identifies each successful chapter's resolved preparation mode (`ssmd`, `spokenform`, or `identity`), includes complete diagnostics and severity counts, a `renderability_repair_count`, and a `degraded_linguistics` flag. Compatibility fields `repair_count` and `repairs` still include segmentation diagnostics regardless of severity; use the diagnostic severity fields and `diagnostics` list for interpretation. The report is operational metadata; partial-success, atomic per-plan writes, and manifest immutability are unchanged.
-
-For the full editable-workspace behavior and examples, see the [SSMDBook guide](ssmdbook.md).
-
-## Produce RenderPlans for selected SSMDBook chapters
-
-`render-plan` remains the low-level one-file projection and replan command.
-`render-book` is the batch convenience workflow: it loads existing schema-v7
-UtterPlans for selected manifest chapters and writes one RenderPlan per chapter
-for a shared RenderProfile.
-
-All ordinary load, validation, inspection, explanation, preview, and RenderPlan commands accept schema v7 only. Older plans fail with `schema.version_unsupported` and the guidance `This build accepts UtterPlan schema 7 only. Recompile the source with the current UtterPlan.` Use `utterplan migrate` only for the explicit serialized-data migration path; it is not invoked implicitly by normal loading.
-
-```text
-utterplan render-book INPUT --profile PROFILE [--chapters SELECTOR]
+utterplan bundle render BUNDLE --profile PROFILE [--chapters SELECTOR]
   [--utterplan-dir PATH] [--output-root PATH] [--variant LABEL]
   [--force] [--fail-fast] [--report PATH]
-```
 
-`INPUT` is an SSMDBook root containing `manifest.json` or its canonical
-`chapters/` directory. `--chapters` uses the same manifest `source_number`
-selector as `compile-book`: `all` (default), one number, an inclusive range, or
-comma-separated selections such as `1,3-5,9`. Chapters remain in manifest order.
-`--profile` is required and is loaded once through the shared RenderPlan codec; UtterPlan does not call VoiceRender or probe engines.
-
-Before initializing a new variant, `render-book` checks role coverage across all readable selected chapter plans. A single incomplete chapter fails the projection with the missing role names and affected chapter IDs; no new profile snapshot or `renderplan-set.toml` is written. The start summary lists the aggregate required roles and complete coverage. Other missing/invalid source-plan behavior is unchanged.
-
-Defaults and behavior:
-
-- `--utterplan-dir`: `<book-root>/utterplan`; it must already exist. A missing
-  selected plan is an item failure, not a shared configuration error.
-- `--output-root`: `<book-root>/renderplan`. The command appends a profile
-  variant directory named `<label>--<profile-id-prefix>`; it is not an output
-  directory override for individual files.
-- `--variant`: optional safe human-readable label. By default, the label comes
-  from the profile filename (`narration.renderprofile.toml` becomes `narration`);
-  the 12-hex-character fingerprint is always appended.
-- `--force`: replace selected existing RenderPlan files only. It does not bypass
-  profile-ID mismatches, invalid set metadata, unsafe paths, or collisions.
-- `--fail-fast`: after the first item failure, later selected chapters are
-  recorded as skipped. Otherwise, processing continues.
-- `--report`: override the per-invocation `render-report.toml` location.
-
-Each variant contains a canonical `renderprofile.toml` snapshot,
-`renderplan-set.toml` collection index, latest-invocation `render-report.toml`,
-and one `.renderplan.toml` file per successful chapter. The set index stores the
-full canonical `profile_id`, source profile location, and source/render plan IDs.
-Repeated invocations with the same profile reuse the variant and upsert entries
-without removing other successful chapters; a different profile identity selects
-a different default variant. UtterPlan refuses to adopt a non-empty directory
-without a valid set or to reuse a missing/mismatched snapshot.
-
-The command does not read chapter content or modify the source manifest, chapter
-files, or UtterPlans. Unsafe output roots inside `chapters/`, input/output or
-metadata collisions, duplicate basenames, and invalid shared profile/set state
-are rejected before chapter processing. Exit status is 0 when all selected
-chapters succeed, 1 when any chapter fails, and 2 for usage or shared-configuration
-errors. See the [SSMDBook workflow guide](ssmdbook.md) for end-to-end and multi-voice examples.
-
-## Replan active RenderPlans for selected chapters
-
-`replan-book` is the book/variant orchestration for VoiceRender's capacity feedback.
-It loads the profile snapshot owned by the existing RenderPlanSet; callers must select
-the exact variant directory, not supply another profile:
-
-VoiceRender supplies capacity feedback: UtterPlan does not add renderer-specific
-metrics, a splitter, engine selection, synthesis, or audio composition.
-
-```text
-utterplan replan-book INPUT --variant VARIANT [--chapters SELECTOR]
+utterplan bundle replan BUNDLE --variant VARIANT [--chapters SELECTOR]
   [--renderplan-root PATH] [--voicerender-root PATH] [--report PATH]
   [--dry-run] [--fail-fast] [--explain] [--json]
 ```
 
-Example repeatable lifecycle:
+`BUNDLE` must be a `.ssmd-bundle/` root. `--chapters` defaults to `all`. Book selection uses manifest `source_number` values and accepts one number, an inclusive range, or comma-separated combinations such as `1,3-5,9`; selected items retain manifest order. Document bundles support only `--chapters all`. Source paths are validated against the bundle root, and symlinks or path escapes are rejected.
 
-```bash
-# Initial projection and exact renderer preflight/render
-utterplan render-book . --profile narration4.renderprofile.toml --variant narration4 --chapters 5
-voicerender render-book . --variant narration4--28f616b6fe3b --chapters 5 \
-  --emphasis-policy defer-to-compose
+Compilation writes one schema-v7 FlowPlan per selected item and an operational `compile-report.toml` under `<bundle>/utterplan/` by default. Rendering reads those saved plans and requires an explicit RenderProfile; it writes profile-fingerprinted RenderPlans, a profile snapshot, and an operational report (book bundles also maintain a set index) under `<bundle>/renderplan/`. Replanning refines active plans from matching VoiceRender preflight feedback and updates only the selected active entries. These commands never mutate the manifest or source documents. `render-plan` remains the low-level one-file projection/replan command.
 
-# If VoiceRender returns preflight.replan, refine only the active chapter plan
-utterplan replan-book . --variant narration4--28f616b6fe3b --chapters 5
-
-# Preflight/render the new active plan; repeat replan-book and this command if needed
-voicerender render-book . --variant narration4--28f616b6fe3b --chapters 5 \
-  --emphasis-policy defer-to-compose
-```
-
-`INPUT` is an SSMDBook root or its canonical `chapters/` directory. Chapter selectors
-use manifest source numbers and retain manifest order. The default RenderPlan root is
-`<book-root>/renderplan`; the default VoiceRender root is `<book-root>/voicerender`.
-The command reads `<variant>/renderprofile.toml` and the selected active plan paths
-from `renderplan-set.toml`. It discovers reports under
-`<voicerender-root>/<variant>/<chapter-id>/`, preferring `preflight-recheck.toml`
-over `preflight.toml` when both fully validate against the exact active RenderPlan.
-
-Only a matching `status="replan"` report is accepted. Missing reports, stale parent
-reports, mismatched profile/plan identities, and `ok`/`reject` statuses fail that
-chapter; the command never falls back to an initial RenderPlan projection. A successful
-replan writes a deterministic immutable child plan first, then atomically changes only
-the selected chapter's active set entry. Parent plans, source UtterPlans, profile
-identity, and unselected set entries remain unchanged. Run VoiceRender again after
-each replan; repeat the two feedback steps until preflight is `ok`.
-
-Defaults and behavior:
-
-- `--variant` is required and must name the existing full variant directory, including
-  its profile fingerprint. The profile snapshot is loaded from that collection.
-- `--chapters`: `all`, one source number, an inclusive range, or comma-separated
-  selections; default is `all`.
-- `--renderplan-root` and `--voicerender-root` override the collection/data roots,
-  not the selected variant or chapter paths recorded by the contracts.
-- `--report`: defaults to `<variant-dir>/replan-report.toml`; progress is persisted
-  after each chapter and the final report is marked complete.
-- `--dry-run`: validates and plans children without writing child RenderPlans or
-  changing the set index. It writes the operational report and reports successful
-  items as `planned`.
-- `--fail-fast`: later chapters are recorded as skipped after the first failure;
-  without it, later selected chapters continue.
-- `--explain` uses the existing per-request RenderPlan explanation; `--json` emits
-  structured outcome paths, identities, replacement counts, errors, and optional
-  explanations.
-
-Re-running with a stale report after activating a child fails with
-`renderplan.replan.book.preflight_stale`. VoiceRender must first measure the active
-child to produce its own matching feedback report.
-
-## Explain a plan
+The diagnostics option controls compile terminal verbosity; failures are always reported and complete diagnostics remain in the operational report. `--fail-fast` skips later selected items after a failure. `--force` replaces selected plan artifacts but does not bypass unsafe paths, metadata collisions, or profile-identity checks. Exit status is 0 when all selected work succeeds, 1 when an item fails, and 2 for usage or shared-configuration errors. See the [bundle guide](bundles.md) for layouts, safety behavior, and Python examples.
 
 Explain an existing compiled plan as a human-readable speech narrative:
 

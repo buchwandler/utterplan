@@ -11,20 +11,12 @@ import tomlkit
 from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile, load_renderplan_set
 from renderplan import codec as renderplan_codec
 
-from utterplan import (
+from utterplan._book_service import (
     BookCompileRequest,
-    BookCompileResult,
     BookRenderRequest,
-    BookRenderResult,
-    BookReplanError,
-    BookReplanRequest,
-    BookReplanResult,
-    BookReplanStart,
     BookServiceError,
-    ReplanOutcome,
     compile_book,
     render_book,
-    replan_book,
 )
 from utterplan.config import LinguisticsConfig, PlannerConfig
 from utterplan.model import FlowPlan, FlowSegment, FlowUnit, SegmentDirectives, VoiceDirective
@@ -77,76 +69,23 @@ def _profile(path: Path, voice: str = "amy") -> RenderProfile:
     return renderplan_codec.load_profile(path)
 
 
-def test_public_request_and_result_models_are_available_at_package_root() -> None:
-    compile_request = BookCompileRequest(Path("book"))
-    render_request = BookRenderRequest(Path("book"), Path("profile.renderprofile.toml"))
-    compile_result = BookCompileResult(
-        workspace=Path("book"),
-        chapter_selector="all",
-        selected_chapter_ids=(),
-        output_dir=Path("book/utterplan"),
-        report_path=Path("book/utterplan/compile-report.toml"),
-        outcomes=(),
+def test_package_root_exports_unified_bundle_services_not_split_services() -> None:
+    import utterplan
+
+    assert callable(utterplan.compile_bundle)
+    assert callable(utterplan.render_bundle)
+    assert callable(utterplan.replan_bundle)
+    for name in ("compile_book", "render_book", "replan_book"):
+        assert not hasattr(utterplan, name)
+
+    assert BookCompileRequest(Path("book")).book == Path("book")
+    assert BookRenderRequest(Path("book"), Path("profile.renderprofile.toml")).profile == Path(
+        "profile.renderprofile.toml"
     )
-    render_result = BookRenderResult(
-        workspace=Path("book"),
-        chapter_selector="all",
-        profile_path=Path("profile.renderprofile.toml"),
-        profile_id="sha256:abc",
-        variant="profile--abc",
-        variant_dir=Path("book/renderplan/profile--abc"),
-        snapshot_path=Path("book/renderplan/profile--abc/renderprofile.toml"),
-        set_path=Path("book/renderplan/profile--abc/renderplan-set.toml"),
-        report_path=Path("book/renderplan/profile--abc/render-report.toml"),
-        selected_chapter_ids=(),
-        outcomes=(),
-    )
-    replan_request = BookReplanRequest(Path("book"), variant="narration--abc")
-    replan_outcome = ReplanOutcome(
-        index=1,
-        id="chapter-0005",
-        source_number=5,
-        status="failed",
-        utterplan=None,
-        previous_renderplan=None,
-        previous_render_plan_id=None,
-        preflight=None,
-    )
-    replan_result = BookReplanResult(
-        workspace=Path("book"),
-        variant="narration--abc",
-        variant_dir=Path("book/renderplan/narration--abc"),
-        set_path=Path("book/renderplan/narration--abc/renderplan-set.toml"),
-        profile_path=Path("book/renderplan/narration--abc/renderprofile.toml"),
-        report_path=Path("book/renderplan/narration--abc/replan-report.toml"),
-        selected_chapter_ids=("chapter-0005",),
-        dry_run=False,
-        outcomes=(replan_outcome,),
-    )
-    replan_start = BookReplanStart(
-        workspace=Path("book"),
-        chapter_selector="5",
-        selected_chapter_ids=("chapter-0005",),
-        variant="narration--abc",
-        variant_dir=replan_result.variant_dir,
-        set_path=replan_result.set_path,
-        profile_path=replan_result.profile_path,
-        voicerender_dir=Path("book/voicerender/narration--abc"),
-        report_path=replan_result.report_path,
-    )
-    assert compile_request.book == Path("book")
-    assert render_request.profile == Path("profile.renderprofile.toml")
-    assert compile_result.exit_code == render_result.exit_code == 0
-    assert replan_request.book == Path("book")
-    assert replan_result.exit_code == 1 and replan_result.failed == 1
-    assert replan_start.variant == replan_request.variant
-    assert callable(replan_book)
-    assert issubclass(BookReplanError, BookServiceError)
-    assert compile_result.failed == render_result.failed == 0
 
 
 def test_public_book_services_return_artifact_paths_and_progress(tmp_path: Path) -> None:
-    root = _book(tmp_path / "ordered.ssmdbook", (5, 7, 6))
+    root = _book(tmp_path / "ordered.ssmd-bundle", (5, 7, 6))
     compile_events = []
     compiled = compile_book(
         root,
@@ -214,7 +153,7 @@ def test_public_book_services_return_artifact_paths_and_progress(tmp_path: Path)
 def test_compile_book_selects_original_source_numbers(
     tmp_path: Path, selector: str, expected: tuple[int, ...]
 ) -> None:
-    root = _book(tmp_path / "selection.ssmdbook", (5, 7, 6, 11, 13, 12))
+    root = _book(tmp_path / "selection.ssmd-bundle", (5, 7, 6, 11, 13, 12))
     result = compile_book(
         root,
         chapters=selector,
@@ -232,8 +171,8 @@ def test_public_api_matches_cli_artifacts_and_report_semantics(tmp_path: Path, c
     from utterplan.cli import main
 
     selector = "5,7,11-13"
-    api_root = _book(tmp_path / "api.ssmdbook", (5, 7, 6, 11, 13, 12))
-    cli_root = _book(tmp_path / "cli.ssmdbook", (5, 7, 6, 11, 13, 12))
+    api_root = _book(tmp_path / "api.ssmd-bundle", (5, 7, 6, 11, 13, 12))
+    cli_root = _book(tmp_path / "cli.ssmd-bundle", (5, 7, 6, 11, 13, 12))
     config = PlannerConfig(
         language="en-US",
         text_preparation="identity",
@@ -243,7 +182,8 @@ def test_public_api_matches_cli_artifacts_and_report_semantics(tmp_path: Path, c
     assert (
         main(
             [
-                "compile-book",
+                "bundle",
+                "compile",
                 str(cli_root),
                 "--chapters",
                 selector,
@@ -297,7 +237,8 @@ def test_public_api_matches_cli_artifacts_and_report_semantics(tmp_path: Path, c
     assert (
         main(
             [
-                "render-book",
+                "bundle",
+                "render",
                 str(cli_root),
                 "--chapters",
                 selector,
@@ -374,19 +315,18 @@ def test_public_api_matches_cli_artifacts_and_report_semantics(tmp_path: Path, c
     ]
 
 
-def test_package_root_book_api_does_not_import_cli() -> None:
+def test_package_root_bundle_api_does_not_import_cli() -> None:
     code = (
         "import sys, utterplan; "
-        "names=('BookCompileRequest','BookCompileResult','BookRenderRequest',"
-        "'BookRenderResult','compile_book','render_book'); "
-        "assert all(hasattr(utterplan, name) for name in names); "
+        "names=('compile_bundle','render_bundle','replan_bundle'); "
+        "assert all(callable(getattr(utterplan, name)) for name in names); "
         "assert 'utterplan.cli' not in sys.modules"
     )
     subprocess.run([sys.executable, "-c", code], check=True, capture_output=True, text=True)
 
 
 def test_render_book_incremental_reuse_and_force(tmp_path: Path) -> None:
-    root = _book(tmp_path / "incremental.ssmdbook", (5, 6, 7))
+    root = _book(tmp_path / "incremental.ssmd-bundle", (5, 6, 7))
     compile_book(
         root,
         planner_config=PlannerConfig(
@@ -412,7 +352,7 @@ def test_render_book_incremental_reuse_and_force(tmp_path: Path) -> None:
 
 
 def test_render_book_refuses_orphan_variant_and_profile_mismatch(tmp_path: Path) -> None:
-    root = _book(tmp_path / "orphan.ssmdbook", (5,))
+    root = _book(tmp_path / "orphan.ssmd-bundle", (5,))
     compile_book(
         root,
         planner_config=PlannerConfig(
@@ -443,7 +383,7 @@ def test_render_book_refuses_orphan_variant_and_profile_mismatch(tmp_path: Path)
 
 
 def test_render_book_refuses_snapshot_identity_mismatch(tmp_path: Path) -> None:
-    root = _book(tmp_path / "snapshot.ssmdbook", (5,))
+    root = _book(tmp_path / "snapshot.ssmd-bundle", (5,))
     compile_book(
         root,
         planner_config=PlannerConfig(
@@ -463,7 +403,7 @@ def test_render_book_refuses_snapshot_identity_mismatch(tmp_path: Path) -> None:
 
 
 def test_public_book_services_refuse_outputs_inside_source_chapters(tmp_path: Path) -> None:
-    root = _book(tmp_path / "unsafe.ssmdbook", (5,))
+    root = _book(tmp_path / "unsafe.ssmd-bundle", (5,))
     with pytest.raises(BookServiceError, match="inside the source chapters"):
         compile_book(root, output_dir=root / "chapters" / "plans")
     assert not (root / "chapters/plans").exists()
@@ -484,7 +424,7 @@ def test_public_book_services_refuse_outputs_inside_source_chapters(tmp_path: Pa
 
 
 def test_render_book_aggregates_missing_roles_before_variant_initialization(tmp_path: Path) -> None:
-    root = _book(tmp_path / "role-coverage.ssmdbook", (5, 6, 7))
+    root = _book(tmp_path / "role-coverage.ssmd-bundle", (5, 6, 7))
     utterplan_dir = root / "utterplan"
     utterplan_dir.mkdir()
     for number, role in ((5, None), (6, "host"), (7, "guest")):

@@ -7,21 +7,23 @@ from pathlib import Path
 from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
 from renderplan import codec as renderplan_codec
 
+from utterplan._document_service import _compile_document_service, _render_document_service
 from utterplan.config import LinguisticsConfig, PlannerConfig
-from utterplan.document_workspace import compile_ssmdoc, render_ssmdoc
 from utterplan.model import FlowPlan, FlowSegment, FlowUnit, SegmentDirectives, VoiceDirective
 
-FIXTURE = Path(__file__).parent / "fixtures/ssmdoc-v1/story.ssmdoc"
+FIXTURE = Path(__file__).parent / "fixtures/document-bundle-v1/story.ssmd-bundle"
 
 
-def test_render_ssmdoc_projects_canonical_flowplan_without_book_index(tmp_path: Path) -> None:
-    root = tmp_path / "story.ssmdoc"
+def test_render_document_bundle_projects_canonical_flowplan_without_book_index(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "story.ssmd-bundle"
     shutil.copytree(FIXTURE, root)
     source = root / "document.ssmd.md"
     source.write_text(
         '---\nssmd_version: "0.9"\nlanguage: en-US\n---\nHello there.\n', encoding="utf-8"
     )
-    compile_ssmdoc(
+    _compile_document_service(
         root,
         planner_config=PlannerConfig(
             language="en-US",
@@ -39,7 +41,7 @@ def test_render_ssmdoc_projects_canonical_flowplan_without_book_index(tmp_path: 
         pauses=PausePolicy(mode="manual", durations_ms={"sentence": 250}),
     )
     renderplan_codec.save_profile(profile, profile_path)
-    result = render_ssmdoc(root, profile=profile_path)
+    result = _render_document_service(root, profile=profile_path)
     assert result.source_plan_path == root / "utterplan" / "document.utterplan.toml"
     assert result.variant_dir.parent == root / "renderplan"
     assert result.renderplan_path.name == "document.renderplan.toml"
@@ -59,14 +61,14 @@ def test_render_ssmdoc_projects_canonical_flowplan_without_book_index(tmp_path: 
     )
 
 
-def test_render_ssmdoc_returns_multi_role_coverage_and_bindings(tmp_path: Path) -> None:
-    root = tmp_path / "multi-role.ssmdoc"
+def test_render_document_bundle_returns_multi_role_coverage_and_bindings(tmp_path: Path) -> None:
+    root = tmp_path / "multi-role.ssmd-bundle"
     shutil.copytree(FIXTURE, root)
     (root / "document.ssmd.md").write_text(
         '---\nssmd_version: "0.9"\nlanguage: en-US\n---\nHost, guest, and narrator.\n',
         encoding="utf-8",
     )
-    compile_ssmdoc(
+    _compile_document_service(
         root,
         planner_config=PlannerConfig(
             language="en-US",
@@ -109,7 +111,7 @@ def test_render_ssmdoc_returns_multi_role_coverage_and_bindings(tmp_path: Path) 
     )
     renderplan_codec.save_profile(profile, profile_path)
 
-    result = render_ssmdoc(root, profile=profile_path)
+    result = _render_document_service(root, profile=profile_path)
 
     assert result.required_roles == ("host", "guest", "narrator")
     assert result.available_roles == ("guest", "host", "narrator")

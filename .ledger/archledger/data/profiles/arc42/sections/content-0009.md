@@ -7,7 +7,7 @@ section: architecture_decisions
 title: Architecture Decisions
 order: 90
 status: accepted
-version: 3
+version: 4
 body_format: markdown
 ---
 
@@ -42,10 +42,13 @@ body_format: markdown
   coordinate maps, preparation provenance, diagnostics, and renderability evidence
   in a separate versioned TOML. _Rationale:_ provenance must never alter executable
   content or identity.
-- **AD: One document, one plan; books are orchestration.** `compile-book` and
-  `render-book` compose per-file operations without a combined book-level semantic
-  plan and never modify the manifest or chapters. _Rationale:_ keeps the engine-
-  independent boundary intact and chapter plans canonical.
+- **AD: One canonical, manifest-dispatched bundle lifecycle.** All bundle commands
+  accept only `<name>.ssmd-bundle/` roots and choose book or document behavior from
+  schema-v1 `manifest.json`. Books produce independent plans per selected source
+  number; a document bundle produces one plan. Compilation, projection, and replan
+  never modify source files or manifests. _Rationale:_ preserve item-level semantics
+  and source ownership while giving downstream packages one stable contract.
+
 - **AD: Best-effort spaCy with deterministic fallback.** Models are preferred in
   `sm`/`md`/`lg`/`trf` order when already installed and never downloaded; without
   spaCy, planning continues with deterministic fallback tokens. _Rationale:_
@@ -53,5 +56,3 @@ body_format: markdown
 - **AD: Package and schema versions are independent.** Migration preserves a
   compiled plan; replanning is a separate operation. _Rationale:_ schema evolution
   must not force package-version coupling or silent replans.
-
-- **AD: SSMDDoc is one document, not a book.** An `ssmdconvert.document` v1 workspace resolves to its current canonical SSMD source and the existing one-document compiler, producing one FlowPlan. Editable directory digests do not override current source content; UtterPlan neither refreshes nor mutates the workspace. _Rationale:_ preserve one-document/one-plan semantics and keep source-workspace ownership in `ssmdconvert`.

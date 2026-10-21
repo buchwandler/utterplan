@@ -1,6 +1,6 @@
 ---
 title: "Architecture Documentation"
-version: 3
+version: 4
 generator: "archledger 0.4.0"
 arc42_template_version: "9.0-EN"
 ---
@@ -56,13 +56,17 @@ Downstream FlowPlan consumers
 G2P / synthesis / audio (downstream)
 ```
 
-The compiler still handles one document at a time; the CLI's explicit SSMDBook
-commands (`compile-book`, `render-book`) discover chapters and orchestrate per-file
-workspaces without changing book content.
+The compiler produces one FlowPlan per source item. The `bundle` CLI and public
+services accept a canonical `.ssmd-bundle/` root and dispatch book or document
+behavior from the `manifest.json` format. Compilation and profile-specific
+RenderPlan projection leave source content and manifests unchanged.
 
-## Document workspaces
+## Manifest-driven bundles
 
-An editable `ssmdconvert.document` v1 workspace (`.ssmdoc`) is another source path for the one-document compiler. `compile-document` discovers its canonical current SSMD document and writes one FlowPlan plus an operational report under `<workspace>/utterplan/`; `render-document` projects that saved plan with an explicit profile into `<workspace>/renderplan/<label>--<profile-id-prefix>/`. Neither command creates book-set semantics or alters workspace source material.
+An `ssmdconvert.book` v1 manifest maps chapters to independently compiled items;
+an `ssmdconvert.document` v1 manifest maps one document to one FlowPlan. Both use
+the same root shape and unified `bundle compile`, `bundle render`, and `bundle replan` lifecycle. The manifest format, not the directory contents, determines
+the kind.
 
 ## Requirements Overview
 
@@ -153,8 +157,8 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
 - Canonical segmentation, safe-boundary inventory, authored pause intents, typed
   directives, and markers.
 - Optional provenance trace sidecars and renderer-neutral diagnostics.
-- SSMDBook chapter discovery and per-file orchestration (`compile-book`,
-  `render-book`) without changing manifest or chapter content.
+- Manifest-driven book/document bundle dispatch through the unified `bundle` commands,
+  using only canonical `.ssmd-bundle/` roots and leaving source content unchanged.
 - Optional RenderPlan projection and deterministic replan refinement for stored
   schema-v7 plans.
 
@@ -168,11 +172,16 @@ UtterPlan depends directly on SSMD, PhraseSplit, and TTSReady:
 - Renderer chunking, token-budget, and pause-realization choices.
 - Consumer-specific compatibility testing.
 
-## SSMDDoc source workspace
+## Manifest-driven bundle inputs
 
-- An editable `.ssmdoc` directory is discovered by its `ssmdconvert.document` v1 manifest, not by its directory suffix. Its canonical `document.ssmd.md` is the current compiler input.
-- The workspace remains one document to one FlowPlan. Manifest digests are provenance only for editable directories: UtterPlan compiles current content and never refreshes the manifest or edits the source.
-- `compile-document` is single-document convenience, not book orchestration. ZIP bundles, fake chapters, and an `ssmdconvert` runtime dependency are outside the contract.
+- Bundle commands accept only a canonical `<name>.ssmd-bundle/` root with a
+  `manifest.json`; the format field selects book or document behavior.
+- Book manifests map source-numbered chapters to independent FlowPlans and support
+  manifest-ordered selection.
+- Document manifests map one SSMD 0.9 source to one FlowPlan and accept only the
+  `all` selector.
+- Both kinds use the shared `bundle compile`, `bundle render`, and `bundle replan` lifecycle. Manifest digests remain provenance; current source content is
+  compiled without modifying the manifest or source files.
 
 ## Business Context
 
@@ -238,34 +247,39 @@ UtterPlan is one Python package (`utterplan`) exposing a library API and a CLI.
 Internal building blocks group as follows (module names refer to
 `utterplan/<module>.py`):
 
-| Block                       | Modules                                                                                                                                      | Responsibility                                                                                                                                                                                 |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Public entry points         | `__init__.py`, `cli.py`, `__main__.py`                                                                                                       | `compile_document`, `UtterancePlanner`, `FlowPlan`, `build_render_plan`, `preview_plan`; the `utterplan` command.                                                                              |
-| Compiler orchestration      | `compiler.py`, `planner.py`, `config.py`                                                                                                     | Stage wiring, `CompileResult`, `PlannerConfig`, progress callbacks.                                                                                                                            |
-| Document parsing            | `parsers.py`, `stages/document/plain.py`, `stages/document/ssmd.py`                                                                          | SSMD 0.9 and explicit plain-text document events (paragraphs, annotations, media spans).                                                                                                       |
-| Preparation                 | `preparation.py`, `stages/preparation/{identity,ssmd,ttsready}.py`                                                                           | Written-to-spoken preparation: TTSReady/Spokenform for plain text, SSMD-authoritative `sub` application for SSMD, exact-once semantics.                                                        |
-| Linguistic analysis         | `linguistics.py`, `spacy_models.py`, `language.py`                                                                                           | Best-effort spaCy enrichment with deterministic fallback, model-tier preference, language resolution.                                                                                          |
-| Segmentation and boundaries | `segmentation.py`, `token_topology.py`, `boundaries.py`, `spans.py`, `units.py`                                                              | Paragraph/sentence/part topology, advisory proposal validation, atomic media-span protection, canonical boundary inventory.                                                                    |
-| Semantics                   | `pauses.py`, `directives.py`                                                                                                                 | Authored `PauseIntent` values, renderer-neutral typed directives, markers.                                                                                                                     |
-| Flow projection             | `flow_projection.py`                                                                                                                         | Final `FlowUnit`/`FlowSegment` assembly with token-edge coverage checks.                                                                                                                       |
-| Plan model and identity     | `model.py`, `hashing.py`, `versioning.py`, `units.py`                                                                                        | Immutable FlowPlan v7 objects, deterministic `plan_id`, schema/version facts.                                                                                                                  |
-| Persistence                 | `toml_codec.py`, `codecs/{v4,v5,v6,v7}_toml.py`, `serialization.py`, `schema_registry.py`, `atomic_io.py`, `format.py`                       | `.utterplan.toml` write/read, migration-only historical codecs, atomic file IO, strict validation.                                                                                             |
-| Migration                   | `migration.py`, `migrations/registry.py`, `migrations/v1_to_v2.py` … `v6_to_v7.py`                                                           | Data-only sequential migration chain with recompile-required refusal at v6-to-v7.                                                                                                              |
-| RenderPlan projection       | `renderplan_projection.py`, `renderplan_grouping.py`, `renderplan_export.py`, `renderplan_replan.py`                                         | Optional schema-v7 FlowPlan to shared RenderPlan projection and deterministic replan refinement.                                                                                               |
-| Book orchestration          | `ssmdbook.py`, `batch.py`, `renderplan_batch.py`                                                                                             | SSMDBook manifest chapter discovery, `compile-many` incremental batch, `render-book` set projection; per-file workspaces only.                                                                 |
-| Diagnostics and explanation | `diagnostics.py`, `explain.py`, `preview.py`, `progress.py`, `renderability.py`, `attempts.py`, `attempt_serialization.py`, `trace_codec.py` | Renderer-neutral diagnostics, human-readable speech-plan explanation, chunk previews, typed progress events, renderability repair policy, inspect-only planning attempts, trace sidecar codec. |
+| Block                       | Modules                                                                                                                                             | Responsibility                                                                                                                                                                                 |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public entry points         | `__init__.py`, `cli.py`, `__main__.py`                                                                                                              | `compile_document`, `UtterancePlanner`, `FlowPlan`, `build_render_plan`, `preview_plan`; the `utterplan` command.                                                                              |
+| Public entry points         | `__init__.py`, `cli.py`, `__main__.py`                                                                                                              | `compile_document`, `compile_bundle`, `render_bundle`, `replan_bundle`, `UtterancePlanner`, `FlowPlan`, `build_render_plan`, `preview_plan`; the `utterplan` command.                          |
+| Document parsing            | `parsers.py`, `stages/document/plain.py`, `stages/document/ssmd.py`                                                                                 | SSMD 0.9 and explicit plain-text document events (paragraphs, annotations, media spans).                                                                                                       |
+| Preparation                 | `preparation.py`, `stages/preparation/{identity,ssmd,ttsready}.py`                                                                                  | Written-to-spoken preparation: TTSReady/Spokenform for plain text, SSMD-authoritative `sub` application for SSMD, exact-once semantics.                                                        |
+| Linguistic analysis         | `linguistics.py`, `spacy_models.py`, `language.py`                                                                                                  | Best-effort spaCy enrichment with deterministic fallback, model-tier preference, language resolution.                                                                                          |
+| Segmentation and boundaries | `segmentation.py`, `token_topology.py`, `boundaries.py`, `spans.py`, `units.py`                                                                     | Paragraph/sentence/part topology, advisory proposal validation, atomic media-span protection, canonical boundary inventory.                                                                    |
+| Semantics                   | `pauses.py`, `directives.py`                                                                                                                        | Authored `PauseIntent` values, renderer-neutral typed directives, markers.                                                                                                                     |
+| Flow projection             | `flow_projection.py`                                                                                                                                | Final `FlowUnit`/`FlowSegment` assembly with token-edge coverage checks.                                                                                                                       |
+| Plan model and identity     | `model.py`, `hashing.py`, `versioning.py`, `units.py`                                                                                               | Immutable FlowPlan v7 objects, deterministic `plan_id`, schema/version facts.                                                                                                                  |
+| Persistence                 | `toml_codec.py`, `codecs/{v4,v5,v6,v7}_toml.py`, `serialization.py`, `schema_registry.py`, `atomic_io.py`, `format.py`                              | `.utterplan.toml` write/read, migration-only historical codecs, atomic file IO, strict validation.                                                                                             |
+| Migration                   | `migration.py`, `migrations/registry.py`, `migrations/v1_to_v2.py` … `v6_to_v7.py`                                                                  | Data-only sequential migration chain with recompile-required refusal at v6-to-v7.                                                                                                              |
+| RenderPlan projection       | `renderplan_projection.py`, `renderplan_grouping.py`, `renderplan_export.py`, `renderplan_replan.py`                                                | Optional schema-v7 FlowPlan to shared RenderPlan projection and deterministic replan refinement.                                                                                               |
+| Bundle orchestration        | `ssmd_bundle.py`, `bundle.py`, `bundle_replan.py`, `_book_service.py`, `_book_replan.py`, `_document_service.py`, `batch.py`, `renderplan_batch.py` | Manifest-driven book/document compilation, profile projection, and replan refinement through the unified bundle API and CLI; one FlowPlan per source item.                                     |
+| Diagnostics and explanation | `diagnostics.py`, `explain.py`, `preview.py`, `progress.py`, `renderability.py`, `attempts.py`, `attempt_serialization.py`, `trace_codec.py`        | Renderer-neutral diagnostics, human-readable speech-plan explanation, chunk previews, typed progress events, renderability repair policy, inspect-only planning attempts, trace sidecar codec. |
 
-The public boundary is deliberately small: `compile_document`, `UtterancePlanner`,
-`FlowPlan`, `build_render_plan`, `preview_plan`, and the CLI. Everything else is
-private compiler machinery. Compiler-only normalized graph state remains private;
-when requested, the trace retains source text/hash, coordinate maps, preparation
-provenance, diagnostics, and renderability evidence in a separate versioned TOML
-sidecar. Trace state is not renderer input and does not affect plan identity or
-TOML.
+The public boundary includes `compile_document`, `compile_bundle`, `render_bundle`,
+`replan_bundle`, `UtterancePlanner`, `FlowPlan`, `build_render_plan`, `preview_plan`,
+and the CLI. Bundle loading, kind-specific adapters, and callbacks are exposed only
+where required by the unified integration contract; compiler machinery otherwise
+remains private. Compiler-only normalized graph state stays private; when requested,
+the trace retains source text/hash, coordinate maps, preparation provenance,
+diagnostics, and renderability evidence in a separate versioned TOML sidecar. Trace
+state is not renderer input and does not affect plan identity or TOML.
 
-## Document workspace orchestration
+## Bundle orchestration
 
-`ssmdoc.py` performs read-only manifest discovery and canonical path safety checks; `source_input.py` centralizes standalone-file and `.ssmdoc` source loading; and `document_workspace.py` delegates one stable `document-0001` CompileRequest to the existing batch persistence/report path. The CLI and public package API expose `compile-document` and `compile_ssmdoc()` without shadowing the in-memory `compile_document()` compiler.
+`ssmd_bundle.py` loads and validates canonical `.ssmd-bundle/` roots, dispatches
+from `manifest.json`, normalizes item selection, and enforces path containment.
+`bundle.py` and `bundle_replan.py` expose uniform compile, render, and replan
+services; private book and document helpers retain kind-specific persistence and
+report behavior. The generic source loader remains limited to standalone files.
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -292,36 +306,45 @@ FlowPlan is validated and atomically saved before the next source is processed;
 ordinary failures are reported and later inputs continue unless fail-fast is
 requested. Its TOML report is operational data, not a FlowPlan.
 
-## Scenario: book compile
+## Scenario: compile from a bundle
 
 ```text
-SSMDBook manifest + chapter source
-    -> utterplan compile-book
-    -> independent FlowPlans in utterplan/
+canonical <name>.ssmd-bundle/ + manifest.json + selected source items
+    -> utterplan bundle compile
+    -> one independent schema-v7 FlowPlan per selected item
+       + compile-report.toml under utterplan/
 ```
 
-`compile-book` reads the manifest and selected chapter source to produce each
-canonical semantic FlowPlan under `utterplan/` plus a `compile-report.toml`. It
-never modifies the manifest or chapter files.
+The manifest format determines book or document behavior. Book selectors use
+manifest source numbers and retain manifest order; a document bundle contains one
+item and accepts only the `all` selector. Current source content is authoritative;
+UtterPlan never refreshes the manifest or modifies source files.
 
-## Scenario: book render projection
+## Scenario: bundle RenderPlan projection
 
 ```text
-saved FlowPlans + one RenderProfile
-    -> utterplan render-book (existing RenderPlan projection)
-    -> profile-specific RenderPlans in renderplan/<label>--<profile-id-prefix>/
-       + UtterPlan-owned renderplan-set.toml and render-report.toml
+saved FlowPlans + explicit RenderProfile
+    -> utterplan bundle render
+    -> profile-specific RenderPlans under renderplan/<label>--<profile-fingerprint>/
+       + profile snapshot + report + book collection index when applicable
 ```
 
-`render-book` does not re-read chapter content: it loads already saved plans,
-projects each independently through the existing `build_render_plan()` path, and
-records successful chapter identities in the variant-local `renderplan-set.toml`.
-Variant directories include a readable label and a prefix of the canonical profile
-ID; the profile snapshot and strict set validation prevent mixing profiles or
-adopting unindexed output. RenderProfile + RenderPlan sets then flow to VoiceRender
-for validation, preflight, G2P, synthesis, and audio — all outside UtterPlan.
+Rendering reads saved plans only. Profile identity and role coverage are checked
+before outputs are written. VoiceRender owns downstream preflight, G2P, synthesis,
+and audio; UtterPlan remains engine-independent.
 
-## Scenario: load a saved plan
+## Scenario: bundle replan refinement
+
+```text
+active RenderPlan(s) + matching VoiceRender preflight feedback
+    -> utterplan bundle replan
+    -> deterministic child RenderPlan(s) + selected active-reference updates
+```
+
+Replanning requires the stored profile snapshot and feedback matching the exact
+active plan. Parent RenderPlans, source FlowPlans, profile identity, and unselected
+active references remain unchanged. A dry run validates and reports proposed
+children without changing active state.
 
 ```text
 current plan:
@@ -341,28 +364,6 @@ accepts TOML only and rejects JSON.
 RenderPlan and its matching preflight report are required together; UtterPlan does
 not calculate renderer-specific metrics.
 
-## Scenario: compile an editable SSMDDoc workspace
-
-```text
-ssmdconvert.document v1 manifest + current document.ssmd.md
-    -> utterplan compile-document
-    -> one FlowPlan at utterplan/document.utterplan.toml
-       + one compile-report.toml
-```
-
-The manifest validates the workspace contract and safe canonical path; SSMD 0.9 content is compiled by the existing single-document path. A stale stored digest does not block editable-directory compilation, and UtterPlan does not modify source material or model the document as a chapter.
-
-## Scenario: project a RenderPlan from an editable SSMDDoc workspace
-
-```text
-saved FlowPlan + explicit RenderProfile
-    -> utterplan render-document
-    -> one profile-specific RenderPlan at renderplan/<label>--<profile-id-prefix>/document.renderplan.toml
-       + canonical renderprofile.toml snapshot + render-report.toml
-```
-
-The command projects the existing plan without compiling source or invoking a renderer. Profile identity is embedded in the variant path, and a mismatched or ambiguous profile snapshot is rejected; source files and the SSMDDoc manifest remain unchanged.
-
 <!-- archledger: no accepted records for this section yet -->
 
 # Deployment View
@@ -374,8 +375,9 @@ or audio dependencies:
   dynamically derived from Git tags by setuptools-scm and is independent of the
   plan schema version.
 - **Installation shapes.** Installed as a library (`pip install utterplan`) for
-  downstream FlowPlan consumers, or with the `utterplan` CLI for direct SSMDBook and
-  SSMDDoc workflows. Development installs use `pip install -e '.[dev,docs]'`.
+  downstream FlowPlan consumers, or with the `utterplan` CLI for canonical
+  manifest-driven `.ssmd-bundle/` workflows. Development installs use
+  `pip install -e '.[dev,docs]'`.
 - **Optional linguistic enrichment.** spaCy models are preferred in `sm`, `md`,
   `lg`, `trf` order when already installed; UtterPlan never downloads models and
   continues with deterministic fallback tokens when spaCy or every compatible local
@@ -391,7 +393,9 @@ or audio dependencies:
 - **Quality gate.** `python -m pytest -q`, `ruff check .`, and `mypy utterplan` run
   against the self-contained repository test suite.
 
-- **Editable document workspaces.** `.ssmdoc` v1 is consumed as a stable file-format contract with the standard library; `ssmdconvert` is not a runtime dependency. `compile-document` writes semantic plans and its report directly under `<workspace>/utterplan/`; `render-document` writes profile-specific artifacts directly under `<workspace>/renderplan/` without changing source files.
+- **Manifest-driven bundle lifecycle.** Schema-v1 book and document manifests use
+  the same canonical `.ssmd-bundle/` root and unified `bundle` compile, render,
+  and replan services. Source content and manifests remain read-only.
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -510,10 +514,13 @@ drafts and never become canonical plans.
   coordinate maps, preparation provenance, diagnostics, and renderability evidence
   in a separate versioned TOML. _Rationale:_ provenance must never alter executable
   content or identity.
-- **AD: One document, one plan; books are orchestration.** `compile-book` and
-  `render-book` compose per-file operations without a combined book-level semantic
-  plan and never modify the manifest or chapters. _Rationale:_ keeps the engine-
-  independent boundary intact and chapter plans canonical.
+- **AD: One canonical, manifest-dispatched bundle lifecycle.** All bundle commands
+  accept only `<name>.ssmd-bundle/` roots and choose book or document behavior from
+  schema-v1 `manifest.json`. Books produce independent plans per selected source
+  number; a document bundle produces one plan. Compilation, projection, and replan
+  never modify source files or manifests. _Rationale:_ preserve item-level semantics
+  and source ownership while giving downstream packages one stable contract.
+
 - **AD: Best-effort spaCy with deterministic fallback.** Models are preferred in
   `sm`/`md`/`lg`/`trf` order when already installed and never downloaded; without
   spaCy, planning continues with deterministic fallback tokens. _Rationale:_
@@ -521,8 +528,6 @@ drafts and never become canonical plans.
 - **AD: Package and schema versions are independent.** Migration preserves a
   compiled plan; replanning is a separate operation. _Rationale:_ schema evolution
   must not force package-version coupling or silent replans.
-
-- **AD: SSMDDoc is one document, not a book.** An `ssmdconvert.document` v1 workspace resolves to its current canonical SSMD source and the existing one-document compiler, producing one FlowPlan. Editable directory digests do not override current source content; UtterPlan neither refreshes nor mutates the workspace. _Rationale:_ preserve one-document/one-plan semantics and keep source-workspace ownership in `ssmdconvert`.
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -620,10 +625,8 @@ drafts and never become canonical plans.
 | RenderPlan       | Shared renderer-specific plan contract produced by optional projection from a schema-v7 FlowPlan.                                                                                                   |
 | RenderProfile    | A separate renderer configuration; UtterPlan loads shared data without importing VoiceRender.                                                                                                       |
 | VoiceRender      | Consumer that creates engine-backed profiles and owns validation, preflight, G2P, synthesis, and audio.                                                                                             |
-| SSMDBook         | Editable book workspace whose manifest drives chapter discovery; `compile-book`/`render-book` orchestrate per-file workspaces without changing content.                                             |
+| SSMD bundle      | Canonical `.ssmd-bundle/` root whose schema-v1 manifest selects book items or a single document item; all operations use the unified `bundle` lifecycle.                                            |
 | Planning attempt | Inspect-only `utterplan.planning-attempt.v1` artifact for reviewing blocked renderability outcomes; never a canonical plan.                                                                         |
 | plan_id          | Deterministic renderer-independent plan identity; v7 `utterplan-flow-v3` includes boundaries and never hashes TOML formatting.                                                                      |
-
-| SSMDDoc | Editable single-document workspace using the `ssmdconvert.document` v1 manifest; `compile-document` compiles the current canonical SSMD file to one FlowPlan without mutating source. |
 
 <!-- archledger: no accepted records for this section yet -->

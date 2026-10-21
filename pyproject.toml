@@ -53,7 +53,7 @@ utterplan = ["py.typed", "utterplan.schema.json", "schemas/*.schema.json"]
 version_file = "utterplan/_version.py"
 version_scheme = "guess-next-dev"
 local_scheme = "node-and-date"
-fallback_version = "0.0.dev0"
+fallback_version = "0.6.6"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

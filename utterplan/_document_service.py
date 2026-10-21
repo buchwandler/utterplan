@@ -1,4 +1,4 @@
-"""Orchestration services for compiling editable SSMDDoc workspaces."""
+"""Private orchestration helpers for one-item document bundles."""
 
 from __future__ import annotations
 
@@ -17,17 +17,17 @@ from .model import FlowPlan
 from .renderplan_export import build_render_plan
 from .renderplan_workspace import profile_fingerprint, render_variant_label
 from .role_coverage import assert_profile_role_coverage
-from .ssmdoc import SSMDDocError, load_ssmdoc_index, ssmdoc_document_path
+from .ssmd_bundle import SsmdBundleError, bundle_item_path, load_ssmd_bundle
 from .workspace_paths import renderplan_output_name, utterplan_output_name
 
 
-class DocumentWorkspaceServiceError(ValueError):
+class _DocumentBundleServiceError(ValueError):
     """A document workspace request is invalid or unsafe to execute."""
 
 
 @dataclass(frozen=True, slots=True)
 class DocumentCompileRequest:
-    """Options for compiling one editable SSMDDoc workspace."""
+    """Options for compiling one editable document bundle."""
 
     workspace: Path
     output_dir: Path | None = None
@@ -83,7 +83,7 @@ class DocumentCompileResult:
 DocumentCompileStartCallback = Callable[[DocumentCompileStart], None]
 
 
-def compile_ssmdoc(
+def _compile_document_service(
     workspace: str | Path,
     *,
     output_dir: str | Path | None = None,
@@ -106,10 +106,13 @@ def compile_ssmdoc(
         diagnostics=diagnostics,
     )
     try:
-        index = load_ssmdoc_index(request.workspace)
-        source_path = ssmdoc_document_path(index)
-    except SSMDDocError as exc:
-        raise DocumentWorkspaceServiceError(str(exc)) from exc
+        index = load_ssmd_bundle(request.workspace)
+        if index.kind != "document":
+            raise _DocumentBundleServiceError("bundle manifest format is not a document")
+        item = index.items[0]
+        source_path = bundle_item_path(index, item, require_exists=True)
+    except SsmdBundleError as exc:
+        raise _DocumentBundleServiceError(str(exc)) from exc
 
     output_path = (
         request.output_dir.expanduser()
@@ -125,7 +128,7 @@ def compile_ssmdoc(
     _preflight_outputs(index.manifest_path, source_path, output_path, plan_path, report_path)
 
     compile_request = CompileRequest(
-        id=index.document_id,
+        id=item.id,
         source=source_path,
         output=plan_path,
         input_format="ssmd",
@@ -138,7 +141,7 @@ def compile_ssmdoc(
         on_start(
             DocumentCompileStart(
                 workspace=index.root,
-                document_id=index.document_id,
+                document_id=item.id,
                 source_path=source_path,
                 output_dir=output_path,
                 report_path=report_path,
@@ -158,7 +161,7 @@ def compile_ssmdoc(
     outcome = outcomes[0]
     return DocumentCompileResult(
         workspace=index.root,
-        document_id=index.document_id,
+        document_id=item.id,
         source_path=source_path,
         output_dir=output_path,
         plan_path=plan_path,
@@ -217,7 +220,7 @@ class DocumentRenderResult:
 DocumentRenderStartCallback = Callable[[DocumentRenderStart], None]
 
 
-def render_ssmdoc(
+def _render_document_service(
     workspace: str | Path,
     *,
     profile: str | Path,
@@ -230,12 +233,15 @@ def render_ssmdoc(
 ) -> DocumentRenderResult:
     """Project the saved document FlowPlan to one profile-specific RenderPlan."""
     try:
-        index = load_ssmdoc_index(workspace)
-        source_path = ssmdoc_document_path(index)
+        index = load_ssmd_bundle(workspace)
+        if index.kind != "document":
+            raise _DocumentBundleServiceError("bundle manifest format is not a document")
+        item = index.items[0]
+        source_path = bundle_item_path(index, item, require_exists=True)
         if variant is not None and (
             "/" in variant or "\\" in variant or "\x00" in variant or variant in {".", ".."}
         ):
-            raise DocumentWorkspaceServiceError(
+            raise _DocumentBundleServiceError(
                 "render variant label must not contain path separators or traversal"
             )
 
@@ -246,9 +252,9 @@ def render_ssmdoc(
         )
         source_plan_path = plan_dir / utterplan_output_name(source_path)
         if not source_plan_path.is_file():
-            raise DocumentWorkspaceServiceError(
+            raise _DocumentBundleServiceError(
                 f"No UtterPlan found at {source_plan_path}.\n"
-                "Run `utterplan compile-document <workspace>` first."
+                "Run `utterplan bundle compile <workspace>` first."
             )
         source_plan = FlowPlan.load(source_plan_path)
 
@@ -274,15 +280,15 @@ def render_ssmdoc(
         )
 
         if variant_root.exists() and not variant_root.is_dir():
-            raise DocumentWorkspaceServiceError(
+            raise _DocumentBundleServiceError(
                 f"RenderPlan output root is not a directory: {variant_root}"
             )
         if variant_dir.is_symlink():
-            raise DocumentWorkspaceServiceError(
+            raise _DocumentBundleServiceError(
                 f"refusing to write through a variant directory symlink: {variant_dir}"
             )
         if variant_dir.exists() and not variant_dir.is_dir():
-            raise DocumentWorkspaceServiceError(f"variant path is not a directory: {variant_dir}")
+            raise _DocumentBundleServiceError(f"variant path is not a directory: {variant_dir}")
 
         resolved_plan_dir = plan_dir.resolve(strict=False)
         resolved_variant_dir = variant_dir.resolve(strict=False)
@@ -291,14 +297,14 @@ def render_ssmdoc(
             or resolved_variant_dir in resolved_plan_dir.parents
             or resolved_plan_dir in resolved_variant_dir.parents
         ):
-            raise DocumentWorkspaceServiceError(
+            raise _DocumentBundleServiceError(
                 "RenderPlan output must not overlap the UtterPlan input directory"
             )
 
         output_paths = (renderplan_path, snapshot_path, report_path)
         resolved_outputs = tuple(path.resolve(strict=False) for path in output_paths)
         if len(set(resolved_outputs)) != len(resolved_outputs):
-            raise DocumentWorkspaceServiceError("render output paths collide")
+            raise _DocumentBundleServiceError("render output paths collide")
         protected_inputs = {
             index.manifest_path.resolve(strict=True),
             source_path.resolve(strict=True),
@@ -310,36 +316,34 @@ def render_ssmdoc(
             for output in resolved_outputs
             for protected in protected_inputs
         ):
-            raise DocumentWorkspaceServiceError(
-                "document projection output would overwrite an input"
-            )
+            raise _DocumentBundleServiceError("document projection output would overwrite an input")
         for path in output_paths:
             if path.is_symlink():
-                raise DocumentWorkspaceServiceError(f"render output must not be a symlink: {path}")
+                raise _DocumentBundleServiceError(f"render output must not be a symlink: {path}")
             if path.exists() and path.is_dir():
-                raise DocumentWorkspaceServiceError(f"metadata output is a directory: {path}")
+                raise _DocumentBundleServiceError(f"metadata output is a directory: {path}")
 
         has_matching_snapshot = False
         if variant_dir.exists():
             nonempty = next(variant_dir.iterdir(), None) is not None
             if nonempty and not snapshot_path.is_file():
-                raise DocumentWorkspaceServiceError(
+                raise _DocumentBundleServiceError(
                     f"refusing to adopt unknown non-empty variant directory: {variant_dir}"
                 )
             if snapshot_path.exists():
                 if snapshot_path.is_symlink():
-                    raise DocumentWorkspaceServiceError(
+                    raise _DocumentBundleServiceError(
                         f"render profile snapshot must not be a symlink: {snapshot_path}"
                     )
                 existing_profile = renderplan_codec.load_profile(snapshot_path)
                 existing_id = existing_profile.profile_id or existing_profile.computed_id()
                 if existing_id != profile_id:
-                    raise DocumentWorkspaceServiceError(
+                    raise _DocumentBundleServiceError(
                         "existing variant snapshot has a different profile identity"
                     )
                 has_matching_snapshot = True
             if renderplan_path.exists() and not force:
-                raise DocumentWorkspaceServiceError(
+                raise _DocumentBundleServiceError(
                     f"RenderPlan already exists (use --force): {renderplan_path}"
                 )
 
@@ -348,7 +352,7 @@ def render_ssmdoc(
             on_start(
                 DocumentRenderStart(
                     index.root,
-                    index.document_id,
+                    item.id,
                     source_plan_path,
                     profile_path,
                     profile_id,
@@ -367,11 +371,11 @@ def render_ssmdoc(
             renderplan_codec.save_profile(active_profile, snapshot_path)
         renderplan_codec.save_plan(plan, renderplan_path)
         report_data: dict[str, Any] = {
-            "format": "utterplan.render-document-report",
+            "format": "utterplan.render-bundle-report",
             "version": 1,
             "status": "ok",
             "workspace": str(index.root.resolve()),
-            "document_id": index.document_id,
+            "document_id": item.id,
             "profile": str(profile_path),
             "profile_id": profile_id,
             "variant": variant_name,
@@ -383,7 +387,7 @@ def render_ssmdoc(
         atomic_write_text(report_path, tomlkit.dumps(report_data), create_parent=True)
         return DocumentRenderResult(
             index.root,
-            index.document_id,
+            item.id,
             source_plan_path,
             source_plan.plan_id,
             profile_path,
@@ -398,10 +402,10 @@ def render_ssmdoc(
             coverage.available_roles,
             coverage.uses_default_role,
         )
-    except (SSMDDocError, OSError, RuntimeError, ValueError, TypeError) as exc:
-        if isinstance(exc, DocumentWorkspaceServiceError):
+    except (SsmdBundleError, OSError, RuntimeError, ValueError, TypeError) as exc:
+        if isinstance(exc, _DocumentBundleServiceError):
             raise
-        raise DocumentWorkspaceServiceError(str(exc)) from exc
+        raise _DocumentBundleServiceError(str(exc)) from exc
 
 
 def _preflight_outputs(
@@ -421,31 +425,31 @@ def _preflight_outputs(
     if resolved_output_dir in protected_inputs or any(
         protected in resolved_output_dir.parents for protected in protected_inputs
     ):
-        raise DocumentWorkspaceServiceError(
+        raise _DocumentBundleServiceError(
             "document output directory overlaps a source workspace file"
         )
     if output_dir.expanduser().exists() and not output_dir.expanduser().is_dir():
-        raise DocumentWorkspaceServiceError(
+        raise _DocumentBundleServiceError(
             f"document output directory is not a directory: {output_dir.expanduser()}"
         )
     if resolved_plan == resolved_report:
-        raise DocumentWorkspaceServiceError(
+        raise _DocumentBundleServiceError(
             f"document report path collides with plan output: {report_path}"
         )
     for output in (resolved_plan, resolved_report):
         if output == resolved_output_dir:
-            raise DocumentWorkspaceServiceError(
+            raise _DocumentBundleServiceError(
                 f"document output path collides with output directory: {output}"
             )
         if any(
             output == protected or protected in output.parents for protected in protected_inputs
         ):
-            raise DocumentWorkspaceServiceError(
+            raise _DocumentBundleServiceError(
                 f"document output would overwrite source workspace content: {output}"
             )
     for output_path in (plan_path, report_path):
         if output_path.exists() and output_path.is_dir():
-            raise DocumentWorkspaceServiceError(
+            raise _DocumentBundleServiceError(
                 f"document output path is a directory when a file is expected: {output_path}"
             )
 
@@ -455,6 +459,6 @@ __all__ = [
     "DocumentCompileResult",
     "DocumentCompileStart",
     "DocumentCompileStartCallback",
-    "DocumentWorkspaceServiceError",
-    "compile_ssmdoc",
+    "_DocumentBundleServiceError",
+    "_compile_document_service",
 ]

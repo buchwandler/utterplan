@@ -7,9 +7,13 @@
 
 UtterPlan is the canonical, engine-independent semantic compiler from one SSMD
 document (or explicitly selected plain-text document) to an executable speech
-plan. It produces deterministic prepared text, paragraph-local flow units, safe boundary opportunities, authored pause intents, and segment-local
-semantics, portable document metadata, and typed directives for
-independent downstream FlowPlan consumers. Its book commands read the SSMDBook manifest only for chapter discovery, never modify the manifest or source chapters, and write derived plans to separate directories. It uses TTSReady for written-to-spoken preparation and stops before G2P, synthesis, and audio.
+plan. It produces deterministic prepared text, paragraph-local flow units, safe
+boundary opportunities, authored pause intents, segment-local semantics,
+portable document metadata, and typed directives for independent downstream
+FlowPlan consumers. Its `bundle` lifecycle accepts canonical `.ssmd-bundle/`
+roots and dispatches book or document behavior from `manifest.json`, without
+modifying source manifests or chapters. It uses TTSReady for written-to-spoken
+preparation and stops before G2P, synthesis, and audio.
 
 ## CLI
 
@@ -41,44 +45,26 @@ utterplan compile-many examples/*.ssmd --output-dir build/plans
 
 This writes one `.utterplan.toml` per source plus an atomically refreshed `compile-report.toml`. Terminal diagnostics default to warnings; `--diagnostics all` also prints informational records, while `--diagnostics none` suppresses non-failure details. Failures are always reported, and the operational report retains every diagnostic. Use `--fail-fast` to skip later inputs after a failure, `--force` to replace existing plans, or `--report PATH` to choose another report location.
 
-## Compile an SSMDDoc workspace
+## Manifest-driven bundle lifecycle
 
-Compile one editable `.ssmdoc` directory as one SSMD document and one FlowPlan:
-
-```bash
-utterplan compile-document story.ssmdoc
-```
-
-By default this writes `story.ssmdoc/utterplan/document.utterplan.toml` and `story.ssmdoc/utterplan/compile-report.toml`. The current `document.ssmd.md` is authoritative even if its manifest digest is stale; UtterPlan leaves the source and manifest untouched. This is separate from the multi-chapter SSMDBook workflow below. See the [SSMDDoc workspace guide](docs/ssmdoc.md) for manifest safety, output options, and the Python API.
-
-Project the saved plan with an explicit RenderProfile:
+Use the canonical `<name>.ssmd-bundle/` directory for either a book or a single-document bundle. UtterPlan reads `manifest.json` to determine the bundle kind; chapter directories and source files are not alternate bundle roots.
 
 ```bash
-utterplan render-document story.ssmdoc --profile narration.renderprofile.toml
+utterplan bundle compile novel.ssmd-bundle --chapters 5-17
+utterplan bundle compile story.ssmd-bundle
+utterplan bundle render novel.ssmd-bundle --chapters 5-17 --profile narration.renderprofile.toml
+utterplan bundle render story.ssmd-bundle --profile narration.renderprofile.toml
 ```
 
-The profile-specific RenderPlan is written to a matching variant directly under `story.ssmdoc/renderplan/`.
+Book manifests support source-number selectors such as `5-17` or `1,3-5`; omit `--chapters` to select all chapters. A document bundle accepts only `--chapters all`. Compilation writes independent FlowPlans and an operational report under `<bundle>/utterplan/`; rendering projects saved plans into profile-specific RenderPlans under `<bundle>/renderplan/`. Source manifests and source documents remain untouched. See the [bundle guide](docs/bundles.md) for manifest contracts, safe paths, reports, and examples.
 
-Compile a selected chapter range directly from an editable SSMDBook workspace:
+When rendering feedback requests deterministic replanning, refine the active bundle variant and the selected book items (or the full document bundle):
 
 ```bash
-cd "Platform Decay - Martha Wells.ssmdbook"
-
-utterplan compile-book chapters --chapters 5-17
+utterplan bundle replan novel.ssmd-bundle --chapters 5 --variant narration--28f616b6fe3b
 ```
 
-The command reads the workspace manifest to discover chapters and writes independent v7 plans and a report under `utterplan/`:
-
-```text
-utterplan/
-├── compile-report.toml
-├── chapter-0005.utterplan.toml
-├── chapter-0006.utterplan.toml
-├── ...
-└── chapter-0017.utterplan.toml
-```
-
-Omit `--chapters` to compile all manifest chapters. Use comma-separated source-number selections for non-contiguous ranges, for example `utterplan compile-book chapters --chapters 1,3-5`. `--diagnostics warnings|all|none` defaults to warnings; failures are always shown and reports retain complete diagnostics. The book root itself is also accepted as input; see the [SSMDBook guide](docs/ssmdbook.md).
+Replanning uses stored profile snapshots and matching preflight feedback; it does not run synthesis or modify source content.
 
 ## Logical roles and complete RenderProfiles
 
@@ -126,17 +112,17 @@ Inspect symbolic role usage without a profile, then project a document or select
 
 ```bash
 utterplan inspect story.utterplan.toml --roles
-utterplan render-document story.ssmdoc --profile printer-cast.renderprofile.toml
-utterplan render-book novel.ssmdbook --profile novel-cast.renderprofile.toml
+utterplan bundle render story.ssmd-bundle --profile printer-cast.renderprofile.toml
+utterplan bundle render novel.ssmd-bundle --profile novel-cast.renderprofile.toml
 ```
 
 Projection reports required and available roles and rejects incomplete coverage before writing the RenderPlan variant. The profile and its concrete role bindings remain separate from the source SSMD.
 
-## From an SSMDBook to RenderPlans
+## From bundles to RenderPlans
 
-UtterPlan keeps one canonical semantic plan per chapter. A RenderProfile is a
+UtterPlan keeps one canonical semantic plan per source item. A RenderProfile is a
 separate renderer configuration; create and validate it with VoiceRender, then
-project the selected saved plans into a profile-specific RenderPlan collection:
+project saved plans from a canonical `.ssmd-bundle/` root:
 
 ```bash
 voicerender profile create \
@@ -147,12 +133,11 @@ voicerender profile create \
   --output narration.renderprofile.toml
 voicerender profile validate narration.renderprofile.toml
 
-utterplan compile-book . --chapters 5-17
-utterplan render-book . --chapters 5-17 --profile narration.renderprofile.toml
+utterplan bundle compile novel.ssmd-bundle --chapters 5-17
+utterplan bundle render novel.ssmd-bundle --chapters 5-17 --profile narration.renderprofile.toml
 ```
 
-The book's `utterplan/` directory remains the shared semantic source. The new
-command writes independent renderer-specific plans into a deterministic variant:
+The shared `renderplan/` area contains a profile-specific variant:
 
 ```text
 renderplan/
@@ -169,45 +154,33 @@ first 12 hexadecimal characters of the canonical RenderProfile `profile_id`.
 Changing identity-bearing profile semantics selects a different directory, so
 multiple voices or planning policies can coexist without replacing one another.
 Each variant snapshots the canonical profile; `renderplan-set.toml` records its
-full identity, source profile reference, and chapter plan IDs. `--variant` changes
+full identity, source profile reference, and source plan IDs. `--variant` changes
 the human label without removing the fingerprint, and `--output-root` changes the
 collection root while retaining the automatic variant directory.
 
-`render-book` consumes only the existing schema-v7 UtterPlans and shared
-RenderProfile/RenderPlan contract. VoiceRender is not required to run it: VoiceRender
-creates or refreshes engine-backed profiles, then preflights and renders the
-resulting RenderPlans. The single-file `utterplan render-plan` command remains the
-low-level projection and deterministic replan primitive.
+`utterplan bundle render` consumes only existing schema-v7 FlowPlans and the
+shared RenderProfile/RenderPlan contract. VoiceRender creates or refreshes
+engine-backed profiles, then preflights and renders the resulting RenderPlans.
+UtterPlan's single-file `render-plan` command remains the low-level projection and
+deterministic replan primitive.
 
-When VoiceRender reports `preflight.replan`, use the new `replan-book` command to
-refine the exact active chapter plan. The operation reads the RenderProfile snapshot
-from the selected variant, writes a fingerprinted child RenderPlan, and updates only
-that chapter's active set entry. It does not replace the parent plan or rerun initial
-projection:
+When VoiceRender reports `preflight.replan`, refine the active bundle variant
+using matching feedback:
 
 ```bash
-# VoiceRender measures the active plans; suppose chapter 5 returns preflight.replan.
-voicerender render-book . \
-  --variant narration4--28f616b6fe3b \
-  --chapters 5 \
-  --emphasis-policy defer-to-compose
-
-utterplan replan-book . \
-  --variant narration4--28f616b6fe3b \
+# After VoiceRender reports preflight.replan for chapter 5:
+utterplan bundle replan novel.ssmd-bundle \
+  --variant narration--28f616b6fe3b \
   --chapters 5
-
-# Measure/render the newly active child. Repeat these last two commands if it
-# still reports preflight.replan; each cycle must use feedback for the active plan.
-voicerender render-book . \
-  --variant narration4--28f616b6fe3b \
-  --chapters 5 \
-  --emphasis-policy defer-to-compose
 ```
 
-Use the exact variant directory name (including its profile fingerprint). `replan-book`
-searches `preflight-recheck.toml` before `preflight.toml` and refuses stale feedback,
-so a report for a parent can never be applied to its child. The single-file
-`render-plan --previous ... --preflight ...` operation remains available for
+Ask VoiceRender to measure and render the newly active plan. If it still reports
+`preflight.replan`, repeat the feedback cycle against the active child.
+
+Use the exact variant directory name (including its profile fingerprint). Bundle
+replanning searches `preflight-recheck.toml` before `preflight.toml` and refuses
+stale feedback, so a report for a parent can never be applied to its child. The
+single-file `render-plan --previous ... --preflight ...` operation remains available for
 low-level replanning.
 
 This orchestration does not add a splitter, renderer-specific capacity estimate, or
@@ -356,7 +329,7 @@ renderer repository rather than UtterPlan's test suite.
 
 - [Getting started](docs/getting-started.md)
 - [CLI](docs/cli.md)
-- [SSMDBook workflows](docs/ssmdbook.md)
+- [Bundle workflows](docs/bundles.md)
 - [Format and schema](docs/format.md)
 - [Consumer guide](docs/consumer-guide.md)
 - [Architecture](docs/architecture.md)
