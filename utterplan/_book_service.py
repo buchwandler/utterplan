@@ -29,6 +29,7 @@ from .renderplan_batch import RenderOutcome, RenderRequest, new_renderplan_set, 
 from .role_coverage import profile_role_coverage
 from .ssmd_bundle import (
     SsmdBundleError,
+    SsmdBundleIndex,
     bundle_item_path,
     load_ssmd_bundle,
     select_bundle_items,
@@ -182,6 +183,7 @@ def compile_book(
     diagnostics: Literal["errors", "warnings", "all", "none"] = "errors",
     on_progress: BatchProgressCallback | None = None,
     on_start: BookCompileStartCallback | None = None,
+    _index: SsmdBundleIndex | None = None,
 ) -> BookCompileResult:
     """Compile selected chapters and atomically write schema-v7 UtterPlans.
 
@@ -201,7 +203,9 @@ def compile_book(
         planner_config=planner_config,
     )
     try:
-        index = load_ssmd_bundle(request.book)
+        index = _index if _index is not None else load_ssmd_bundle(request.book)
+        if index.kind != "book":
+            raise BookServiceError("bundle manifest format is not a book")
         chapters_selected = select_bundle_items(index, request.chapters)
         sources = [bundle_item_path(index, chapter) for chapter in chapters_selected]
     except SsmdBundleError as exc:
@@ -294,6 +298,7 @@ def render_book(
     fail_fast: bool = False,
     on_progress: RenderProgressCallback | None = None,
     on_start: BookRenderStartCallback | None = None,
+    _index: SsmdBundleIndex | None = None,
 ) -> BookRenderResult:
     """Project selected schema-v7 FlowPlans to a profile-specific RenderPlan set."""
     request = BookRenderRequest(
@@ -308,7 +313,9 @@ def render_book(
         fail_fast=fail_fast,
     )
     try:
-        index = load_ssmd_bundle(request.book)
+        index = _index if _index is not None else load_ssmd_bundle(request.book)
+        if index.kind != "book":
+            raise BookServiceError("bundle manifest format is not a book")
         chapters_selected = select_bundle_items(index, request.chapters)
         sources = [bundle_item_path(index, chapter) for chapter in chapters_selected]
     except SsmdBundleError as exc:

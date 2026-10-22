@@ -186,7 +186,9 @@ def build_parser() -> argparse.ArgumentParser:
     bundle_commands = bundle_parser.add_subparsers(dest="bundle_command", required=True)
 
     bundle_compile = bundle_commands.add_parser("compile", help="compile a book or document bundle")
-    bundle_compile.add_argument("workspace", type=Path, help="canonical NAME.ssmd-bundle directory")
+    bundle_compile.add_argument(
+        "workspace", type=Path, help="path resolving to a canonical NAME.ssmd-bundle directory"
+    )
     bundle_compile.add_argument("--chapters", default="all", metavar="SELECTOR")
     bundle_compile.add_argument("--output-dir", type=Path)
     bundle_compile.add_argument("--language", "--lang", dest="language")
@@ -205,7 +207,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     bundle_render = bundle_commands.add_parser("render", help="render a book or document bundle")
-    bundle_render.add_argument("workspace", type=Path, help="canonical NAME.ssmd-bundle directory")
+    bundle_render.add_argument(
+        "workspace", type=Path, help="path resolving to a canonical NAME.ssmd-bundle directory"
+    )
     bundle_render.add_argument("--profile", type=Path, required=True)
     bundle_render.add_argument("--chapters", default="all", metavar="SELECTOR")
     bundle_render.add_argument("--variant")
@@ -216,7 +220,9 @@ def build_parser() -> argparse.ArgumentParser:
     bundle_render.add_argument("--fail-fast", action="store_true")
 
     bundle_replan = bundle_commands.add_parser("replan", help="refine active bundle RenderPlans")
-    bundle_replan.add_argument("workspace", type=Path, help="canonical NAME.ssmd-bundle directory")
+    bundle_replan.add_argument(
+        "workspace", type=Path, help="path resolving to a canonical NAME.ssmd-bundle directory"
+    )
     bundle_replan.add_argument("--variant", required=True, help="exact existing RenderPlan variant")
     bundle_replan.add_argument("--chapters", default="all", metavar="SELECTOR")
     bundle_replan.add_argument("--renderplan-root", type=Path)

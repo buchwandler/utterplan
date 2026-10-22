@@ -17,7 +17,7 @@ from .model import FlowPlan
 from .renderplan_export import build_render_plan
 from .renderplan_workspace import profile_fingerprint, render_variant_label
 from .role_coverage import assert_profile_role_coverage
-from .ssmd_bundle import SsmdBundleError, bundle_item_path, load_ssmd_bundle
+from .ssmd_bundle import SsmdBundleError, SsmdBundleIndex, bundle_item_path, load_ssmd_bundle
 from .workspace_paths import renderplan_output_name, utterplan_output_name
 
 
@@ -94,6 +94,7 @@ def _compile_document_service(
     diagnostics: Literal["errors", "warnings", "all", "none"] = "errors",
     on_progress: BatchProgressCallback | None = None,
     on_start: DocumentCompileStartCallback | None = None,
+    bundle_index: SsmdBundleIndex | None = None,
 ) -> DocumentCompileResult:
     """Compile the current canonical SSMD document and write a one-item report."""
     request = DocumentCompileRequest(
@@ -106,7 +107,7 @@ def _compile_document_service(
         diagnostics=diagnostics,
     )
     try:
-        index = load_ssmd_bundle(request.workspace)
+        index = bundle_index if bundle_index is not None else load_ssmd_bundle(request.workspace)
         if index.kind != "document":
             raise _DocumentBundleServiceError("bundle manifest format is not a document")
         item = index.items[0]
@@ -171,17 +172,6 @@ def _compile_document_service(
 
 
 @dataclass(frozen=True, slots=True)
-class DocumentRenderRequest:
-    workspace: Path
-    profile: Path
-    variant: str | None = None
-    utterplan_dir: Path | None = None
-    output_root: Path | None = None
-    report: Path | None = None
-    force: bool = False
-
-
-@dataclass(frozen=True, slots=True)
 class DocumentRenderStart:
     workspace: Path
     document_id: str
@@ -230,10 +220,11 @@ def _render_document_service(
     report: str | Path | None = None,
     force: bool = False,
     on_start: DocumentRenderStartCallback | None = None,
+    bundle_index: SsmdBundleIndex | None = None,
 ) -> DocumentRenderResult:
     """Project the saved document FlowPlan to one profile-specific RenderPlan."""
     try:
-        index = load_ssmd_bundle(workspace)
+        index = bundle_index if bundle_index is not None else load_ssmd_bundle(workspace)
         if index.kind != "document":
             raise _DocumentBundleServiceError("bundle manifest format is not a document")
         item = index.items[0]

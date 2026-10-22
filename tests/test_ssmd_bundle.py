@@ -111,6 +111,25 @@ def test_rejects_non_root_workspace_inputs(tmp_path: Path) -> None:
         resolve_ssmd_bundle_root(tmp_path / "legacy-workspace")
 
 
+@pytest.mark.parametrize(
+    ("working_directory", "path"),
+    [("root", "."), ("root", "./"), ("child", "..")],
+)
+def test_resolves_bundle_root_path_aliases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    working_directory: str,
+    path: str,
+) -> None:
+    root = tmp_path / "story.ssmd-bundle"
+    _write_manifest(root, _document_manifest())
+    (root / "child").mkdir()
+    monkeypatch.chdir(root if working_directory == "root" else root / "child")
+
+    assert resolve_ssmd_bundle_root(path) == root.resolve()
+    assert load_ssmd_bundle(path).root == root.resolve()
+
+
 def test_rejects_bundle_root_without_manifest_or_regular_root_directory(tmp_path: Path) -> None:
     root = tmp_path / "empty.ssmd-bundle"
     root.mkdir()
@@ -207,5 +226,37 @@ def test_rejects_manifest_symlink_escape(tmp_path: Path) -> None:
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"symlinks unavailable: {exc}")
 
-    with pytest.raises(SsmdBundleError, match="cannot read bundle manifest"):
+    with pytest.raises(SsmdBundleError, match="regular file, not a symlink"):
         load_ssmd_bundle(root)
+
+
+def test_rejects_manifest_symlink_to_file_inside_bundle(tmp_path: Path) -> None:
+    root = tmp_path / "internal-manifest-link.ssmd-bundle"
+    root.mkdir()
+    target = root / "manifest-copy.json"
+    target.write_text(json.dumps(_book_manifest()), encoding="utf-8")
+    try:
+        (root / "manifest.json").symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
+
+    with pytest.raises(SsmdBundleError, match="regular file, not a symlink"):
+        load_ssmd_bundle(root)
+
+
+def test_allows_item_symlink_target_inside_bundle(tmp_path: Path) -> None:
+    root = tmp_path / "item-link.ssmd-bundle"
+    _write_manifest(root, _book_manifest())
+    target = root / "chapter-source.ssmd.md"
+    target.write_text("chapter content", encoding="utf-8")
+    item_path = root / "chapters/chapter-0005.ssmd.md"
+    item_path.parent.mkdir()
+    try:
+        item_path.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
+
+    index = load_ssmd_bundle(root)
+    resolved_item = bundle_item_path(index, index.items[0], require_exists=True)
+    assert resolved_item == item_path
+    assert resolved_item.read_text(encoding="utf-8") == "chapter content"

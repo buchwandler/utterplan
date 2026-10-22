@@ -10,8 +10,10 @@ from renderplan import codec as renderplan_codec
 
 from tests.test_bundle_book_replan import _active_plan, _save_preflight, _setup
 from tests.test_bundle_services import _planner_config, _profile
+from utterplan._book_replan import BookReplanError, replan_book
 from utterplan.bundle import compile_bundle, render_bundle
 from utterplan.bundle_replan import BundleReplanError, replan_bundle
+from utterplan.ssmd_bundle import load_ssmd_bundle
 
 DOCUMENT_FIXTURE = Path(__file__).parent / "fixtures/document-bundle-v1/story.ssmd-bundle"
 
@@ -62,13 +64,24 @@ def _document_preflight(root: Path, variant: str, active_path: Path) -> Path:
 
 def test_replan_bundle_keeps_book_set_selection_and_immutable_child_behavior(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root, variant, variant_dir, _ = _setup(tmp_path, numbers=(5, 6))
     entry, parent, _ = _active_plan(variant_dir)
+    loaded_indexes = []
+
+    def tracked_load(path):
+        index = load_ssmd_bundle(path)
+        loaded_indexes.append(index)
+        return index
+
+    monkeypatch.setattr("utterplan.bundle_replan.load_ssmd_bundle", tracked_load)
+    monkeypatch.setattr("utterplan._book_replan.load_ssmd_bundle", tracked_load)
     preflight_path = _save_preflight(root / "voicerender", variant, entry.id, parent)
     starts = []
 
     result = replan_bundle(root, variant=variant, chapters="5", on_start=starts.append)
+    assert len(loaded_indexes) == 1
 
     assert result.kind == "book"
     assert result.selected_item_ids == ("chapter-0005",)
@@ -133,3 +146,10 @@ def test_document_replan_rejects_non_all_selector(tmp_path: Path) -> None:
     root = _document_bundle(tmp_path / "story.ssmd-bundle")
     with pytest.raises(BundleReplanError, match="document bundles only support --chapters all"):
         replan_bundle(root, variant="any", chapters="1")
+
+
+def test_book_replan_rejects_document_bundle_direct_call(tmp_path: Path) -> None:
+    root = _document_bundle(tmp_path / "story.ssmd-bundle")
+
+    with pytest.raises(BookReplanError, match="bundle manifest format is not a book"):
+        replan_book(root, variant="not-a-book")

@@ -180,6 +180,7 @@ def replan_book(
     fail_fast: bool = False,
     on_progress: ReplanProgressCallback | None = None,
     on_start: BookReplanStartCallback | None = None,
+    _index: SsmdBundleIndex | None = None,
 ) -> BookReplanResult:
     """Refine selected active RenderPlans using their exact matching preflight reports.
 
@@ -197,7 +198,7 @@ def replan_book(
         dry_run=dry_run,
         fail_fast=fail_fast,
     )
-    context = _prepare_book(request)
+    context = _prepare_book(request, index=_index)
     selected_ids = tuple(chapter.id for chapter in context.chapters)
     _ensure_report_not_input(context)
     if on_start is not None:
@@ -275,9 +276,16 @@ def replan_book(
     )
 
 
-def _prepare_book(request: BookReplanRequest) -> _BookContext:
+def _prepare_book(
+    request: BookReplanRequest, *, index: SsmdBundleIndex | None = None
+) -> _BookContext:
     try:
-        index = load_ssmd_bundle(request.book)
+        index = index if index is not None else load_ssmd_bundle(request.book)
+        if index.kind != "book":
+            raise BookReplanError(
+                "bundle manifest format is not a book",
+                code="renderplan.replan.book.bundle_invalid",
+            )
         selected = select_bundle_items(index, request.chapters)
     except SsmdBundleError as exc:
         code = (

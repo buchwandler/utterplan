@@ -8,8 +8,10 @@ import pytest
 from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
 from renderplan import codec as renderplan_codec
 
+from utterplan._book_service import BookServiceError, compile_book, render_book
 from utterplan.bundle import BundleServiceError, compile_bundle, render_bundle
 from utterplan.config import LinguisticsConfig, PlannerConfig
+from utterplan.ssmd_bundle import load_ssmd_bundle
 
 DOCUMENT_FIXTURE = Path(__file__).parent / "fixtures/document-bundle-v1/story.ssmd-bundle"
 
@@ -76,7 +78,7 @@ def _profile(path: Path) -> RenderProfile:
 
 @pytest.mark.parametrize("kind", ["book", "document"])
 def test_compile_bundle_dispatches_both_kinds_and_returns_uniform_result(
-    tmp_path: Path, kind: str
+    tmp_path: Path, kind: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = (
         _book(tmp_path / "novel.ssmd-bundle")
@@ -84,6 +86,19 @@ def test_compile_bundle_dispatches_both_kinds_and_returns_uniform_result(
         else _document(tmp_path / "story.ssmd-bundle")
     )
     starts = []
+    loaded_indexes = []
+
+    def tracked_load(path):
+        index = load_ssmd_bundle(path)
+        loaded_indexes.append(index)
+        return index
+
+    for module in (
+        "utterplan.bundle",
+        "utterplan._book_service",
+        "utterplan._document_service",
+    ):
+        monkeypatch.setattr(f"{module}.load_ssmd_bundle", tracked_load)
 
     result = compile_bundle(root, planner_config=_planner_config(), on_start=starts.append)
 
@@ -100,6 +115,8 @@ def test_compile_bundle_dispatches_both_kinds_and_returns_uniform_result(
     assert starts[0].selected_item_ids == result.selected_item_ids
     assert result.report_path.is_file()
 
+    assert len(loaded_indexes) == 1
+
 
 def test_document_bundle_only_accepts_all_chapters_for_compile_and_render(tmp_path: Path) -> None:
     root = _document(tmp_path / "story.ssmd-bundle")
@@ -110,18 +127,45 @@ def test_document_bundle_only_accepts_all_chapters_for_compile_and_render(tmp_pa
         render_bundle(root, profile=tmp_path / "missing.renderprofile.toml", chapters="2")
 
 
-def test_render_bundle_dispatches_book_and_document_with_uniform_outputs(tmp_path: Path) -> None:
+def test_book_services_reject_document_bundle_direct_calls(tmp_path: Path) -> None:
+    root = _document(tmp_path / "story.ssmd-bundle")
+
+    with pytest.raises(BookServiceError, match="bundle manifest format is not a book"):
+        compile_book(root)
+    with pytest.raises(BookServiceError, match="bundle manifest format is not a book"):
+        render_book(root, profile=tmp_path / "missing.renderprofile.toml")
+
+
+def test_render_bundle_dispatches_book_and_document_with_uniform_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded_indexes = []
+
+    def tracked_load(path):
+        index = load_ssmd_bundle(path)
+        loaded_indexes.append(index)
+        return index
+
+    for module in (
+        "utterplan.bundle",
+        "utterplan._book_service",
+        "utterplan._document_service",
+    ):
+        monkeypatch.setattr(f"{module}.load_ssmd_bundle", tracked_load)
+
     for kind, root in (
         ("book", _book(tmp_path / "novel.ssmd-bundle")),
         ("document", _document(tmp_path / "story.ssmd-bundle")),
     ):
         compile_bundle(root, planner_config=_planner_config())
         profile_path = root / f"{kind}.renderprofile.toml"
+        loaded_indexes.clear()
         _profile(profile_path)
         starts = []
 
         result = render_bundle(root, profile=profile_path, on_start=starts.append)
 
+        assert len(loaded_indexes) == 1
         assert result.kind == kind
         assert result.workspace == root
         assert result.exit_code == 0

@@ -26,6 +26,13 @@ utterplan bundle compile novel.ssmd-bundle --chapters 5-17
 utterplan bundle compile story.ssmd-bundle --text-preparation identity
 ```
 
+When already inside a bundle root, `.` is also accepted because the supplied path is resolved before the directory name is validated:
+
+```bash
+cd story.ssmd-bundle
+utterplan bundle compile --lang en .
+```
+
 Compilation defaults to all items. For book bundles, `--chapters` selects manifest `source_number` values: one number, an inclusive range, or comma-separated combinations such as `1,3-5,9`. Selected items retain manifest order. A document bundle accepts only `--chapters all`.
 
 By default, one schema-v7 `.utterplan.toml` plan per selected item and `compile-report.toml` are written under `<bundle>/utterplan/`. `--output-dir` and `--report` override those destinations. Existing plans are protected unless `--force` is supplied; `--fail-fast` records later selected items as skipped after a failure. `--language` is a fallback for SSMD language metadata. Bundle sources are SSMD 0.9, so the command does not accept an input-format override. The report is operational metadata and does not affect plan identity.
@@ -58,7 +65,7 @@ The full variant directory name, including its profile fingerprint, is required.
 
 ## Safe and read-only behavior
 
-The bundle path must be a directory named `<name>.ssmd-bundle` containing a regular `manifest.json`. Manifest item paths must be normalized relative POSIX paths, remain inside the resolved root, and resolve to regular files. Symlink escapes and unsafe output collisions are rejected. Manifest size and document size are bounded. Source digests are not used to replace current edited content; the manifest and source files are never refreshed or rewritten.
+The supplied workspace path is resolved first. The resolved directory must be named `<name>.ssmd-bundle` and contain a regular, non-symlink `manifest.json`. Therefore `.` and equivalent aliases are valid when they resolve to the bundle root; paths to `chapters/` or an item file remain invalid. Manifest item paths must be normalized relative POSIX paths, remain inside the resolved root, and resolve to regular files. Symlink escapes and unsafe output collisions are rejected. Manifest size and document size are bounded. Source digests are not used to replace current edited content; the manifest and source files are never refreshed or rewritten.
 
 ## Python API
 

@@ -119,6 +119,7 @@ def compile_bundle(
         try:
             book_result = compile_book(
                 index.root,
+                _index=index,
                 chapters=selector,
                 output_dir=output_dir,
                 report=report,
@@ -160,6 +161,7 @@ def compile_bundle(
     try:
         document_result = _compile_document_service(
             index.root,
+            bundle_index=index,
             output_dir=output_dir,
             report=report,
             language=language,
@@ -221,6 +223,7 @@ def render_bundle(
         try:
             book_result = render_book(
                 index.root,
+                _index=index,
                 profile=profile,
                 chapters=selector,
                 variant=variant,
@@ -273,6 +276,7 @@ def render_bundle(
     try:
         document_result = _render_document_service(
             index.root,
+            bundle_index=index,
             profile=profile,
             variant=variant,
             utterplan_dir=utterplan_dir,

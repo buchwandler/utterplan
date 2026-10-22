@@ -166,6 +166,39 @@ def test_compile_book_root_range_defaults_to_utterplan_and_writes_v6_plans(
     assert (root / "manifest.json").read_bytes() == manifest_before
 
 
+def test_bundle_compile_accepts_dot_from_current_book_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "book.ssmd-bundle"
+    _write_book(root, (5,), contents={5: _ssmd("Chapter 5.")})
+    manifest = root / "manifest.json"
+    manifest_before = manifest.read_bytes()
+    monkeypatch.chdir(root)
+
+    result = main(
+        [
+            "bundle",
+            "compile",
+            "--lang",
+            "en",
+            ".",
+            "--text-preparation",
+            "identity",
+            "--spacy",
+            "off",
+        ]
+    )
+
+    capsys.readouterr()
+    assert result == 0
+    assert (root / "utterplan/chapter-0005.utterplan.toml").is_file()
+    assert (root / "utterplan/compile-report.toml").is_file()
+    assert _plan_text(root / "utterplan/chapter-0005.utterplan.toml") == "Chapter 5."
+    assert manifest.read_bytes() == manifest_before
+
+
 def test_compile_book_report_records_ssmd_mode_and_repaired_cut_details(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

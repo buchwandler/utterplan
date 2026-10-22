@@ -159,6 +159,7 @@ def replan_bundle(
             dry_run=dry_run,
             fail_fast=fail_fast,
             on_progress=on_progress,
+            _index=index,
             on_start=(
                 lambda start: (
                     on_start(

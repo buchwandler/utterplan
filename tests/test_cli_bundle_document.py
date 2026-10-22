@@ -84,6 +84,41 @@ def test_compile_document_uses_manifest_kind_with_canonical_root(
     assert (root / "utterplan/document.utterplan.toml").is_file()
 
 
+def test_bundle_compile_accepts_dot_from_current_document_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = _workspace(tmp_path)
+    manifest = root / "manifest.json"
+    source = root / "document.ssmd.md"
+    manifest_before = manifest.read_bytes()
+    source_before = source.read_bytes()
+    monkeypatch.chdir(root)
+
+    result = main(
+        [
+            "bundle",
+            "compile",
+            "--lang",
+            "en",
+            ".",
+            "--text-preparation",
+            "identity",
+            "--spacy",
+            "off",
+        ]
+    )
+
+    capsys.readouterr()
+    assert result == 0
+    assert (root / "utterplan/document.utterplan.toml").is_file()
+    assert (root / "utterplan/compile-report.toml").is_file()
+    assert "Original content." in _plan_text(root / "utterplan/document.utterplan.toml")
+    assert manifest.read_bytes() == manifest_before
+    assert source.read_bytes() == source_before
+
+
 def test_compile_document_uses_dirty_current_content_without_refreshing_manifest(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

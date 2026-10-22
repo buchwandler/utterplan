@@ -135,32 +135,32 @@ def _parse_positive_number(value: str, selector: str) -> int:
     return number
 
 
+def _not_bundle_root(path: str | Path) -> SsmdBundleError:
+    return SsmdBundleError(
+        f"not a canonical SSMD bundle root: {path}\n"
+        "expected a directory named NAME.ssmd-bundle containing manifest.json"
+    )
+
+
 def resolve_ssmd_bundle_root(path: str | Path) -> Path:
-    """Accept only the canonical ``NAME.ssmd-bundle/`` workspace root."""
+    """Resolve *path* and require a canonical ``NAME.ssmd-bundle/`` root."""
     input_path = Path(path).expanduser()
-    if input_path.name.endswith(".ssmd-bundle") is False or input_path.name == ".ssmd-bundle":
-        raise SsmdBundleError(
-            f"not a canonical SSMD bundle root: {path}\n"
-            "expected a directory named NAME.ssmd-bundle containing manifest.json"
-        )
     try:
-        if not input_path.is_dir():
-            raise SsmdBundleError(
-                f"not a canonical SSMD bundle root: {path}\n"
-                "expected a directory named NAME.ssmd-bundle containing manifest.json"
-            )
         root = input_path.resolve(strict=True)
-        manifest_path = root / "manifest.json"
-        if not manifest_path.exists() and not manifest_path.is_symlink():
-            raise SsmdBundleError(
-                f"not a canonical SSMD bundle root: {path}\n"
-                "expected a directory named NAME.ssmd-bundle containing manifest.json"
-            )
-        return root
-    except SsmdBundleError:
-        raise
+    except FileNotFoundError as exc:
+        raise _not_bundle_root(path) from exc
     except (OSError, RuntimeError, ValueError) as exc:
         raise SsmdBundleError(f"cannot inspect bundle root {input_path}: {exc}") from exc
+
+    if not root.is_dir():
+        raise _not_bundle_root(path)
+    if not root.name.endswith(".ssmd-bundle") or root.name == ".ssmd-bundle":
+        raise _not_bundle_root(path)
+
+    manifest_path = root / "manifest.json"
+    if not manifest_path.exists() and not manifest_path.is_symlink():
+        raise _not_bundle_root(path)
+    return root
 
 
 def bundle_item_path(
@@ -195,6 +195,10 @@ def bundle_item_path(
 
 
 def _read_manifest(manifest_path: Path, root: Path) -> dict[str, Any]:
+    if manifest_path.is_symlink():
+        raise SsmdBundleError(
+            f"bundle manifest must be a regular file, not a symlink: {manifest_path}"
+        )
     try:
         resolved = manifest_path.resolve(strict=True)
         resolved.relative_to(root)

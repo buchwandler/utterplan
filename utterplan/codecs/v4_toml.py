@@ -218,20 +218,6 @@ def from_toml_data(data: Mapping[str, object]) -> UtterancePlan:
     return UtterancePlan.from_dict(_decode_toml_data(data))
 
 
-def _from_toml_data_draft(data: Mapping[str, object]) -> UtterancePlan:
-    """Decode a candidate while enforcing topology but not renderability or identity."""
-    from ..model import _check_shape, _from_current_dict, validate_plan_structure
-
-    semantic = _decode_toml_data(data)
-    try:
-        _check_shape(semantic)
-        plan = _from_current_dict(semantic)
-    except (KeyError, TypeError, ValueError, IndexError) as exc:
-        raise PlanFormatError(f"invalid draft candidate: {exc}", code="plan.value") from exc
-    validate_plan_structure(plan)
-    return plan
-
-
 def dumps_toml(plan: UtterancePlan) -> str:
     """Serialize a plan to deterministic, human-readable TOML text."""
     wire = to_toml_data(plan)

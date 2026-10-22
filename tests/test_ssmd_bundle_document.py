@@ -196,5 +196,5 @@ def test_rejects_manifest_symlink_escape(tmp_path: Path) -> None:
         (root / "manifest.json").symlink_to(outside)
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"symlinks unavailable: {exc}")
-    with pytest.raises(SsmdBundleError, match="cannot read bundle manifest"):
+    with pytest.raises(SsmdBundleError, match="regular file, not a symlink"):
         load_ssmd_bundle(root)
