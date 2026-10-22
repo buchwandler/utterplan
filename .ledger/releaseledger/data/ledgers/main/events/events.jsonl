@@ -164,3 +164,4 @@
 {"data":{"released_at":"2026-10-21"},"event":"release.finalized","event_id":"event-0164","record_revisions":{"release:v0.6.6":4},"release_version":"v0.6.6","schema_version":2}
 {"data":{"status":"planned"},"event":"release.created","event_id":"event-0165","record_revisions":{"release:v0.6.7":1},"release_version":"v0.6.7","schema_version":2}
 {"data":{"kind":"fixed","status":"accepted"},"entry_id":"entry-0001","event":"entry.added","event_id":"event-0166","record_revisions":{"entry:v0.6.7/entry-0001":1,"release:v0.6.7":2},"release_version":"v0.6.7","schema_version":2}
+{"data":{"released_at":"2026-10-22"},"event":"release.finalized","event_id":"event-0167","record_revisions":{"release:v0.6.7":3},"release_version":"v0.6.7","schema_version":2}
