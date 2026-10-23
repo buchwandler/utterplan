@@ -236,6 +236,41 @@ The compile and render services accept paths and keyword options. `chapters` def
 
 `BundleCompileResult`, `BundleRenderResult`, and `BundleReplanResult` expose the resolved bundle, manifest-declared kind, selected item IDs, per-item outcomes, generated paths, reports, and exit status. Their start records provide resolved configuration to optional callbacks. Invalid or unsafe shared requests raise `BundleServiceError` or `BundleReplanError`; item-level failures are reported in result outcomes. The package also exports manifest loader, selector, item-path, result, start, and callback types for integrations that need to inspect dispatch results.
 
+## Bundle role inventory
+
+`BundleRole`, `BundleRoleInventoryItem`, and `BundleRoleInventory` are immutable public models for the version-1 `utterplan.bundle-role-inventory` TOML interoperability contract. `build_bundle_role_inventory()` consumes compiled item records in manifest order; each record provides `id`, `source_path`, and `plan_path`, with optional `source_relative_path` and `plan_relative_path` values. It loads the saved FlowPlan, reuses `logical_role_inventory()`, and hashes the exact manifest and source file bytes.
+
+```python
+from pathlib import Path
+
+from utterplan import (
+    build_bundle_role_inventory,
+    load_bundle_role_inventory,
+    save_bundle_role_inventory,
+)
+
+bundle = Path("story.ssmd-bundle")
+inventory = build_bundle_role_inventory(
+    bundle_root=bundle,
+    bundle_kind="document",
+    manifest_path=bundle / "manifest.json",
+    compiled_items=[
+        {
+            "id": "document-0001",
+            "source_path": bundle / "document.ssmd.md",
+            "source_relative_path": "document.ssmd.md",
+            "plan_path": bundle / "utterplan/document.utterplan.toml",
+            "plan_relative_path": "utterplan/document.utterplan.toml",
+        }
+    ],
+)
+save_bundle_role_inventory(inventory, bundle / "utterplan/role-inventory.toml")
+restored = load_bundle_role_inventory(bundle / "utterplan/role-inventory.toml")
+assert restored == inventory
+```
+
+The loader rejects unsupported versions, malformed hashes/paths, duplicate roles or item IDs, invalid counts, inconsistent explicit-role maps, and aggregates that do not match their item records. Saving is deterministic and atomic. Persisted `uses_default_role` and `implicit_occurrences` describe unresolved profile-default speech; no concrete role is inferred. Item source and plan references are bundle-relative POSIX paths, and their hashes/`plan_id` let consumers detect stale metadata without modification-time checks. The bundle compiler emits this artifact only for successful complete selections; partial or failed compiles do not replace it. Downstream tools may read this serialized contract without importing UtterPlan or parsing SSMD.
+
 ## Planner progress callbacks
 
 `UtterancePlanner.plan`, `UtterancePlanner.compile`, and `compile_document` accept an optional keyword-only `on_progress` callback. It receives typed `PlannerProgressEvent` objects synchronously in the planner thread. Progress is operational only: it is not added to `PlannerConfig` or the plan, and enabling a callback does not change plan identity or serialization.

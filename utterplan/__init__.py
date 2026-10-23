@@ -20,6 +20,15 @@ from .bundle_replan import (
     BundleReplanStartCallback,
     replan_bundle,
 )
+from .bundle_role_inventory import (
+    BundleRole,
+    BundleRoleInventory,
+    BundleRoleInventoryError,
+    BundleRoleInventoryItem,
+    build_bundle_role_inventory,
+    load_bundle_role_inventory,
+    save_bundle_role_inventory,
+)
 from .compiler import (
     CompileResult,
     InputFormat,
@@ -139,6 +148,13 @@ __all__ = [
     "BundleCompileResult",
     "BundleCompileStart",
     "BundleCompileStartCallback",
+    "BundleRole",
+    "BundleRoleInventory",
+    "BundleRoleInventoryError",
+    "BundleRoleInventoryItem",
+    "build_bundle_role_inventory",
+    "load_bundle_role_inventory",
+    "save_bundle_role_inventory",
     "BundleReplanError",
     "BundleReplanResult",
     "BundleReplanStart",

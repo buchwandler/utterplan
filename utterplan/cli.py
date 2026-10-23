@@ -34,6 +34,7 @@ from .bundle_replan import (
 from .bundle_replan import (
     replan_bundle as _replan_bundle_service,
 )
+from .bundle_role_inventory import load_bundle_role_inventory
 from .compiler import InputFormat, PreparationTrace, compile_document
 from .config import LinguisticsConfig, PlannerConfig
 from .exceptions import PlanFormatError, PlanRenderabilityError, UtterPlanError
@@ -679,6 +680,17 @@ def _compile_bundle(args: argparse.Namespace) -> int:
     print(f"  written:   {written}", file=sys.stderr)
     print(f"  failed:    {result.failed}", file=sys.stderr)
     print(f"  report:    {result.report_path}", file=sys.stderr)
+    if result.role_inventory_path is not None:
+        inventory = load_bundle_role_inventory(result.role_inventory_path)
+        role_names = ", ".join(role.name for role in inventory.roles) or "(none)"
+        default_role = (
+            f"required by {inventory.implicit_occurrences} speech segments"
+            if inventory.uses_default_role
+            else "not used"
+        )
+        print(f"  roles:           {role_names}", file=sys.stderr)
+        print(f"  default-role:    {default_role}", file=sys.stderr)
+        print(f"  role inventory:  {result.role_inventory_path}", file=sys.stderr)
     return result.exit_code
 
 

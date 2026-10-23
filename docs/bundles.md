@@ -37,6 +37,32 @@ Compilation defaults to all items. For book bundles, `--chapters` selects manife
 
 By default, one schema-v7 `.utterplan.toml` plan per selected item and `compile-report.toml` are written under `<bundle>/utterplan/`. `--output-dir` and `--report` override those destinations. Existing plans are protected unless `--force` is supplied; `--fail-fast` records later selected items as skipped after a failure. `--language` is a fallback for SSMD language metadata. Bundle sources are SSMD 0.9, so the command does not accept an input-format override. The report is operational metadata and does not affect plan identity.
 
+### Bundle-level logical role inventory
+
+A successful complete bundle compile writes `utterplan/role-inventory.toml` under the selected UtterPlan output directory (by default, `<bundle>/utterplan/`). For example:
+
+```bash
+ssmdconvert bundle convert story.ssmd.md
+utterplan bundle compile story.ssmd-bundle
+```
+
+The bundle contains the source and compiled document plan alongside the derived inventory:
+
+```text
+story.ssmd-bundle/
+├── document.ssmd.md
+├── manifest.json
+└── utterplan/
+    ├── document.utterplan.toml
+    └── role-inventory.toml
+```
+
+The TOML contract uses `format = "utterplan.bundle-role-inventory"` and `version = 1`. It records `bundle_kind`, a SHA-256 of the exact manifest bytes, aggregate `[[roles]]` with speech-segment occurrence counts, bundle-order `[[items]]`, and each item's source and plan paths, actual source-byte SHA-256, canonical `plan_id`, explicit role order/counts, and implicit/default-role count. Paths are bundle-relative POSIX paths, not absolute machine paths. Inventory bytes are deterministic and the file is replaced atomically.
+
+Roles and counts derive from compiled FlowPlan speech segments through UtterPlan's logical role semantics, not by scanning SSMD markup or inspecting RenderPlans. Aggregate role order is first semantic occurrence across items in manifest order; item role order is first occurrence within that plan. Empty and audio-only segments do not count. Speech without an explicit role sets `uses_default_role = true` and increments `implicit_occurrences`; it is not assigned an invented role name. A profile-aware consumer resolves the concrete default role later.
+
+Freshness is content-based: `manifest_sha256` hashes the current `manifest.json` bytes, each `source_sha256` hashes its current source bytes, and each item stores the compiled plan's `plan_id`. Modification times are not used. A subset book compile never replaces the canonical whole-bundle inventory and returns no inventory path. A failed full compile also leaves any previous inventory untouched. The successful full-compile summary reports explicit roles, whether a default role is required, and the inventory path; partial compiles do not claim a whole-bundle inventory was produced.
+
 ## Render
 
 Compilation and rendering are separate operations. Rendering reads saved plans and requires an explicit RenderProfile:
@@ -87,3 +113,5 @@ print(projected.variant)
 ```
 
 `compile_bundle()`, `render_bundle()`, and `replan_bundle()` accept paths and keyword options. Their result records expose the resolved bundle, kind, selection, per-item outcomes, artifact paths, reports, and exit status. Optional progress and start callbacks receive typed records; services do not print. Invalid or unsafe requests raise `BundleServiceError` or `BundleReplanError`, while item-level failures are returned in result outcomes.
+
+For a successful full bundle compile, `BundleCompileResult.role_inventory_path` is the canonical `role-inventory.toml` path. It is `None` for partial selections and any compile with a failed item; in those cases the prior whole-bundle inventory, if present, remains untouched. The artifact is additive and does not alter plan identity or bundle rendering.

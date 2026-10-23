@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,9 +15,16 @@ from ._document_service import (
     _render_document_service,
 )
 from .batch import BatchProgressCallback, CompileOutcome
+from .bundle_role_inventory import build_bundle_role_inventory, save_bundle_role_inventory
 from .config import PlannerConfig
 from .renderplan_batch import RenderOutcome
-from .ssmd_bundle import BundleKind, SsmdBundleError, load_ssmd_bundle
+from .ssmd_bundle import (
+    BundleKind,
+    SsmdBundleError,
+    SsmdBundleIndex,
+    bundle_item_path,
+    load_ssmd_bundle,
+)
 from .workspace_paths import renderplan_output_name
 
 
@@ -43,6 +51,8 @@ class BundleCompileResult:
     output_dir: Path
     report_path: Path
     outcomes: tuple[CompileOutcome, ...]
+
+    role_inventory_path: Path | None = None
 
     @property
     def failed(self) -> int:
@@ -148,6 +158,12 @@ def compile_bundle(
             )
         except BookServiceError as exc:
             raise BundleServiceError(str(exc)) from exc
+        role_inventory_path = _write_role_inventory(
+            index,
+            book_result.output_dir,
+            book_result.selected_chapter_ids,
+            book_result.outcomes,
+        )
         return BundleCompileResult(
             workspace=book_result.workspace,
             kind=index.kind,
@@ -156,6 +172,7 @@ def compile_bundle(
             output_dir=book_result.output_dir,
             report_path=book_result.report_path,
             outcomes=book_result.outcomes,
+            role_inventory_path=role_inventory_path,
         )
 
     try:
@@ -188,6 +205,12 @@ def compile_bundle(
         )
     except _DocumentBundleServiceError as exc:
         raise BundleServiceError(str(exc)) from exc
+    role_inventory_path = _write_role_inventory(
+        index,
+        document_result.output_dir,
+        (document_result.document_id,),
+        (document_result.outcome,),
+    )
     return BundleCompileResult(
         workspace=document_result.workspace,
         kind=index.kind,
@@ -196,6 +219,7 @@ def compile_bundle(
         output_dir=document_result.output_dir,
         report_path=document_result.report_path,
         outcomes=(document_result.outcome,),
+        role_inventory_path=role_inventory_path,
     )
 
 
@@ -326,6 +350,61 @@ def render_bundle(
         outputs=(document_result.renderplan_path,),
         report_path=document_result.report_path,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _BundleRoleInventoryInput:
+    id: str
+    source_path: Path
+    source_relative_path: str
+    plan_path: Path
+    plan_relative_path: str
+
+
+def _write_role_inventory(
+    index: SsmdBundleIndex,
+    output_dir: Path,
+    selected_item_ids: tuple[str, ...],
+    outcomes: tuple[CompileOutcome, ...],
+) -> Path | None:
+    expected_ids = tuple(item.id for item in index.items)
+    if selected_item_ids != expected_ids:
+        return None
+    if len(outcomes) != len(expected_ids) or any(
+        outcome.status != "written" for outcome in outcomes
+    ):
+        return None
+
+    compiled_items: list[_BundleRoleInventoryInput] = []
+    bundle_root = index.root.resolve()
+    for item, outcome in zip(index.items, outcomes, strict=True):
+        if outcome.id != item.id:
+            raise BundleServiceError("compile outcome order does not match the bundle manifest")
+        source_path = bundle_item_path(index, item, require_exists=True)
+        plan_path = Path(outcome.output)
+        plan_relative = Path(os.path.relpath(plan_path.resolve(), start=bundle_root)).as_posix()
+        compiled_items.append(
+            _BundleRoleInventoryInput(
+                id=item.id,
+                source_path=source_path,
+                source_relative_path=item.relative_path,
+                plan_path=plan_path,
+                plan_relative_path=plan_relative,
+            )
+        )
+
+    try:
+        inventory = build_bundle_role_inventory(
+            bundle_root=bundle_root,
+            bundle_kind=index.kind,
+            manifest_path=index.manifest_path,
+            compiled_items=tuple(compiled_items),
+        )
+        inventory_path = output_dir / "role-inventory.toml"
+        save_bundle_role_inventory(inventory, inventory_path)
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        raise BundleServiceError(f"cannot write bundle role inventory: {exc}") from exc
+    return inventory_path
 
 
 def _load_bundle(bundle: str | Path):

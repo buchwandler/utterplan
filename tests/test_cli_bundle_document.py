@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import tomlkit
 
+from utterplan.bundle_role_inventory import load_bundle_role_inventory
 from utterplan.cli import build_parser, main
 from utterplan.model import FlowPlan
 
@@ -56,6 +57,14 @@ def test_compile_document_writes_default_layout_and_keeps_source_unchanged(
     assert "UtterPlan bundle compile" in captured.err
     assert f"[1/1] document-0001  {source}" in captured.err
     assert "written:   1" in captured.err
+    inventory_path = output_dir / "role-inventory.toml"
+    inventory = load_bundle_role_inventory(inventory_path)
+    assert (
+        f"roles:           {', '.join(role.name for role in inventory.roles) or '(none)'}"
+        in captured.err
+    )
+    assert "default-role:    required by " in captured.err
+    assert f"role inventory:  {inventory_path}" in captured.err
     assert "Original content." in _plan_text(plan_path)
     report = _report(report_path)
     assert report["requested"] == 1

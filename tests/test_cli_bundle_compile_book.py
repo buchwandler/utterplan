@@ -284,7 +284,8 @@ def test_unselected_missing_or_malformed_chapter_does_not_block_selected_range(
         ["bundle", "compile", str(root), "--chapters", "5-6", "--text-preparation", "identity"]
     )
 
-    capsys.readouterr()
+    captured = capsys.readouterr()
+    assert "role inventory:" not in captured.err
     assert result == 0
     assert (root / "utterplan/chapter-0005.utterplan.toml").exists()
     assert (root / "utterplan/chapter-0006.utterplan.toml").exists()

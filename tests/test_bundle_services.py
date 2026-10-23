@@ -10,7 +10,9 @@ from renderplan import codec as renderplan_codec
 
 from utterplan._book_service import BookServiceError, compile_book, render_book
 from utterplan.bundle import BundleServiceError, compile_bundle, render_bundle
+from utterplan.bundle_role_inventory import load_bundle_role_inventory, sha256_file
 from utterplan.config import LinguisticsConfig, PlannerConfig
+from utterplan.model import FlowPlan
 from utterplan.ssmd_bundle import load_ssmd_bundle
 
 DOCUMENT_FIXTURE = Path(__file__).parent / "fixtures/document-bundle-v1/story.ssmd-bundle"
@@ -114,8 +116,71 @@ def test_compile_bundle_dispatches_both_kinds_and_returns_uniform_result(
     assert starts[0].kind == kind
     assert starts[0].selected_item_ids == result.selected_item_ids
     assert result.report_path.is_file()
+    assert result.role_inventory_path == result.output_dir / "role-inventory.toml"
+    assert result.role_inventory_path.is_file()
+    inventory = load_bundle_role_inventory(result.role_inventory_path)
+    assert inventory.bundle_kind == kind
+    assert [item.id for item in inventory.items] == list(result.selected_item_ids)
+    assert inventory.manifest_sha256 == sha256_file(root / "manifest.json")
+    for item in inventory.items:
+        assert item.source_sha256 == sha256_file(root / item.source)
+        assert item.plan_id == FlowPlan.load(root / item.plan).plan_id
 
     assert len(loaded_indexes) == 1
+
+
+def test_partial_book_compile_leaves_canonical_inventory_absent_or_unchanged(
+    tmp_path: Path,
+) -> None:
+    partial_root = _book(tmp_path / "partial.ssmd-bundle")
+    partial = compile_bundle(partial_root, chapters="5", planner_config=_planner_config())
+    assert partial.exit_code == 0
+    assert partial.role_inventory_path is None
+    assert not (partial.output_dir / "role-inventory.toml").exists()
+
+    full_root = _book(tmp_path / "full-then-partial.ssmd-bundle")
+    full = compile_bundle(full_root, planner_config=_planner_config())
+    assert full.role_inventory_path is not None
+    previous = full.role_inventory_path.read_bytes()
+    subset = compile_bundle(full_root, chapters="5", planner_config=_planner_config(), force=True)
+    assert subset.exit_code == 0
+    assert subset.role_inventory_path is None
+    assert full.role_inventory_path.read_bytes() == previous
+
+
+@pytest.mark.parametrize("preexisting", [False, True])
+def test_failed_full_book_compile_does_not_replace_existing_inventory(
+    tmp_path: Path, preexisting: bool
+) -> None:
+    root = _book(tmp_path / "failed-full.ssmd-bundle")
+    output = root / "utterplan"
+    output.mkdir()
+    inventory_path = output / "role-inventory.toml"
+    previous = b"previous inventory"
+    if preexisting:
+        inventory_path.write_bytes(previous)
+    invalid_source = root / "chapters/chapter-0006.ssmd.md"
+    invalid_source.write_text("not valid SSMD", encoding="utf-8")
+
+    failed = compile_bundle(root, planner_config=_planner_config())
+
+    assert failed.exit_code == 1
+    assert failed.role_inventory_path is None
+    if preexisting:
+        assert inventory_path.read_bytes() == previous
+    else:
+        assert not inventory_path.exists()
+
+    invalid_source.write_text(
+        (root / "chapters/chapter-0005.ssmd.md").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    recovered = compile_bundle(root, planner_config=_planner_config(), force=True)
+    assert recovered.exit_code == 0
+    assert recovered.role_inventory_path == inventory_path
+    assert load_bundle_role_inventory(inventory_path).bundle_kind == "book"
+    if preexisting:
+        assert inventory_path.read_bytes() != previous
 
 
 def test_document_bundle_only_accepts_all_chapters_for_compile_and_render(tmp_path: Path) -> None:
