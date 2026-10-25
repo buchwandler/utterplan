@@ -40,3 +40,16 @@ If spoken wording is wrong, inspect `FlowSegment.text`. If effective language is
 For source-coordinate bugs, inspect `PreparationTrace.source_text`, `source_spans`, and the structural/spoken maps. Source offsets address exact input Python characters, including SSMD headers and markup; diagnostic line and column are 1-based. Preparation transformation source ranges address structural text, while output ranges address prepared spoken text. See the [coordinate-space contract](coordinate-spaces).
 
 If the FlowPlan is correct but G2P or audio is wrong, the issue belongs to the renderer or acoustic runtime, not the planning boundary.
+
+## RenderProfile identity mismatch
+
+A RenderProfile's `profile_id` identifies its canonical semantic content, not its TOML serialization. The error `profile_id does not match profile content` means the persisted ID is stale for the current profile semantics. UtterPlan fails closed and names the profile path; it does not repair or re-hash the profile, and `--force` does not bypass validation.
+
+Regenerate or re-save the complete engine-backed RenderProfile with VoiceRender, then validate it before invoking UtterPlan:
+
+```bash
+voicerender profile validate narration.renderprofile.toml
+utterplan bundle render story.ssmd-bundle --profile narration.renderprofile.toml --force
+```
+
+Do not use `sha256sum` on the TOML file as a replacement ID. If VoiceRender created the file and it was not manually edited, report the producer path for investigation; all binding and renderer metadata must be assembled before the final profile identity is persisted.

@@ -16,6 +16,7 @@ from .config import PlannerConfig
 from .model import FlowPlan
 from .renderplan_export import build_render_plan
 from .renderplan_workspace import profile_fingerprint, render_variant_label
+from .renderprofile_io import load_render_profile
 from .role_coverage import assert_profile_role_coverage
 from .ssmd_bundle import SsmdBundleError, SsmdBundleIndex, bundle_item_path, load_ssmd_bundle
 from .workspace_paths import renderplan_output_name, utterplan_output_name
@@ -249,10 +250,11 @@ def _render_document_service(
             )
         source_plan = FlowPlan.load(source_plan_path)
 
-        profile_path = Path(profile).expanduser().resolve(strict=True)
-        active_profile = renderplan_codec.load_profile(profile_path)
+        loaded_profile = load_render_profile(profile)
+        profile_path = loaded_profile.path
+        active_profile = loaded_profile.profile
         coverage = assert_profile_role_coverage(source_plan, active_profile)
-        profile_id = active_profile.profile_id or active_profile.computed_id()
+        profile_id = loaded_profile.profile_id
         variant_name = (
             f"{render_variant_label(profile_path, variant)}--{profile_fingerprint(profile_id)}"
         )
@@ -326,8 +328,8 @@ def _render_document_service(
                     raise _DocumentBundleServiceError(
                         f"render profile snapshot must not be a symlink: {snapshot_path}"
                     )
-                existing_profile = renderplan_codec.load_profile(snapshot_path)
-                existing_id = existing_profile.profile_id or existing_profile.computed_id()
+                existing_profile = load_render_profile(snapshot_path)
+                existing_id = existing_profile.profile_id
                 if existing_id != profile_id:
                     raise _DocumentBundleServiceError(
                         "existing variant snapshot has a different profile identity"

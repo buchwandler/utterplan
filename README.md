@@ -164,6 +164,16 @@ engine-backed profiles, then preflights and renders the resulting RenderPlans.
 UtterPlan's single-file `render-plan` command remains the low-level projection and
 deterministic replan primitive.
 
+### Troubleshooting RenderProfile identity mismatch
+
+A RenderProfile `profile_id` is a semantic content identity validated by RenderPlan; it is not a hash of the TOML file bytes. If the profile's identity-bearing semantics change without refreshing its ID, UtterPlan rejects it before creating RenderPlan artifacts. Regenerate or re-save the complete profile with VoiceRender, then validate it before rendering:
+
+```bash
+voicerender profile validate narration.renderprofile.toml
+```
+
+Do not replace `profile_id` with `sha256sum` of the TOML file. `--force` only replaces an otherwise valid existing RenderPlan output; it never bypasses profile validation.
+
 When VoiceRender reports `preflight.replan`, refine the active bundle variant
 using matching feedback:
 

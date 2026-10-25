@@ -183,6 +183,7 @@ def test_render_book_success_matches_single_file_projection(tmp_path: Path, caps
     root = _write_book(tmp_path / "ordered.ssmd-bundle", (5, 7, 6))
     profile_path = root / "narration.renderprofile.toml"
     profile = _profile(profile_path)
+    profile_bytes_before = profile_path.read_bytes()
     manifest_before = (root / "manifest.json").read_bytes()
 
     result = _render(root, profile_path, "--chapters", "5-7")
@@ -221,6 +222,7 @@ def test_render_book_success_matches_single_file_projection(tmp_path: Path, caps
     assert report["failed"] == 0
     assert len(report["item"]) == 3
     assert (root / "manifest.json").read_bytes() == manifest_before
+    assert profile_path.read_bytes() == profile_bytes_before
 
     source_plan = root / "utterplan/chapter-0005.utterplan.toml"
     single_output = tmp_path / "chapter-0005.single.renderplan.toml"
@@ -241,6 +243,55 @@ def test_render_book_success_matches_single_file_projection(tmp_path: Path, caps
     single_plan = renderplan_codec.load_plan(single_output)
     assert batch_plan == single_plan
     assert batch_plan.plan_id == single_plan.plan_id
+
+
+@pytest.mark.parametrize("force", (False, True))
+def test_stale_profile_identity_fails_closed_with_and_without_force(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], force: bool
+) -> None:
+    root = _write_book(tmp_path / "stale.ssmd-bundle", (5,))
+    profile_path = root / "stale.renderprofile.toml"
+    _profile(profile_path)
+    stale_content = profile_path.read_text(encoding="utf-8").replace(
+        'voice = "amy"', 'voice = "changed"', 1
+    )
+    assert stale_content != profile_path.read_text(encoding="utf-8")
+    profile_path.write_text(stale_content, encoding="utf-8")
+
+    options = ("--force",) if force else ()
+    assert _render(root, profile_path, *options) != 0
+    error = capsys.readouterr().err
+    assert f"invalid RenderProfile {profile_path.resolve()}" in error
+    assert "profile_id does not match profile content" in error
+    assert "stale for the current profile semantics" in error
+    assert "Regenerate or re-save the RenderProfile with its producer" in error
+    assert "validate it before rendering" in error
+    assert "--force does not bypass profile identity validation" in error
+    assert not (root / "renderplan").exists()
+
+
+@pytest.mark.parametrize("invalid_kind", ("missing", "malformed", "schema"))
+def test_profile_load_failures_include_path_and_write_nothing(
+    tmp_path: Path, capsys, invalid_kind: str
+) -> None:
+    root = _write_book(tmp_path / f"{invalid_kind}.ssmd-bundle", (5,))
+    profile_path = root / f"{invalid_kind}.renderprofile.toml"
+    if invalid_kind == "malformed":
+        profile_path.write_text("[roles\n", encoding="utf-8")
+    elif invalid_kind == "schema":
+        _profile(profile_path)
+        profile_path.write_text(
+            profile_path.read_text(encoding="utf-8").replace(
+                "schema_version = 1", "schema_version = 99"
+            ),
+            encoding="utf-8",
+        )
+
+    assert _render(root, profile_path) != 0
+    error = capsys.readouterr().err
+    assert "invalid RenderProfile" in error
+    assert str(profile_path.resolve()) in error
+    assert not (root / "renderplan").exists()
 
 
 def test_render_book_reports_multi_role_coverage(tmp_path: Path, capsys) -> None:

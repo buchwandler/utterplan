@@ -45,6 +45,7 @@ from .preview import PreviewChunk, preview_plan
 from .renderability import format_renderability_error
 from .renderplan_batch import RenderOutcome
 from .renderplan_export import build_render_plan, format_render_plan_explanation
+from .renderprofile_io import load_render_profile
 from .role_coverage import logical_role_inventory, profile_role_coverage
 from .source_input import _format_for_path as _format_source_path
 from .source_input import load_source_path
@@ -217,7 +218,13 @@ def build_parser() -> argparse.ArgumentParser:
     bundle_render.add_argument("--utterplan-dir", type=Path)
     bundle_render.add_argument("--output-root", type=Path)
     bundle_render.add_argument("--report", type=Path)
-    bundle_render.add_argument("--force", action="store_true")
+    bundle_render.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "replace valid existing RenderPlan outputs; does not bypass RenderProfile validation"
+        ),
+    )
     bundle_render.add_argument("--fail-fast", action="store_true")
 
     bundle_replan = bundle_commands.add_parser("replan", help="refine active bundle RenderPlans")
@@ -317,7 +324,9 @@ def build_parser() -> argparse.ArgumentParser:
         "-o", "--output", type=Path, required=True, help="write the RenderPlan TOML"
     )
     render_plan_parser.add_argument(
-        "--force", action="store_true", help="replace an existing output file"
+        "--force",
+        action="store_true",
+        help="replace valid existing output; does not bypass profile validation",
     )
     render_plan_parser.add_argument(
         "--explain", action="store_true", help="print in-memory planning decisions"
@@ -899,7 +908,7 @@ def _replan_explanation(outcome: ReplanOutcome, profile_path: Path) -> str:
     ):
         return ""
     source_plan = FlowPlan.load(outcome.utterplan)
-    profile = renderplan_codec.load_profile(profile_path)
+    profile = load_render_profile(profile_path).profile
     previous = renderplan_codec.load_plan(outcome.previous_renderplan)
     preflight = renderplan_codec.load_preflight(outcome.preflight)
     plan = build_render_plan(
@@ -1121,7 +1130,7 @@ def _render_plan_command(args: argparse.Namespace) -> int:
         raise _CliUsageError(f"output exists: {args.output}; use --force to replace it")
 
     source = _load_plan_file(args.input)
-    profile = renderplan_codec.load_profile(args.profile)
+    profile = load_render_profile(args.profile).profile
     coverage = profile_role_coverage(source, profile)
     previous = renderplan_codec.load_plan(args.previous) if args.previous is not None else None
     preflight = (

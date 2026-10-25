@@ -23,6 +23,7 @@ from .atomic_io import atomic_write_text
 from .model import FlowPlan
 from .renderplan_export import build_render_plan
 from .renderplan_workspace import profile_fingerprint
+from .renderprofile_io import load_render_profile
 from .ssmd_bundle import (
     BundleItem,
     BundleKind,
@@ -298,8 +299,9 @@ def _prepare_document(
             stage="load",
         )
     try:
-        profile = renderplan_codec.load_profile(profile_path)
-        profile_id = profile.profile_id or profile.computed_id()
+        loaded_profile = load_render_profile(profile_path)
+        profile = loaded_profile.profile
+        profile_id = loaded_profile.profile_id
         active = renderplan_codec.load_plan(active_path)
         active.validate_against_profile(profile)
     except (OSError, ValueError, TypeError) as exc:

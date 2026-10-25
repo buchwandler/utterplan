@@ -77,6 +77,16 @@ The default RenderPlan root is `<bundle>/renderplan/`. Each variant includes a c
 
 Role coverage is checked before new variant artifacts are written. The selected profile must cover every required logical role, including its default role when any speech has no explicit role. Profile identity mismatches, unsafe paths, and metadata collisions are not bypassed by `--force`.
 
+### Troubleshooting stale RenderProfile identity
+
+RenderProfile IDs represent semantic profile content, not the bytes or formatting of the TOML file. A profile edited after its identity was persisted (or produced with a stale identity) fails validation before UtterPlan creates a variant. Regenerate or re-save the complete profile with VoiceRender and validate it before rendering:
+
+```bash
+voicerender profile validate narration.renderprofile.toml
+```
+
+Do not set `profile_id` to the result of `sha256sum` on the TOML file; RenderPlan owns the canonical semantic identity. `--force` permits replacing an otherwise valid existing RenderPlan output only. It does not bypass profile identity/schema checks, role coverage, unsafe paths, or snapshot mismatches.
+
 ## Replan
 
 When VoiceRender reports `preflight.replan`, refine the active plan using its exact matching feedback:

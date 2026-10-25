@@ -26,6 +26,7 @@ from .batch import BatchProgressCallback, CompileOutcome, CompileRequest, compil
 from .config import PlannerConfig
 from .model import FlowPlan
 from .renderplan_batch import RenderOutcome, RenderRequest, new_renderplan_set, render_to_files
+from .renderprofile_io import RenderProfileLoadError, load_render_profile
 from .role_coverage import profile_role_coverage
 from .ssmd_bundle import (
     SsmdBundleError,
@@ -335,11 +336,12 @@ def render_book(
 
     profile_input = request.profile.expanduser()
     try:
-        active_profile = renderplan_codec.load_profile(profile_input)
-        profile_path = profile_input.resolve(strict=True)
-    except (OSError, RuntimeError, ValueError, TypeError) as exc:
-        raise BookServiceError(f"invalid RenderProfile {profile_input}: {exc}") from exc
-    profile_id = active_profile.profile_id or active_profile.computed_id()
+        loaded_profile = load_render_profile(profile_input)
+    except RenderProfileLoadError as exc:
+        raise BookServiceError(str(exc)) from exc
+    active_profile = loaded_profile.profile
+    profile_path = loaded_profile.path
+    profile_id = loaded_profile.profile_id
     fingerprint = profile_id.removeprefix("sha256:")[:12]
     label = _render_variant_label(profile_path, request.variant)
     variant_name = f"{label}--{fingerprint}"

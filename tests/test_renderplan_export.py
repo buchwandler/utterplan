@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from renderplan import (
     PausePolicy,
     PlanningPolicy,
@@ -395,3 +396,38 @@ def test_inspect_roles_reports_source_inventory_without_profile(tmp_path: Path, 
     assert "host  1 speech segments" in output
     assert "guest  1 speech segments" in output
     assert "required by 1 speech segments" in output
+
+
+@pytest.mark.parametrize("force", (False, True))
+def test_render_plan_stale_profile_is_rejected_before_output(
+    tmp_path: Path, capsys, force: bool
+) -> None:
+    source_path = tmp_path / "chapter.utterplan.toml"
+    profile_path = tmp_path / "stale.renderprofile.toml"
+    output_path = tmp_path / "chapter.renderplan.toml"
+    _source().save(source_path)
+    renderplan_codec.save_profile(_profile(), profile_path)
+    profile_path.write_text(
+        profile_path.read_text(encoding="utf-8").replace(
+            'engine = "fixture"', 'engine = "changed"'
+        ),
+        encoding="utf-8",
+    )
+    args = [
+        "render-plan",
+        str(source_path),
+        "--profile",
+        str(profile_path),
+        "--output",
+        str(output_path),
+    ]
+    if force:
+        args.append("--force")
+
+    assert main(args) == 1
+    error = capsys.readouterr().err
+    assert f"invalid RenderProfile {profile_path.resolve()}" in error
+    assert "profile_id does not match profile content" in error
+    assert "Regenerate or re-save the RenderProfile with its producer" in error
+    assert "--force does not bypass profile identity validation" in error
+    assert not output_path.exists()
