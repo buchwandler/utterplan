@@ -1,0 +1,55 @@
+{
+  "candidate_count": 3,
+  "candidates": [
+    {
+      "additions": 59,
+      "deletions": 0,
+      "patch_file": "75db97f.patch",
+      "patch_sha256": "699e56f290a747210dda082311cfeb5783e433cbc02528ad604d08c02b144741",
+      "paths": ["utterplan/renderprofile_io.py"],
+      "sha": "75db97f3374918402c0b70b171b52aa578977761",
+      "short_sha": "75db97f",
+      "source_ref": "git:75db97f3374918402c0b70b171b52aa578977761"
+    },
+    {
+      "additions": 204,
+      "deletions": 17,
+      "patch_file": "3b80a28.patch",
+      "patch_sha256": "1406cf347ee0c18b83900f61b9620ef21548960b682ee0d27237144298e351cd",
+      "paths": [
+        "README.md",
+        "docs/bundles.md",
+        "docs/cli.md",
+        "docs/debugging.md",
+        "tests/test_cli_bundle_render_book.py",
+        "tests/test_cli_bundle_render_document.py",
+        "tests/test_renderplan_export.py",
+        "utterplan/_book_service.py",
+        "utterplan/_document_service.py",
+        "utterplan/bundle_replan.py",
+        "utterplan/cli.py"
+      ],
+      "sha": "3b80a28101da9e916b2790ede5c28fdef1047ada",
+      "short_sha": "3b80a28",
+      "source_ref": "git:3b80a28101da9e916b2790ede5c28fdef1047ada"
+    },
+    {
+      "additions": 33,
+      "deletions": 0,
+      "patch_file": "740d814.patch",
+      "patch_sha256": "e393d494df4181101ef3fdaee252e58c63eee20cdf48a0abeb78eb267af87f55",
+      "paths": ["tests/test_renderplan_v7_contract.py"],
+      "sha": "740d81406493319468b585d127527c1b08ff62d5",
+      "short_sha": "740d814",
+      "source_ref": "git:740d81406493319468b585d127527c1b08ff62d5"
+    }
+  ],
+  "git_base_ref": "167978804dbbfe99b051c9628c20f109f1d6e552",
+  "git_base_sha": "167978804dbbfe99b051c9628c20f109f1d6e552",
+  "git_head_ref": "740d81406493319468b585d127527c1b08ff62d5",
+  "git_head_sha": "740d81406493319468b585d127527c1b08ff62d5",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "v0.6.9",
+  "schema_version": 1
+}

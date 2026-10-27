@@ -1,0 +1,434 @@
+ README.md                                | 10 +++++++
+ docs/bundles.md                          | 10 +++++++
+ docs/cli.md                              |  4 ++-
+ docs/debugging.md                        | 13 ++++++++
+ tests/test_cli_bundle_render_book.py     | 51 ++++++++++++++++++++++++++++++++
+ tests/test_cli_bundle_render_document.py | 50 +++++++++++++++++++++++++++++++
+ tests/test_renderplan_export.py          | 36 ++++++++++++++++++++++
+ utterplan/_book_service.py               | 12 ++++----
+ utterplan/_document_service.py           | 12 ++++----
+ utterplan/bundle_replan.py               |  6 ++--
+ utterplan/cli.py                         | 17 ++++++++---
+ 11 files changed, 204 insertions(+), 17 deletions(-)
+
+diff --git a/README.md b/README.md
+index f151393..c55facb 100644
+--- a/README.md
++++ b/README.md
+@@ -164,6 +164,16 @@ engine-backed profiles, then preflights and renders the resulting RenderPlans.
+ UtterPlan's single-file `render-plan` command remains the low-level projection and
+ deterministic replan primitive.
+
++### Troubleshooting RenderProfile identity mismatch
++
++A RenderProfile `profile_id` is a semantic content identity validated by RenderPlan; it is not a hash of the TOML file bytes. If the profile's identity-bearing semantics change without refreshing its ID, UtterPlan rejects it before creating RenderPlan artifacts. Regenerate or re-save the complete profile with VoiceRender, then validate it before rendering:
++
++```bash
++voicerender profile validate narration.renderprofile.toml
++```
++
++Do not replace `profile_id` with `sha256sum` of the TOML file. `--force` only replaces an otherwise valid existing RenderPlan output; it never bypasses profile validation.
++
+ When VoiceRender reports `preflight.replan`, refine the active bundle variant
+ using matching feedback:
+
+diff --git a/docs/bundles.md b/docs/bundles.md
+index cd7a03e..6759ad2 100644
+--- a/docs/bundles.md
++++ b/docs/bundles.md
+@@ -77,6 +77,16 @@ The default RenderPlan root is `<bundle>/renderplan/`. Each variant includes a c
+
+ Role coverage is checked before new variant artifacts are written. The selected profile must cover every required logical role, including its default role when any speech has no explicit role. Profile identity mismatches, unsafe paths, and metadata collisions are not bypassed by `--force`.
+
++### Troubleshooting stale RenderProfile identity
++
++RenderProfile IDs represent semantic profile content, not the bytes or formatting of the TOML file. A profile edited after its identity was persisted (or produced with a stale identity) fails validation before UtterPlan creates a variant. Regenerate or re-save the complete profile with VoiceRender and validate it before rendering:
++
++```bash
++voicerender profile validate narration.renderprofile.toml
++```
++
++Do not set `profile_id` to the result of `sha256sum` on the TOML file; RenderPlan owns the canonical semantic identity. `--force` permits replacing an otherwise valid existing RenderPlan output only. It does not bypass profile identity/schema checks, role coverage, unsafe paths, or snapshot mismatches.
++
+ ## Replan
+
+ When VoiceRender reports `preflight.replan`, refine the active plan using its exact matching feedback:
+diff --git a/docs/cli.md b/docs/cli.md
+index b029bdb..b6cffeb 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -161,7 +161,9 @@ utterplan bundle replan BUNDLE --variant VARIANT [--chapters SELECTOR]
+
+ Compilation writes one schema-v7 FlowPlan per selected item and an operational `compile-report.toml` under `<bundle>/utterplan/` by default. Rendering reads those saved plans and requires an explicit RenderProfile; it writes profile-fingerprinted RenderPlans, a profile snapshot, and an operational report (book bundles also maintain a set index) under `<bundle>/renderplan/`. Replanning refines active plans from matching VoiceRender preflight feedback and updates only the selected active entries. These commands never mutate the manifest or source documents. `render-plan` remains the low-level one-file projection/replan command.
+
+-The diagnostics option controls compile terminal verbosity; failures are always reported and complete diagnostics remain in the operational report. `--fail-fast` skips later selected items after a failure. `--force` replaces selected plan artifacts but does not bypass unsafe paths, metadata collisions, or profile-identity checks. Exit status is 0 when all selected work succeeds, 1 when an item fails, and 2 for usage or shared-configuration errors. See the [bundle guide](bundles.md) for layouts, safety behavior, and Python examples.
++The diagnostics option controls compile terminal verbosity; failures are always reported and complete diagnostics remain in the operational report. `--fail-fast` skips later selected items after a failure. For compile commands, `--force` replaces selected plan artifacts. For rendering, it only replaces an otherwise valid existing RenderPlan output; it does not bypass unsafe paths, metadata collisions, role-coverage failures, profile schema/identity validation, or existing snapshot identity checks. Exit status is 0 when all selected work succeeds, 1 when an item fails, and 2 for usage or shared-configuration errors. See the [bundle guide](bundles.md) for layouts, safety behavior, and Python examples.
++
++A RenderProfile `profile_id` is a semantic content identity, not a hash of TOML bytes. If it is stale, the path-aware error recommends regenerating or re-saving the profile with VoiceRender and validating it with `voicerender profile validate PROFILE` before rendering. Do not substitute `sha256sum` of the profile file; `--force` never bypasses this validation.
+
+ Explain an existing compiled plan as a human-readable speech narrative:
+
+diff --git a/docs/debugging.md b/docs/debugging.md
+index b4df508..2f78288 100644
+--- a/docs/debugging.md
++++ b/docs/debugging.md
+@@ -40,3 +40,16 @@ If spoken wording is wrong, inspect `FlowSegment.text`. If effective language is
+ For source-coordinate bugs, inspect `PreparationTrace.source_text`, `source_spans`, and the structural/spoken maps. Source offsets address exact input Python characters, including SSMD headers and markup; diagnostic line and column are 1-based. Preparation transformation source ranges address structural text, while output ranges address prepared spoken text. See the [coordinate-space contract](coordinate-spaces).
+
+ If the FlowPlan is correct but G2P or audio is wrong, the issue belongs to the renderer or acoustic runtime, not the planning boundary.
++
++## RenderProfile identity mismatch
++
++A RenderProfile's `profile_id` identifies its canonical semantic content, not its TOML serialization. The error `profile_id does not match profile content` means the persisted ID is stale for the current profile semantics. UtterPlan fails closed and names the profile path; it does not repair or re-hash the profile, and `--force` does not bypass validation.
++
++Regenerate or re-save the complete engine-backed RenderProfile with VoiceRender, then validate it before invoking UtterPlan:
++
++```bash
++voicerender profile validate narration.renderprofile.toml
++utterplan bundle render story.ssmd-bundle --profile narration.renderprofile.toml --force
++```
++
++Do not use `sha256sum` on the TOML file as a replacement ID. If VoiceRender created the file and it was not manually edited, report the producer path for investigation; all binding and renderer metadata must be assembled before the final profile identity is persisted.
+diff --git a/tests/test_cli_bundle_render_book.py b/tests/test_cli_bundle_render_book.py
+index b6deb42..e5cff4e 100644
+--- a/tests/test_cli_bundle_render_book.py
++++ b/tests/test_cli_bundle_render_book.py
+@@ -183,6 +183,7 @@ def test_render_book_success_matches_single_file_projection(tmp_path: Path, caps
+     root = _write_book(tmp_path / "ordered.ssmd-bundle", (5, 7, 6))
+     profile_path = root / "narration.renderprofile.toml"
+     profile = _profile(profile_path)
++    profile_bytes_before = profile_path.read_bytes()
+     manifest_before = (root / "manifest.json").read_bytes()
+
+     result = _render(root, profile_path, "--chapters", "5-7")
+@@ -221,6 +222,7 @@ def test_render_book_success_matches_single_file_projection(tmp_path: Path, caps
+     assert report["failed"] == 0
+     assert len(report["item"]) == 3
+     assert (root / "manifest.json").read_bytes() == manifest_before
++    assert profile_path.read_bytes() == profile_bytes_before
+
+     source_plan = root / "utterplan/chapter-0005.utterplan.toml"
+     single_output = tmp_path / "chapter-0005.single.renderplan.toml"
+@@ -243,6 +245,55 @@ def test_render_book_success_matches_single_file_projection(tmp_path: Path, caps
+     assert batch_plan.plan_id == single_plan.plan_id
+
+
++@pytest.mark.parametrize("force", (False, True))
++def test_stale_profile_identity_fails_closed_with_and_without_force(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str], force: bool
++) -> None:
++    root = _write_book(tmp_path / "stale.ssmd-bundle", (5,))
++    profile_path = root / "stale.renderprofile.toml"
++    _profile(profile_path)
++    stale_content = profile_path.read_text(encoding="utf-8").replace(
++        'voice = "amy"', 'voice = "changed"', 1
++    )
++    assert stale_content != profile_path.read_text(encoding="utf-8")
++    profile_path.write_text(stale_content, encoding="utf-8")
++
++    options = ("--force",) if force else ()
++    assert _render(root, profile_path, *options) != 0
++    error = capsys.readouterr().err
++    assert f"invalid RenderProfile {profile_path.resolve()}" in error
++    assert "profile_id does not match profile content" in error
++    assert "stale for the current profile semantics" in error
++    assert "Regenerate or re-save the RenderProfile with its producer" in error
++    assert "validate it before rendering" in error
++    assert "--force does not bypass profile identity validation" in error
++    assert not (root / "renderplan").exists()
++
++
++@pytest.mark.parametrize("invalid_kind", ("missing", "malformed", "schema"))
++def test_profile_load_failures_include_path_and_write_nothing(
++    tmp_path: Path, capsys, invalid_kind: str
++) -> None:
++    root = _write_book(tmp_path / f"{invalid_kind}.ssmd-bundle", (5,))
++    profile_path = root / f"{invalid_kind}.renderprofile.toml"
++    if invalid_kind == "malformed":
++        profile_path.write_text("[roles\n", encoding="utf-8")
++    elif invalid_kind == "schema":
++        _profile(profile_path)
++        profile_path.write_text(
++            profile_path.read_text(encoding="utf-8").replace(
++                "schema_version = 1", "schema_version = 99"
++            ),
++            encoding="utf-8",
++        )
++
++    assert _render(root, profile_path) != 0
++    error = capsys.readouterr().err
++    assert "invalid RenderProfile" in error
++    assert str(profile_path.resolve()) in error
++    assert not (root / "renderplan").exists()
++
++
+ def test_render_book_reports_multi_role_coverage(tmp_path: Path, capsys) -> None:
+     root = _write_book(tmp_path / "multi-role.ssmd-bundle", (5, 6, 7))
+     _write_role_plan(root, 5, "host")
+diff --git a/tests/test_cli_bundle_render_document.py b/tests/test_cli_bundle_render_document.py
+index 3cd31bc..9b419f1 100644
+--- a/tests/test_cli_bundle_render_document.py
++++ b/tests/test_cli_bundle_render_document.py
+@@ -110,6 +110,7 @@ def test_render_document_writes_profile_specific_direct_variant_and_report(
+     source_plan_before = source_plan.read_bytes()
+     profile_path = tmp_path / "narration.renderprofile.toml"
+     profile = _profile(profile_path)
++    profile_bytes_before = profile_path.read_bytes()
+
+     assert _render(root, profile_path) == 0
+     capsys.readouterr()
+@@ -146,6 +147,55 @@ def test_render_document_writes_profile_specific_direct_variant_and_report(
+         "utterplan",
+         "renderplan",
+     }
++    assert profile_path.read_bytes() == profile_bytes_before
++
++
++def test_stale_profile_identity_fails_closed_with_and_without_force(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    profile_path = tmp_path / "stale.renderprofile.toml"
++    _profile(profile_path)
++    stale_content = profile_path.read_text(encoding="utf-8").replace(
++        'voice = "amy"', 'voice = "changed"', 1
++    )
++    assert stale_content != profile_path.read_text(encoding="utf-8")
++    profile_path.write_text(stale_content, encoding="utf-8")
++
++    for options in ((), ("--force",)):
++        assert _render(root, profile_path, *options) != 0
++        error = capsys.readouterr().err
++        assert f"invalid RenderProfile {profile_path.resolve()}" in error
++        assert "profile_id does not match profile content" in error
++        assert "stale for the current profile semantics" in error
++        assert "Regenerate or re-save the RenderProfile with its producer" in error
++        assert "validate it before rendering" in error
++        assert "--force does not bypass profile identity validation" in error
++        assert not (root / "renderplan").exists()
++
++
++@pytest.mark.parametrize("invalid_kind", ("missing", "malformed", "schema"))
++def test_profile_load_failures_include_path_and_write_nothing(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str], invalid_kind: str
++) -> None:
++    root = _workspace(tmp_path)
++    profile_path = tmp_path / f"{invalid_kind}.renderprofile.toml"
++    if invalid_kind == "malformed":
++        profile_path.write_text("[roles\n", encoding="utf-8")
++    elif invalid_kind == "schema":
++        _profile(profile_path)
++        profile_path.write_text(
++            profile_path.read_text(encoding="utf-8").replace(
++                "schema_version = 1", "schema_version = 99"
++            ),
++            encoding="utf-8",
++        )
++
++    assert _render(root, profile_path) != 0
++    error = capsys.readouterr().err
++    assert "invalid RenderProfile" in error
++    assert str(profile_path.resolve()) in error
++    assert not (root / "renderplan").exists()
+
+
+ def test_missing_utterplan_fails_actionably_without_partial_variant(
+diff --git a/tests/test_renderplan_export.py b/tests/test_renderplan_export.py
+index 06bdaf0..f808951 100644
+--- a/tests/test_renderplan_export.py
++++ b/tests/test_renderplan_export.py
+@@ -3,6 +3,7 @@ from __future__ import annotations
+ import json
+ from pathlib import Path
+
++import pytest
+ from renderplan import (
+     PausePolicy,
+     PlanningPolicy,
+@@ -395,3 +396,38 @@ def test_inspect_roles_reports_source_inventory_without_profile(tmp_path: Path,
+     assert "host  1 speech segments" in output
+     assert "guest  1 speech segments" in output
+     assert "required by 1 speech segments" in output
++
++
++@pytest.mark.parametrize("force", (False, True))
++def test_render_plan_stale_profile_is_rejected_before_output(
++    tmp_path: Path, capsys, force: bool
++) -> None:
++    source_path = tmp_path / "chapter.utterplan.toml"
++    profile_path = tmp_path / "stale.renderprofile.toml"
++    output_path = tmp_path / "chapter.renderplan.toml"
++    _source().save(source_path)
++    renderplan_codec.save_profile(_profile(), profile_path)
++    profile_path.write_text(
++        profile_path.read_text(encoding="utf-8").replace(
++            'engine = "fixture"', 'engine = "changed"'
++        ),
++        encoding="utf-8",
++    )
++    args = [
++        "render-plan",
++        str(source_path),
++        "--profile",
++        str(profile_path),
++        "--output",
++        str(output_path),
++    ]
++    if force:
++        args.append("--force")
++
++    assert main(args) == 1
++    error = capsys.readouterr().err
++    assert f"invalid RenderProfile {profile_path.resolve()}" in error
++    assert "profile_id does not match profile content" in error
++    assert "Regenerate or re-save the RenderProfile with its producer" in error
++    assert "--force does not bypass profile identity validation" in error
++    assert not output_path.exists()
+diff --git a/utterplan/_book_service.py b/utterplan/_book_service.py
+index 2d46fd9..871236f 100644
+--- a/utterplan/_book_service.py
++++ b/utterplan/_book_service.py
+@@ -26,6 +26,7 @@ from .batch import BatchProgressCallback, CompileOutcome, CompileRequest, compil
+ from .config import PlannerConfig
+ from .model import FlowPlan
+ from .renderplan_batch import RenderOutcome, RenderRequest, new_renderplan_set, render_to_files
++from .renderprofile_io import RenderProfileLoadError, load_render_profile
+ from .role_coverage import profile_role_coverage
+ from .ssmd_bundle import (
+     SsmdBundleError,
+@@ -335,11 +336,12 @@ def render_book(
+
+     profile_input = request.profile.expanduser()
+     try:
+-        active_profile = renderplan_codec.load_profile(profile_input)
+-        profile_path = profile_input.resolve(strict=True)
+-    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+-        raise BookServiceError(f"invalid RenderProfile {profile_input}: {exc}") from exc
+-    profile_id = active_profile.profile_id or active_profile.computed_id()
++        loaded_profile = load_render_profile(profile_input)
++    except RenderProfileLoadError as exc:
++        raise BookServiceError(str(exc)) from exc
++    active_profile = loaded_profile.profile
++    profile_path = loaded_profile.path
++    profile_id = loaded_profile.profile_id
+     fingerprint = profile_id.removeprefix("sha256:")[:12]
+     label = _render_variant_label(profile_path, request.variant)
+     variant_name = f"{label}--{fingerprint}"
+diff --git a/utterplan/_document_service.py b/utterplan/_document_service.py
+index 8a83fe5..9286c18 100644
+--- a/utterplan/_document_service.py
++++ b/utterplan/_document_service.py
+@@ -16,6 +16,7 @@ from .config import PlannerConfig
+ from .model import FlowPlan
+ from .renderplan_export import build_render_plan
+ from .renderplan_workspace import profile_fingerprint, render_variant_label
++from .renderprofile_io import load_render_profile
+ from .role_coverage import assert_profile_role_coverage
+ from .ssmd_bundle import SsmdBundleError, SsmdBundleIndex, bundle_item_path, load_ssmd_bundle
+ from .workspace_paths import renderplan_output_name, utterplan_output_name
+@@ -249,10 +250,11 @@ def _render_document_service(
+             )
+         source_plan = FlowPlan.load(source_plan_path)
+
+-        profile_path = Path(profile).expanduser().resolve(strict=True)
+-        active_profile = renderplan_codec.load_profile(profile_path)
++        loaded_profile = load_render_profile(profile)
++        profile_path = loaded_profile.path
++        active_profile = loaded_profile.profile
+         coverage = assert_profile_role_coverage(source_plan, active_profile)
+-        profile_id = active_profile.profile_id or active_profile.computed_id()
++        profile_id = loaded_profile.profile_id
+         variant_name = (
+             f"{render_variant_label(profile_path, variant)}--{profile_fingerprint(profile_id)}"
+         )
+@@ -326,8 +328,8 @@ def _render_document_service(
+                     raise _DocumentBundleServiceError(
+                         f"render profile snapshot must not be a symlink: {snapshot_path}"
+                     )
+-                existing_profile = renderplan_codec.load_profile(snapshot_path)
+-                existing_id = existing_profile.profile_id or existing_profile.computed_id()
++                existing_profile = load_render_profile(snapshot_path)
++                existing_id = existing_profile.profile_id
+                 if existing_id != profile_id:
+                     raise _DocumentBundleServiceError(
+                         "existing variant snapshot has a different profile identity"
+diff --git a/utterplan/bundle_replan.py b/utterplan/bundle_replan.py
+index 5c851fc..d703bf5 100644
+--- a/utterplan/bundle_replan.py
++++ b/utterplan/bundle_replan.py
+@@ -23,6 +23,7 @@ from .atomic_io import atomic_write_text
+ from .model import FlowPlan
+ from .renderplan_export import build_render_plan
+ from .renderplan_workspace import profile_fingerprint
++from .renderprofile_io import load_render_profile
+ from .ssmd_bundle import (
+     BundleItem,
+     BundleKind,
+@@ -298,8 +299,9 @@ def _prepare_document(
+             stage="load",
+         )
+     try:
+-        profile = renderplan_codec.load_profile(profile_path)
+-        profile_id = profile.profile_id or profile.computed_id()
++        loaded_profile = load_render_profile(profile_path)
++        profile = loaded_profile.profile
++        profile_id = loaded_profile.profile_id
+         active = renderplan_codec.load_plan(active_path)
+         active.validate_against_profile(profile)
+     except (OSError, ValueError, TypeError) as exc:
+diff --git a/utterplan/cli.py b/utterplan/cli.py
+index e13156d..08a4cd2 100644
+--- a/utterplan/cli.py
++++ b/utterplan/cli.py
+@@ -45,6 +45,7 @@ from .preview import PreviewChunk, preview_plan
+ from .renderability import format_renderability_error
+ from .renderplan_batch import RenderOutcome
+ from .renderplan_export import build_render_plan, format_render_plan_explanation
++from .renderprofile_io import load_render_profile
+ from .role_coverage import logical_role_inventory, profile_role_coverage
+ from .source_input import _format_for_path as _format_source_path
+ from .source_input import load_source_path
+@@ -217,7 +218,13 @@ def build_parser() -> argparse.ArgumentParser:
+     bundle_render.add_argument("--utterplan-dir", type=Path)
+     bundle_render.add_argument("--output-root", type=Path)
+     bundle_render.add_argument("--report", type=Path)
+-    bundle_render.add_argument("--force", action="store_true")
++    bundle_render.add_argument(
++        "--force",
++        action="store_true",
++        help=(
++            "replace valid existing RenderPlan outputs; does not bypass RenderProfile validation"
++        ),
++    )
+     bundle_render.add_argument("--fail-fast", action="store_true")
+
+     bundle_replan = bundle_commands.add_parser("replan", help="refine active bundle RenderPlans")
+@@ -317,7 +324,9 @@ def build_parser() -> argparse.ArgumentParser:
+         "-o", "--output", type=Path, required=True, help="write the RenderPlan TOML"
+     )
+     render_plan_parser.add_argument(
+-        "--force", action="store_true", help="replace an existing output file"
++        "--force",
++        action="store_true",
++        help="replace valid existing output; does not bypass profile validation",
+     )
+     render_plan_parser.add_argument(
+         "--explain", action="store_true", help="print in-memory planning decisions"
+@@ -899,7 +908,7 @@ def _replan_explanation(outcome: ReplanOutcome, profile_path: Path) -> str:
+     ):
+         return ""
+     source_plan = FlowPlan.load(outcome.utterplan)
+-    profile = renderplan_codec.load_profile(profile_path)
++    profile = load_render_profile(profile_path).profile
+     previous = renderplan_codec.load_plan(outcome.previous_renderplan)
+     preflight = renderplan_codec.load_preflight(outcome.preflight)
+     plan = build_render_plan(
+@@ -1121,7 +1130,7 @@ def _render_plan_command(args: argparse.Namespace) -> int:
+         raise _CliUsageError(f"output exists: {args.output}; use --force to replace it")
+
+     source = _load_plan_file(args.input)
+-    profile = renderplan_codec.load_profile(args.profile)
++    profile = load_render_profile(args.profile).profile
+     coverage = profile_role_coverage(source, profile)
+     previous = renderplan_codec.load_plan(args.previous) if args.previous is not None else None
+     preflight = (

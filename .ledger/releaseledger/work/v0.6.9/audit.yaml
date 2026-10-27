@@ -1,0 +1,71 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: v0.6.9
+git_base_ref: v0.6.8
+git_base_sha: 167978804dbbfe99b051c9628c20f109f1d6e552
+git_head_ref: HEAD
+git_head_sha: 740d81406493319468b585d127527c1b08ff62d5
+git_range: 167978804dbbfe99b051c9628c20f109f1d6e552..740d81406493319468b585d127527c1b08ff62d5
+commit_count: 3
+rows:
+  - sha: 75db97f3374918402c0b70b171b52aa578977761
+    source_ref: git:75db97f3374918402c0b70b171b52aa578977761
+    short_sha: 75db97f
+    changed_paths:
+      - utterplan/renderprofile_io.py
+    stats:
+      files_changed: 1
+      insertions: 59
+      deletions: 0
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: better diagnostics"
+  - sha: 3b80a28101da9e916b2790ede5c28fdef1047ada
+    source_ref: git:3b80a28101da9e916b2790ede5c28fdef1047ada
+    short_sha: 3b80a28
+    changed_paths:
+      - README.md
+      - docs/bundles.md
+      - docs/cli.md
+      - docs/debugging.md
+      - tests/test_cli_bundle_render_book.py
+      - tests/test_cli_bundle_render_document.py
+      - tests/test_renderplan_export.py
+      - utterplan/_book_service.py
+      - utterplan/_document_service.py
+      - utterplan/bundle_replan.py
+      - utterplan/cli.py
+    stats:
+      files_changed: 11
+      insertions: 204
+      deletions: 17
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: explain profile_id"
+  - sha: 740d81406493319468b585d127527c1b08ff62d5
+    source_ref: git:740d81406493319468b585d127527c1b08ff62d5
+    short_sha: 740d814
+    changed_paths:
+      - tests/test_renderplan_v7_contract.py
+    stats:
+      files_changed: 1
+      insertions: 33
+      deletions: 0
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "fix: contract"

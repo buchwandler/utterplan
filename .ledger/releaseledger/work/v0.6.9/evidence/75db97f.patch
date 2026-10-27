@@ -1,0 +1,68 @@
+ utterplan/renderprofile_io.py | 59 +++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 59 insertions(+)
+
+diff --git a/utterplan/renderprofile_io.py b/utterplan/renderprofile_io.py
+new file mode 100644
+index 0000000..27c3262
+--- /dev/null
++++ b/utterplan/renderprofile_io.py
+@@ -0,0 +1,59 @@
++"""Shared loading and diagnostics for engine-backed RenderProfiles."""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from pathlib import Path
++
++from renderplan import RenderProfile
++from renderplan import codec as renderplan_codec
++
++
++class RenderProfileLoadError(ValueError):
++    """A RenderProfile could not be resolved or failed RenderPlan validation."""
++
++
++@dataclass(frozen=True, slots=True)
++class LoadedRenderProfile:
++    """A validated profile, its canonical path, and its effective identity."""
++
++    path: Path
++    profile: RenderProfile
++    profile_id: str
++
++
++def render_profile_error_message(path: Path, exc: Exception) -> str:
++    """Add a stable UtterPlan boundary and remediation to profile-load errors."""
++    detail = str(exc)
++    message = f"invalid RenderProfile {path}: {detail}"
++    if detail == "profile_id does not match profile content":
++        return (
++            f"{message}.\n"
++            "The stored profile_id is stale for the current profile semantics. "
++            "Regenerate or re-save the RenderProfile with its producer and validate it "
++            "before rendering. --force does not bypass profile identity validation."
++        )
++    return message
++
++
++def load_render_profile(path: str | Path) -> LoadedRenderProfile:
++    """Resolve and validate a profile using RenderPlan's canonical contract.
++
++    This function deliberately does not repair or recompute a persisted identity.
++    """
++    requested = Path(path).expanduser()
++    try:
++        resolved_path = requested.resolve(strict=True)
++        profile = renderplan_codec.load_profile(resolved_path)
++    except (OSError, RuntimeError, ValueError, TypeError) as exc:
++        try:
++            display_path = requested.resolve(strict=False)
++        except (OSError, RuntimeError):
++            display_path = requested.absolute()
++        raise RenderProfileLoadError(render_profile_error_message(display_path, exc)) from exc
++
++    return LoadedRenderProfile(
++        path=resolved_path,
++        profile=profile,
++        profile_id=profile.profile_id or profile.computed_id(),
++    )

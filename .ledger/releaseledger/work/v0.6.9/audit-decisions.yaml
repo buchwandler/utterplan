@@ -1,0 +1,44 @@
+rows:
+  - sha: 75db97f3374918402c0b70b171b52aa578977761
+    inspected: true
+    inspected_paths:
+      - utterplan/renderprofile_io.py
+    observed_behavior: Shared profile loading resolves the requested path, validates the RenderProfile through RenderPlan, preserves the persisted semantic identity, and emits actionable remediation when the identity is stale.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
+  - sha: 3b80a28101da9e916b2790ede5c28fdef1047ada
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/bundles.md
+      - docs/cli.md
+      - docs/debugging.md
+      - tests/test_cli_bundle_render_book.py
+      - tests/test_cli_bundle_render_document.py
+      - tests/test_renderplan_export.py
+      - utterplan/_book_service.py
+      - utterplan/_document_service.py
+      - utterplan/bundle_replan.py
+      - utterplan/cli.py
+    observed_behavior: Bundle and document render paths now share validated profile loading; rendering leaves profile files unchanged, and --force cannot bypass profile validation or role and snapshot checks.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
+  - sha: 740d81406493319468b585d127527c1b08ff62d5
+    inspected: true
+    inspected_paths:
+      - tests/test_renderplan_v7_contract.py
+    observed_behavior: Token projection preserves available optional morphology and raises a locator-bearing error only when a requested required token field is absent.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
