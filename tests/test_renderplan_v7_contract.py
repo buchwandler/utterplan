@@ -127,6 +127,39 @@ def test_exact_source_text_tokens_and_controls_rebase_without_trimming() -> None
     }
 
 
+def test_sparse_optional_morphology_is_preserved_but_required_morph_fails() -> None:
+    plan = FlowPlan(
+        language="en-US",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment(
+                        "read the book",
+                        "en-US",
+                        tokens=(
+                            TokenView(0, 4, lemma="read", morph="Tense=Pres"),
+                            TokenView(5, 8, lemma="the"),
+                            TokenView(9, 13, lemma="book", morph="Number=Sing"),
+                        ),
+                    ),
+                )
+            ),
+        ),
+    )
+    index = build_source_index(plan)
+    source = (SourceSpan("f000000.s000", 0, 13),)
+
+    optional = index.tokens_for(source, required_fields=())
+    assert optional is not None
+    assert optional.morph == ((0, "Tense=Pres"), (2, "Number=Sing"))
+
+    with pytest.raises(RenderPlanProjectionError, match="required token field 'morph'") as error:
+        index.tokens_for(source, required_fields=("morph",))
+    assert error.value.code == "renderplan.token.required"
+    assert error.value.locator == "f000000.s000"
+    assert error.value.token_index == 1
+
+
 def test_partial_token_slice_and_missing_required_field_fail_with_locator() -> None:
     index = build_source_index(_projection_plan())
 
