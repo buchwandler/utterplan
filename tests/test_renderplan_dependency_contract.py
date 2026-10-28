@@ -29,4 +29,4 @@ def test_renderplan_collection_api_minimum_is_declared_as_runtime_dependency() -
     project = tomlkit.parse(
         (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
     ).unwrap()
-    assert "renderplan>=0.1.1,<0.2" in project["project"]["dependencies"]
+    assert "renderplan>=0.1.4,<0.2" in project["project"]["dependencies"]
