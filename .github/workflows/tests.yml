@@ -120,7 +120,7 @@ jobs:
               "phrasplit": ("0.3.9", "0.4"),
               "ssmd": ("0.9.3", "0.10"),
               "ttsready": ("0.2.3", "0.3"),
-              "renderplan": ("0.1.1", "0.2"),
+              "renderplan": ("0.1.4", "0.2"),
           }
 
           def check_metadata(contents):
