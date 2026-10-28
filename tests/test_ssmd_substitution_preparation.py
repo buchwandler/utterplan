@@ -56,6 +56,117 @@ def test_ssmd_mode_applies_authored_alias_once_with_exact_provenance(
     assert plan.segments[0].directives.substitution is None
 
 
+def test_spelled_ssmd_substitution_becomes_exact_semantic_segment() -> None:
+    plan = _planner().plan('Because someone called [ART]{sub="A R T"} finally.')
+    expected = "Because someone called A R T finally."
+    spelled = [segment for segment in plan.segments if segment.text == "A R T"]
+
+    assert plan.texts.spoken == expected
+    assert len(spelled) == 1
+    assert spelled[0].directives.say_as is not None
+    assert spelled[0].directives.say_as.interpret_as == "characters"
+    assert spelled[0].directives.substitution is None
+    assert all(
+        segment.directives.say_as is None for segment in plan.segments if segment is not spelled[0]
+    )
+    flow = project_compiler_plan(plan)
+    for unit in flow.flow:
+        for segment in unit.segments:
+            previous_end = 0
+            for token in segment.tokens:
+                assert previous_end <= token.start < token.end <= len(segment.text)
+                assert segment.text[token.start : token.end]
+                previous_end = token.end
+    assert "A- R- T" not in plan.texts.spoken
+
+
+def test_spacy_style_separate_letter_tokens_remain_segment_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def analyze_each_word(text, runs, _config, _resources, **_kwargs):
+        analyses = []
+        for run in runs:
+            tokens = []
+            cursor = run.spoken_start
+            for word in text[run.spoken_start : run.spoken_end].split():
+                start = text.index(word, cursor, run.spoken_end)
+                end = start + len(word)
+                tokens.append(TokenAnnotation(start, end, word, language=run.language))
+                cursor = end
+            analyses.append(
+                RunAnalysis(
+                    run.language,
+                    run.spoken_start,
+                    run.spoken_end,
+                    tuple(tokens),
+                    provider="spacy",
+                    model_name="test-tokenizer",
+                )
+            )
+        return tuple(analyses)
+
+    monkeypatch.setattr(planner_module, "analyze_run_analyses", analyze_each_word)
+    plan = CompilerTestPlanner(
+        PlannerConfig(
+            language="en-us",
+            document_format="ssmd",
+            linguistics=LinguisticsConfig(use_spacy=False),
+        )
+    ).plan('Because someone called [ART]{sub="A R T"} finally.')
+    flow = project_compiler_plan(plan)
+    spelled = [
+        segment for unit in flow.flow for segment in unit.segments if segment.text == "A R T"
+    ]
+
+    assert len(spelled) == 1
+    assert [spelled[0].text[token.start : token.end] for token in spelled[0].tokens] == [
+        "A",
+        "R",
+        "T",
+    ]
+    assert [(token.start, token.end) for token in spelled[0].tokens] == [(0, 1), (2, 3), (4, 5)]
+
+
+def test_ttsready_replacement_derives_same_portable_character_semantics() -> None:
+    plan = CompilerTestPlanner(
+        PlannerConfig(
+            language="en-us",
+            document_format="plain",
+            linguistics=LinguisticsConfig(use_spacy=False),
+        )
+    ).plan("Because someone called ART finally.")
+    spelled = [segment for segment in plan.segments if segment.text == "A R T"]
+
+    assert plan.preparation.backend == "spokenform"
+    assert any(item["kind"] != "ssmd-sub" for item in plan.preparation.replacements)
+    assert plan.texts.spoken == "Because someone called A R T finally."
+    assert len(spelled) == 1
+    assert spelled[0].directives.say_as is not None
+    assert spelled[0].directives.say_as.interpret_as == "characters"
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("[ART's]{sub=\"A R T's\"} house is nice.", "A R T's house is nice."),
+        ('[ART’s]{sub="A R T’s"} house is nice.', "A R T’s house is nice."),
+    ],
+)
+def test_possessive_substitution_semantic_segment_excludes_suffix(
+    source: str, expected: str
+) -> None:
+    plan = _planner().plan(source)
+    spelled = [segment for segment in plan.segments if segment.text == "A R T"]
+
+    assert plan.texts.spoken == expected
+    assert len(spelled) == 1
+    assert spelled[0].directives.say_as is not None
+    assert spelled[0].directives.say_as.interpret_as == "characters"
+    assert "'s" not in spelled[0].text and "’s" not in spelled[0].text
+    assert "A R T's" not in [segment.text for segment in plan.segments]
+    assert "A R T’s" not in [segment.text for segment in plan.segments]
+
+
 def test_ssmd_mode_does_not_expand_unannotated_text_and_legacy_mode_remains_opt_in() -> None:
     source = '[H2O]{sub="water"} ordinary 5 kg.'
 

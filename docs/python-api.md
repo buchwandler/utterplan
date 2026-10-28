@@ -329,6 +329,12 @@ print(segment.directives.emphasis)
 
 The `document` record retains compact portable document information. Effective directives and pause intents live on their owning flow segments. Compiler-only source spans and preparation coordinate maps remain in the optional trace. See the [coordinate-space contract](coordinate-spaces) and [consumer guide](consumer-guide) for renderer responsibilities.
 
+### Character-spelling substitutions
+
+When a verified preparation replacement is exactly an ASCII uppercase-letter/digit sequence expanded into its individual characters separated by single spaces, UtterPlan derives `say_as=characters` for that prepared core. For example, `[ART]{sub="A R T"}` keeps prepared text `A R T`; `[ART's]{sub="A R T's"}` keeps `A R T's` and covers only `A R T`. This applies to exact SSMD substitutions and other preparation backends' verified replacement records, including TTSReady. It does not guess from arbitrary acronyms, case changes, normalization, punctuation, or altered spacing. An authored `say-as` takes precedence.
+
+The derived directive is executable semantic intent and participates in FlowPlan identity. Replacement provenance remains diagnostic only. With sentence-level RenderPlan grouping, the full sentence stays one speech request and the request-local `say_as` control covers only the spelled core. UtterPlan never rewrites prepared text to frontend-specific forms such as `A- R- T` and does not add an automatic pause for this feature; an engine adapter owns any renderer-specific realization.
+
 ## Flow segments and local tokens
 
 A `FlowPlan` stores ordered `FlowUnit` objects. Each unit owns its ordered segments, so consumers do not join plan-global IDs. Token offsets use Python-character coordinates local to `segment.text`:

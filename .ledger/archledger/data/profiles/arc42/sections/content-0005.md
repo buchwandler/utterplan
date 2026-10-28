@@ -7,8 +7,12 @@ section: building_block_view
 title: Building Block View
 order: 50
 status: accepted
-version: 4
+version: 6
 body_format: markdown
+source_refs:
+  - path: utterplan/prepared_semantics.py
+    role: implements
+    reason: Compiler-only preparation semantic pass.
 ---
 
 UtterPlan is one Python package (`utterplan`) exposing a library API and a CLI.
@@ -48,3 +52,5 @@ from `manifest.json`, normalizes item selection, and enforces path containment.
 `bundle.py` and `bundle_replan.py` expose uniform compile, render, and replan
 services; private book and document helpers retain kind-specific persistence and
 report behavior. The generic source loader remains limited to standalone files.
+
+Preparation semantics include the compiler-only `prepared_semantics.py` pass. It consumes verified preparation replacement records after text preparation and before language-run/segment construction, appending deterministic `say-as=characters` annotations without changing prepared text, replacement provenance, boundaries, source maps, or consumed substitutions. It reuses existing directive resolution, semantic-edge segmentation, FlowPlan v7 serialization/identity, and RenderPlan request-local control projection.

@@ -49,6 +49,7 @@ from .preparation import (
     SSMDSubstitutionPreparer,
     TTSReadyTextPreparer,
 )
+from .prepared_semantics import infer_prepared_semantics
 from .progress import PlannerProgressEvent, ProgressCallback, _notify_progress
 from .renderability import (
     RenderabilityIssue,
@@ -242,6 +243,7 @@ class UtterancePlanner:
             prepared = preparer.prepare(*preparation_args, analyses=pass_a, parsed_document=parsed)
         else:
             prepared = preparer.prepare(*preparation_args, analyses=pass_a)
+        prepared = infer_prepared_semantics(prepared)
         _notify_progress(
             on_progress,
             PlannerProgressEvent(kind="phase.completed", phase="preparation"),
@@ -355,13 +357,21 @@ class UtterancePlanner:
             and annotation.spoken_end is not None
             and annotation.spoken_start < annotation.spoken_end
         )
+        derived_semantic_edges = tuple(
+            position
+            for annotation in prepared.annotations
+            if annotation.attrs.get("origin") == "derived-character-spelling"
+            for position in (annotation.spoken_start, annotation.spoken_end)
+            if type(position) is int
+        )
         atomic_sub_spans = tuple(
-            (start, end)
+            piece
             for item in prepared.info.replacements
             if item.get("kind") == "ssmd-sub"
             and type(start := item.get("output_start")) is int
             and type(end := item.get("output_end")) is int
             and start < end
+            for piece in _split_protected_range(start, end, derived_semantic_edges)
         )
         protected_ranges = tuple(sorted((*protected_audio_spans, *atomic_sub_spans)))
         consumed_substitutions = frozenset(prepared.consumed_substitutions)
@@ -814,6 +824,14 @@ def _token_providers_for_runs(
         for token_index in range(max(0, run.token_start), min(token_count, run.token_end)):
             providers[token_index] = run.provider
     return tuple(providers)
+
+
+def _split_protected_range(
+    start: int, end: int, semantic_edges: tuple[int, ...]
+) -> tuple[tuple[int, int], ...]:
+    """Keep a range protected except at explicit semantic cut edges."""
+    points = (start, *sorted({point for point in semantic_edges if start < point < end}), end)
+    return tuple((left, right) for left, right in zip(points, points[1:], strict=False))
 
 
 def _author_owned_cut_positions(

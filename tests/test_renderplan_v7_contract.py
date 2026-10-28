@@ -22,10 +22,13 @@ from utterplan import (
     FlowUnit,
     LegacyFlowPlan,
     PauseIntent,
+    PlannerConfig,
     ProsodyDirective,
     SegmentDirectives,
     TokenView,
     VoiceDirective,
+    build_render_plan,
+    compile_document,
 )
 from utterplan.hashing import V5_FLOW_HASH_SCHEMA, V6_FLOW_HASH_SCHEMA
 from utterplan.renderplan_grouping import group_initial_plan
@@ -554,3 +557,40 @@ def test_model_token_capacity_is_not_interpreted_by_utterplan() -> None:
     with pytest.raises(RenderPlanProjectionError) as error:
         _group(plan, profile)
     assert error.value.code == "renderplan.capacity.metric"
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            "Because someone called [ART's]{sub=\"A R T's\"} finally.",
+            "Because someone called A R T's finally.",
+        ),
+        (
+            'Because someone called [ART’s]{sub="A R T’s"} finally.',
+            "Because someone called A R T’s finally.",
+        ),
+    ],
+)
+def test_character_spelling_projects_one_sentence_with_exact_request_control(
+    source: str, expected: str
+) -> None:
+    compiled = compile_document(
+        source,
+        input_format="ssmd",
+        config=PlannerConfig(language="en-us", document_format="ssmd"),
+    )
+    rendered = build_render_plan(compiled.plan, _profile(pauses={"sentence": 120}))
+    speech = [item for item in rendered.flow if isinstance(item, SpeechItem)]
+
+    assert len(speech) == 1
+    assert speech[0].planning_level == "sentence"
+    assert speech[0].text == expected
+    assert "A- R- T" not in speech[0].text
+    assert not any(isinstance(item, PauseItem) for item in rendered.flow)
+    say_as = [control for control in speech[0].controls if control.name == "say_as"]
+    assert len(say_as) == 1
+    control = say_as[0]
+    start = expected.index("A R T")
+    assert (control.start, control.end) == (start, start + len("A R T"))
+    assert dict(control.params) == {"interpret_as": "characters"}

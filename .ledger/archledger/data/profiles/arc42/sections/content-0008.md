@@ -7,8 +7,18 @@ section: cross_cutting_concepts
 title: Cross-cutting Concepts
 order: 80
 status: accepted
-version: 2
+version: 6
 body_format: markdown
+source_refs:
+  - path: utterplan/prepared_semantics.py
+    role: implements
+    reason: Separates prepared text, portable intent, and renderer realization.
+  - path: tests/test_identity_units.py
+    role: validates
+    reason: Executable identity regression coverage.
+  - path: tests/test_renderplan_v7_contract.py
+    role: validates
+    reason: RenderPlan request-local control and v7 contract coverage.
 ---
 
 ## Coordinate spaces
@@ -88,3 +98,7 @@ repair opportunity. Neither mode guesses a symbol's pronunciation or crosses
 semantic blockers. Blocked planning outcomes may be reviewed through the separate
 `utterplan.planning-attempt.v1` inspect-only artifact; such candidates remain
 drafts and never become canonical plans.
+
+### Character spelling: text, intent, and realization
+
+Character spelling keeps four concerns separate: source spelling (for example, `ART`), prepared spoken text (`A R T`), portable executable intent (`say_as=characters` over the exact prepared core), and downstream renderer realization. The matcher uses only verified replacement metadata and does not guess from arbitrary uppercase words or normalization changes. Possessive suffixes remain outside the semantic range. Replacement provenance is excluded from executable identity; the derived directive affects FlowUnit and FlowPlan identity. UtterPlan never persists a frontend-specific hyphen form or adds a pause for this feature.

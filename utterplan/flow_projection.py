@@ -16,6 +16,7 @@ from .model import (
     TokenView,
     UtterancePlan,
 )
+from .prepared_semantics import detect_character_spelling
 from .token_topology import boundary_splits_lexical_content
 
 
@@ -184,7 +185,7 @@ def _tokens_for_segment(
     return tuple(result)
 
 
-def _replacement_owner(plan: UtterancePlan, raw: Any, index: int) -> Any:
+def _replacement_owner(plan: UtterancePlan, raw: Any, index: int) -> tuple[Any, ...]:
     path = f"$.preparation.replacements[{index}]"
     if not isinstance(raw, Mapping):
         raise PlanValidationError(
@@ -233,13 +234,70 @@ def _replacement_owner(plan: UtterancePlan, raw: Any, index: int) -> Any:
         ]
         if not owners and output_start == len(plan.texts.spoken):
             owners = [segment for segment in plan.segments if segment.spoken_end == output_start]
-    if len(owners) != 1:
-        raise PlanValidationError(
-            f"replacement provenance must have exactly one owning segment; found {len(owners)}",
-            code="replacement.owner",
-            path=path,
+    if len(owners) == 1:
+        return (owners[0],)
+    if output_start < output_end:
+        split_owners = _character_spelling_replacement_owners(
+            plan, source_start, output_start, output_end, source, replacement
         )
-    return owners[0]
+        if split_owners:
+            return split_owners
+    raise PlanValidationError(
+        f"replacement provenance must have exactly one owning segment; found {len(owners)}",
+        code="replacement.owner",
+        path=path,
+    )
+
+
+def _character_spelling_replacement_owners(
+    plan: UtterancePlan,
+    source_start: int,
+    output_start: int,
+    output_end: int,
+    source: str,
+    replacement: str,
+) -> tuple[Any, ...]:
+    match = detect_character_spelling(source, replacement)
+    if match is None:
+        return ()
+    core_start = output_start + match.output_core_start
+    core_end = output_start + match.output_core_end
+    if not output_start <= core_start < core_end < output_end:
+        return ()
+    if not any(
+        annotation.attrs.get("origin") == "derived-character-spelling"
+        and annotation.structural_start == source_start + match.source_core_start
+        and annotation.structural_end == source_start + match.source_core_end
+        and annotation.spoken_start == core_start
+        and annotation.spoken_end == core_end
+        for annotation in plan.annotations
+    ):
+        return ()
+
+    owners = tuple(
+        sorted(
+            (
+                segment
+                for segment in plan.segments
+                if segment.spoken_start < output_end and output_start < segment.spoken_end
+            ),
+            key=lambda segment: (segment.spoken_start, segment.spoken_end, segment.id),
+        )
+    )
+    if len(owners) < 2:
+        return ()
+    cursor = output_start
+    for segment in owners:
+        left = max(output_start, segment.spoken_start)
+        right = min(output_end, segment.spoken_end)
+        if left != cursor or right <= left:
+            return ()
+        cursor = right
+    if cursor != output_end or not any(
+        segment.spoken_start == core_start and segment.spoken_end == core_end for segment in owners
+    ):
+        return ()
+    return owners
 
 
 def _validate_replacement_ownership(plan: UtterancePlan) -> None:
@@ -252,15 +310,19 @@ def _replacement_views_for_segment(
 ) -> tuple[ReplacementView, ...]:
     views: list[ReplacementView] = []
     for index, raw in enumerate(plan.preparation.replacements):
-        owner = _replacement_owner(plan, raw, index)
-        if owner.id != segment.id:
+        owners = _replacement_owner(plan, raw, index)
+        if not any(owner.id == segment.id for owner in owners):
             continue
         output_start = raw["output_start"]
         output_end = raw["output_end"]
+        start = max(output_start, segment.spoken_start)
+        end = min(output_end, segment.spoken_end)
+        if output_start < output_end and start >= end:
+            continue
         views.append(
             ReplacementView(
-                start=output_start - segment.spoken_start,
-                end=output_end - segment.spoken_start,
+                start=start - segment.spoken_start,
+                end=end - segment.spoken_start,
                 source=raw["source"],
                 kind=raw.get("kind"),
                 rule=raw.get("rule"),

@@ -132,6 +132,29 @@ def test_malformed_or_unlocalizable_replacement_provenance_is_rejected() -> None
         project_compiler_plan(replace(split_plan, preparation=preparation))
 
 
+def test_character_spelling_split_keeps_replacement_provenance_segment_local() -> None:
+    compiler_plan = CompilerTestPlanner(
+        PlannerConfig(
+            language="en-us",
+            document_format="ssmd",
+            linguistics=LinguisticsConfig(use_spacy=False),
+        )
+    ).plan("[ART's]{sub=\"A R T's\"} house is nice.")
+    flow = project_compiler_plan(compiler_plan)
+    localized = [
+        (segment, replacement)
+        for unit in flow.flow
+        for segment in unit.segments
+        for replacement in segment.replacements
+    ]
+
+    assert len(localized) == 2
+    assert [
+        (segment.text[replacement.start : replacement.end], replacement.source)
+        for segment, replacement in localized
+    ] == [("A R T", "ART's"), ("'s", "ART's")]
+
+
 def test_replacement_view_and_flow_segment_validate_local_spans() -> None:
     with pytest.raises(ValueError, match="coordinates must be integers"):
         ReplacementView(True, 1, "source")

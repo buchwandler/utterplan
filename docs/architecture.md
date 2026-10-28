@@ -1,6 +1,6 @@
 ---
 title: "Architecture Documentation"
-version: 4
+version: 6
 generator: "archledger 0.4.0"
 arc42_template_version: "9.0-EN"
 ---
@@ -237,6 +237,14 @@ Supporting tactics:
   evidence live in an optional versioned trace TOML that never affects plan
   identity or executable content.
 
+## Prepared character-spelling semantics
+
+After written-to-spoken preparation and before segmentation, UtterPlan inspects verified replacement records for the exact character-spelling transformation: an ASCII uppercase-letter/digit core of at least two characters becomes the same characters joined by single spaces, optionally retaining an identical `'s` or `’s` suffix. This derives a compiler-owned `say_as=characters` annotation over only the prepared character core. For example, `[ART]{sub=\"A R T\"}` keeps prepared text `A R T`; `[ART's]{sub=\"A R T's\"}` keeps `A R T's` and marks only `A R T`.
+
+The derivation is portable executable intent, not a renderer-specific spelling rewrite. Prepared text never becomes `A- R- T`; a renderer adapter may choose that frontend form. Existing semantic-edge segmentation produces the exact controlled span, while RenderPlan sentence grouping retains the full sentence as one normal speech request with a request-local control. This feature adds neither a sentence split nor an automatic pause.
+
+Authored `say-as` semantics take precedence, and the consumed SSMD `sub` annotation remains consumed. The derived directive uses existing schema-v7 `SayAsDirective` serialization and identity hashing; replacement records remain diagnostic provenance and are not synthesis input. No schema version or migration changes are required.
+
 ## Strategy Items
 
 <!-- archledger: no accepted records for this section yet -->
@@ -280,6 +288,8 @@ from `manifest.json`, normalizes item selection, and enforces path containment.
 `bundle.py` and `bundle_replan.py` expose uniform compile, render, and replan
 services; private book and document helpers retain kind-specific persistence and
 report behavior. The generic source loader remains limited to standalone files.
+
+Preparation semantics include the compiler-only `prepared_semantics.py` pass. It consumes verified preparation replacement records after text preparation and before language-run/segment construction, appending deterministic `say-as=characters` annotations without changing prepared text, replacement provenance, boundaries, source maps, or consumed substitutions. It reuses existing directive resolution, semantic-edge segmentation, FlowPlan v7 serialization/identity, and RenderPlan request-local control projection.
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -478,6 +488,10 @@ repair opportunity. Neither mode guesses a symbol's pronunciation or crosses
 semantic blockers. Blocked planning outcomes may be reviewed through the separate
 `utterplan.planning-attempt.v1` inspect-only artifact; such candidates remain
 drafts and never become canonical plans.
+
+### Character spelling: text, intent, and realization
+
+Character spelling keeps four concerns separate: source spelling (for example, `ART`), prepared spoken text (`A R T`), portable executable intent (`say_as=characters` over the exact prepared core), and downstream renderer realization. The matcher uses only verified replacement metadata and does not guess from arbitrary uppercase words or normalization changes. Possessive suffixes remain outside the semantic range. Replacement provenance is excluded from executable identity; the derived directive affects FlowUnit and FlowPlan identity. UtterPlan never persists a frontend-specific hyphen form or adds a pause for this feature.
 
 <!-- archledger: no accepted records for this section yet -->
 
