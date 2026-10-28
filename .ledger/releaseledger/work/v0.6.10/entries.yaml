@@ -1,0 +1,37 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.6.10
+git_base_ref: 898a83db9a23fc2818d1ee63320013033e8df18c
+git_base_sha: 898a83db9a23fc2818d1ee63320013033e8df18c
+git_head_ref: ec4b806156aa4e8f6534b3f215154f668c5ec4cc
+git_head_sha: ec4b806156aa4e8f6534b3f215154f668c5ec4cc
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: "Added portable character-spelling semantics for verified substitutions"
+    status: accepted
+    source_refs:
+      - git:ec4b806156aa4e8f6534b3f215154f668c5ec4cc
+    paths:
+      - .ledger/archledger/data/document-state.json
+      - .ledger/archledger/data/profiles/arc42/sections/content-0004.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0005.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0008.md
+      - docs/architecture.md
+      - docs/python-api.md
+      - tests/test_identity_units.py
+      - tests/test_prepared_semantics.py
+      - tests/test_renderplan_v7_contract.py
+      - tests/test_replacement_provenance.py
+      - tests/test_ssmd_substitution_preparation.py
+      - utterplan/flow_projection.py
+      - utterplan/planner.py
+      - utterplan/prepared_semantics.py
+    sources:
+      - git:ec4b806156aa4e8f6534b3f215154f668c5ec4cc
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

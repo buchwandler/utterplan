@@ -1,0 +1,42 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: v0.6.10
+git_base_ref: v0.6.9
+git_base_sha: 898a83db9a23fc2818d1ee63320013033e8df18c
+git_head_ref: HEAD
+git_head_sha: ec4b806156aa4e8f6534b3f215154f668c5ec4cc
+git_range: 898a83db9a23fc2818d1ee63320013033e8df18c..ec4b806156aa4e8f6534b3f215154f668c5ec4cc
+commit_count: 1
+rows:
+  - sha: ec4b806156aa4e8f6534b3f215154f668c5ec4cc
+    source_ref: git:ec4b806156aa4e8f6534b3f215154f668c5ec4cc
+    short_sha: ec4b806
+    changed_paths:
+      - .ledger/archledger/data/document-state.json
+      - .ledger/archledger/data/profiles/arc42/sections/content-0004.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0005.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0008.md
+      - docs/architecture.md
+      - docs/python-api.md
+      - tests/test_identity_units.py
+      - tests/test_prepared_semantics.py
+      - tests/test_renderplan_v7_contract.py
+      - tests/test_replacement_provenance.py
+      - tests/test_ssmd_substitution_preparation.py
+      - utterplan/flow_projection.py
+      - utterplan/planner.py
+      - utterplan/prepared_semantics.py
+    stats:
+      files_changed: 14
+      insertions: 787
+      deletions: 19
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: spelling substitution"
