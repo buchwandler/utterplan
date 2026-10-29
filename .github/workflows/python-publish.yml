@@ -82,7 +82,7 @@ jobs:
               assert has_range(requirements, "phrasplit", "0.3.9", "0.4")
               assert has_range(requirements, "ssmd", "0.9.3", "0.10")
               assert has_range(requirements, "ttsready", "0.2.3", "0.3")
-              assert has_range(requirements, "renderplan", "0.1.4", "0.2")
+              assert has_range(requirements, "renderplan", "0.2.0", "0.3")
               names = set(archive.namelist())
               expected = {
                   "utterplan/py.typed",
