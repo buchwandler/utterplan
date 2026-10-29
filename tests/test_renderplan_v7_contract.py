@@ -586,6 +586,12 @@ def test_character_spelling_projects_one_sentence_with_exact_request_control(
     assert len(speech) == 1
     assert speech[0].planning_level == "sentence"
     assert speech[0].text == expected
+    tokens = speech[0].tokens
+    assert tokens is not None
+    t_index = next(
+        index for index, (start, end) in enumerate(tokens.span) if speech[0].text[start:end] == "T"
+    )
+    assert dict(tokens.lemma)[t_index] == "T"
     assert "A- R- T" not in speech[0].text
     assert not any(isinstance(item, PauseItem) for item in rendered.flow)
     say_as = [control for control in speech[0].controls if control.name == "say_as"]

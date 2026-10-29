@@ -18,6 +18,7 @@ from utterplan import (
     LinguisticProvenance,
     PauseIntent,
     PlanValidationError,
+    SayAsDirective,
     SegmentDirectives,
     TokenView,
 )
@@ -116,6 +117,44 @@ def test_toml_is_compact_local_and_columnar() -> None:
     assert "language" not in segment
     assert wire["flow"][0]["segment"][1]["language"] == "fr-FR"
     assert text.count('language = "fr-FR"') == 2
+
+
+def test_character_spelling_lemmas_are_explicit_and_survive_v7_roundtrip() -> None:
+    segment = FlowSegment(
+        text="(A R T)",
+        language="en-US",
+        directives=SegmentDirectives(say_as=SayAsDirective("characters")),
+        tokens=(
+            TokenView(0, 1, lemma="(", pos="PUNCT"),
+            TokenView(1, 2, lemma="A", pos="PROPN"),
+            TokenView(3, 4, lemma="R", pos="PROPN"),
+            TokenView(5, 6, lemma="T", pos="NOUN"),
+            TokenView(6, 7, lemma=")", pos="PUNCT"),
+        ),
+    )
+    plan = FlowPlan(language="en-US", flow=(FlowUnit((segment,)),))
+
+    wire = to_toml_data(plan)
+    encoded_lemmas = wire["flow"][0]["segment"][0]["token"]["lemma"]
+    restored = loads_toml(dumps_toml(plan))
+
+    assert encoded_lemmas == [[1, "A"], [2, "R"], [3, "T"]]
+    assert restored.flow[0].segments[0].tokens[3].lemma == "T"
+
+
+def test_ordinary_casefold_lemma_remains_implicit_in_v7_toml() -> None:
+    segment = FlowSegment(
+        text="The",
+        language="en-US",
+        tokens=(TokenView(0, 3, lemma="the", pos="DET"),),
+    )
+    plan = FlowPlan(language="en-US", flow=(FlowUnit((segment,)),))
+
+    wire = to_toml_data(plan)
+    restored = loads_toml(dumps_toml(plan))
+
+    assert wire["flow"][0]["segment"][0]["token"].get("lemma", []) == []
+    assert restored.flow[0].segments[0].tokens[0].lemma == "the"
 
 
 def test_freeform_document_semantics_preserve_null_through_the_toml_sentinel() -> None:

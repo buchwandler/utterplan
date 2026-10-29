@@ -38,6 +38,8 @@ for unit in plan.flow:
 
 Use the v7 linguistic token fields (not model-token IDs or counts) as authoritative context: pass available `pos`, `tag`, `lemma`, and `morph` through unchanged rather than rerunning spaCy or inferring tags. Default `auto` uses installed compatible local models, preferring `sm`, `md`, `lg`, `trf`, and safely falls back if unavailable; model packages are never downloaded. When fields are unavailable, follow the adapter's documented non-contextual fallback.
 
+Character spelling is an explicit semantic exception to contextual lemmatization: within `say_as.interpret_as = "characters"`, each single alphanumeric token's portable lemma is its exact surface (so `T` remains uppercase even if the provider reports `t`). POS, tag, and morphology are not rewritten, and ordinary lexical lemmas keep the compact casefold default. On the separate RenderPlan path, schema-v2 files store role bindings once in a plan-level catalog; loading them still supplies the full `SpeechItem.binding` to the consumer.
+
 ## Pause behavior
 
 Schema v7 carries safe boundary opportunities separately from authored pause intents and exact timed breaks; neither selects a renderer activation policy or fixes a chunk. PyKokoro may choose its own chunking and native, automatic, or manual pause realization. A `FlowSegment` is not necessarily one TTS call, and renderer/acoustic variance remains outside UtterPlan and plan identity.

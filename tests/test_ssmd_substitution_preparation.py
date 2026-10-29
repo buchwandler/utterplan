@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 import pytest
@@ -125,6 +126,70 @@ def test_spacy_style_separate_letter_tokens_remain_segment_local(
         "T",
     ]
     assert [(token.start, token.end) for token in spelled[0].tokens] == [(0, 1), (2, 3), (4, 5)]
+
+
+@pytest.mark.parametrize("provider", ["spacy", "fallback"])
+@pytest.mark.parametrize("reported_lemma", ["T", "t"])
+def test_character_spelling_projection_preserves_exact_lemma_for_all_providers(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: Literal["spacy", "fallback"],
+    reported_lemma: str,
+) -> None:
+    def analyze_character_context(text, runs, _config, _resources, **_kwargs):
+        analyses = []
+        for run in runs:
+            local_text = text[run.spoken_start : run.spoken_end]
+            tokens = []
+            for match in re.finditer(r"\w+|[^\w\s]", local_text):
+                surface = match.group()
+                lemma = reported_lemma if surface == "T" else surface.casefold()
+                pos = "PUNCT" if surface in {"(", ")"} else "NOUN"
+                tag = {"(": "-LRB-", ")": "-RRB-"}.get(surface, "NN")
+                tokens.append(
+                    TokenAnnotation(
+                        run.spoken_start + match.start(),
+                        run.spoken_start + match.end(),
+                        surface,
+                        pos=pos,
+                        tag=tag,
+                        lemma=lemma,
+                        language=run.language,
+                        morph="Number=Sing" if surface == "T" else None,
+                    )
+                )
+            analyses.append(
+                RunAnalysis(
+                    run.language,
+                    run.spoken_start,
+                    run.spoken_end,
+                    tuple(tokens),
+                    provider=provider,
+                    model_name="deterministic-test-provider" if provider == "spacy" else None,
+                )
+            )
+        return tuple(analyses)
+
+    monkeypatch.setattr(planner_module, "analyze_run_analyses", analyze_character_context)
+    plan = CompilerTestPlanner(
+        PlannerConfig(
+            language="en-us",
+            document_format="ssmd",
+            linguistics=LinguisticsConfig(use_spacy=False),
+        )
+    ).plan('Because someone ([ART]{sub="A R T"}) finally.')
+    flow = project_compiler_plan(plan)
+    spelled = next(
+        segment for unit in flow.flow for segment in unit.segments if segment.text == "(A R T)"
+    )
+    surfaces = [spelled.text[token.start : token.end] for token in spelled.tokens]
+
+    assert surfaces == ["(", "A", "R", "T", ")"]
+    assert [token.lemma for token in spelled.tokens] == ["(", "A", "R", "T", ")"]
+    assert spelled.tokens[3].pos == "NOUN"
+    assert spelled.tokens[3].tag == "NN"
+    assert spelled.tokens[3].morph == "Number=Sing"
+    assert spelled.directives.say_as is not None
+    assert spelled.directives.say_as.interpret_as == "characters"
 
 
 def test_ttsready_replacement_derives_same_portable_character_semantics() -> None:

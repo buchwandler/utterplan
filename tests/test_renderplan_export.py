@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -91,7 +92,7 @@ def _preflight(plan, profile) -> PreflightReport:
     ).with_identity()
 
 
-def test_public_build_is_deterministic_and_rejects_incomplete_replan_inputs() -> None:
+def test_public_build_is_deterministic_and_rejects_incomplete_replan_inputs(tmp_path: Path) -> None:
     source = _source()
     profile = _profile()
 
@@ -103,6 +104,23 @@ def test_public_build_is_deterministic_and_rejects_incomplete_replan_inputs() ->
     assert first.speech[0].text == "one two three."
     assert first.speech[0].source[0].locator == "f000000.s000"
     assert first.speech[0].wav == "000001.wav"
+    renderplan_path = tmp_path / "single-role.renderplan.toml"
+    renderplan_codec.save_plan(first, renderplan_path)
+    serialized = renderplan_path.read_text(encoding="utf-8")
+    loaded = renderplan_codec.load_plan(renderplan_path)
+    assert first.schema_version == 2
+    assert serialized.count("[bindings.narrator]") == 1
+    assert "[flow.binding]" not in serialized
+    assert loaded.plan_id == first.plan_id == first.computed_id()
+    assert all(
+        speech.binding == dict(profile.roles[speech.role].binding) for speech in loaded.speech
+    )
+    loaded.validate_against_profile(profile)
+
+    changed_role = replace(profile.roles["narrator"], binding={"engine": "changed"})
+    changed_profile = replace(profile, roles={"narrator": changed_role}, profile_id=None)
+    changed_plan = build_render_plan(source, changed_profile)
+    assert changed_plan.speech[0].segment_id != first.speech[0].segment_id
     try:
         build_render_plan(source, profile, preflight=_preflight(first, profile))
     except RenderPlanProjectionError as error:
@@ -314,7 +332,8 @@ def test_render_plan_json_reports_role_coverage_metadata(tmp_path: Path, capsys)
     profile_path = tmp_path / "cast.renderprofile.toml"
     output_path = tmp_path / "roles.renderplan.toml"
     _multi_role_source().save(source_path)
-    renderplan_codec.save_profile(_multi_role_profile(), profile_path)
+    profile = _multi_role_profile()
+    renderplan_codec.save_profile(profile, profile_path)
 
     assert (
         main(
@@ -341,6 +360,15 @@ def test_render_plan_json_reports_role_coverage_metadata(tmp_path: Path, capsys)
     }
     assert output_path.is_file()
 
+    plan = renderplan_codec.load_plan(output_path)
+    serialized = output_path.read_text(encoding="utf-8")
+    for role in ("narrator", "host", "guest"):
+        assert serialized.count(f"[bindings.{role}]") == 1
+    assert "[flow.binding]" not in serialized
+    assert plan.schema_version == 2
+    assert plan.plan_id == plan.computed_id()
+    assert all(speech.binding == dict(profile.roles[speech.role].binding) for speech in plan.speech)
+    plan.validate_against_profile(profile)
     human_output_path = tmp_path / "roles-human.renderplan.toml"
     assert (
         main(

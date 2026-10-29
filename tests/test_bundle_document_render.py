@@ -47,6 +47,12 @@ def test_render_document_bundle_projects_canonical_flowplan_without_book_index(
     assert result.renderplan_path.name == "document.renderplan.toml"
     plan = renderplan_codec.load_plan(result.renderplan_path)
     plan.validate_against_profile(profile)
+    serialized = result.renderplan_path.read_text(encoding="utf-8")
+    assert plan.schema_version == 2
+    assert serialized.count("[bindings.narrator]") == 1
+    assert "[flow.binding]" not in serialized
+    assert plan.plan_id == plan.computed_id()
+    assert all(speech.binding == dict(profile.roles[speech.role].binding) for speech in plan.speech)
     flow = FlowPlan.load(result.source_plan_path)
     assert result.variant.startswith("narration--")
     assert result.snapshot_path.is_file()
@@ -119,3 +125,11 @@ def test_render_document_bundle_returns_multi_role_coverage_and_bindings(tmp_pat
     plan = renderplan_codec.load_plan(result.renderplan_path)
     assert {speech.role for speech in plan.speech} == {"host", "guest", "narrator"}
     assert {speech.binding["engine"] for speech in plan.speech} == {"kokoro", "kitten", "piper"}
+    serialized = result.renderplan_path.read_text(encoding="utf-8")
+    for role in ("narrator", "host", "guest"):
+        assert serialized.count(f"[bindings.{role}]") == 1
+    assert "[flow.binding]" not in serialized
+    assert plan.schema_version == 2
+    assert plan.plan_id == plan.computed_id()
+    assert all(speech.binding == dict(profile.roles[speech.role].binding) for speech in plan.speech)
+    plan.validate_against_profile(profile)

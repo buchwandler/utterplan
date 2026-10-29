@@ -116,6 +116,19 @@ def _pause(value: Any, field: str) -> PauseIntent | None:
     return value
 
 
+def _portable_lemma(segment: Any, *, surface: str, lemma: str | None) -> str | None:
+    directives = getattr(segment, "directives", None)
+    say_as = getattr(directives, "say_as", None)
+    if (
+        say_as is not None
+        and say_as.interpret_as == "characters"
+        and len(surface) == 1
+        and surface.isalnum()
+    ):
+        return surface
+    return lemma
+
+
 def _tokens_for_segment(
     plan: UtterancePlan,
     segment: Any,
@@ -172,6 +185,7 @@ def _tokens_for_segment(
             or (provider == "fallback" and lemma == token.text.lower())
         ):
             lemma = surface.casefold()
+        lemma = _portable_lemma(segment, surface=surface, lemma=lemma)
         result.append(
             TokenView(
                 start=start - segment.spoken_start,

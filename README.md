@@ -164,6 +164,8 @@ engine-backed profiles, then preflights and renders the resulting RenderPlans.
 UtterPlan's single-file `render-plan` command remains the low-level projection and
 deterministic replan primitive.
 
+Character-spelling segments keep exact identity in their portable token lemmas: a single alphanumeric token under `say_as = {interpret_as = "characters"}` has the exact token surface as its lemma, even when a linguistic provider reports a context-sensitive lowercase lemma. Ordinary lexical lemmas retain compact casefold-default encoding. Newly generated RenderPlans use schema v2 and store each used role's concrete configuration once in a top-level `[bindings.<role>]` table. The RenderPlan codec restores the complete `SpeechItem.binding` mapping on load; this changes disk layout, not the consumer API.
+
 ### Troubleshooting RenderProfile identity mismatch
 
 A RenderProfile `profile_id` is a semantic content identity validated by RenderPlan; it is not a hash of the TOML file bytes. If the profile's identity-bearing semantics change without refreshing its ID, UtterPlan rejects it before creating RenderPlan artifacts. Regenerate or re-save the complete profile with VoiceRender, then validate it before rendering:

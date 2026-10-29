@@ -319,6 +319,20 @@ def test_render_book_reports_multi_role_coverage(tmp_path: Path, capsys) -> None
         "narrator",
     }
 
+    for chapter, plan in zip(collection.chapters, plans, strict=True):
+        serialized = (variant / chapter.renderplan).read_text(encoding="utf-8")
+        roles = {speech.role for speech in plan.speech}
+        assert len(roles) == 1
+        for role in roles:
+            assert serialized.count(f"[bindings.{role}]") == 1
+        assert "[flow.binding]" not in serialized
+        assert plan.schema_version == 2
+        assert plan.plan_id == plan.computed_id()
+        assert all(
+            speech.binding == dict(profile.roles[speech.role].binding) for speech in plan.speech
+        )
+        plan.validate_against_profile(profile)
+
 
 def test_render_book_accumulates_successful_chapters_and_replaces_latest_report(
     tmp_path: Path, capsys

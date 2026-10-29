@@ -42,6 +42,8 @@ In Python, `PlannerConfig.document_format` defaults to `"plain"`; select `"ssmd"
 Token offsets are half-open Python-character ranges into the owning `segment.text`. Do not use them to slice document text or add offsets from another segment. Consumers preserve stored segment order but decide downstream chunk boundaries; a segment is not necessarily one TTS call.
 Token `pos`, `tag`, `lemma`, and `morph` describe that exact prepared text and are the authoritative linguistic context, not model-token IDs or counts. Consumers may pass them through without retokenizing or rerunning spaCy. Optional replacements are provenance only: their output spans are segment-local, source values are original spellings, and they do not alter hashes independently of the source digest and are not synthesis inputs.
 
+For `say_as.interpret_as = "characters"`, a single alphanumeric spelling token keeps its exact surface as the portable lemma (`T`, not a provider's contextual `t`); POS, tag, and morphology remain provider facts. The ordinary casefold-default encoding is unchanged. If the plan is projected and saved as RenderPlan v2, role bindings are interned in top-level `[bindings.<role>]` tables; `renderplan.codec.load_plan()` restores each complete `SpeechItem.binding` mapping for consumers.
+
 ```python
 from utterplan import FlowPlan
 
