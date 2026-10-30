@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import replace
 from typing import Any, TypeAlias
 
@@ -22,7 +22,7 @@ from .renderplan_projection import RenderPlanProjectionError, SourceSegmentIndex
 FlowItem: TypeAlias = AudioItem | PauseItem | SpeechItem
 
 _TIMED_PAUSE = re.compile(r"^(0|[1-9][0-9]*)ms$")
-_BOUNDARY_PRIORITY = {"clause": 1, "sentence": 2, "paragraph": 3, "voice_change": 4}
+_STRUCTURAL_BOUNDARY_PRIORITY = {"clause": 1, "sentence": 2, "paragraph": 3, "voice_change": 4}
 _AUTHORED_PAUSES = frozenset({"timed", "x-weak", "weak", "medium", "strong", "x-strong"})
 
 
@@ -88,7 +88,8 @@ def group_initial_plan(index: SourceSegmentIndex, profile: RenderProfile) -> tup
         else:
             left_ref = refs[position - 1]
             left = left_ref.segment
-            boundary = _boundary_kind(left, segment)
+            edge_kinds = _boundary_kinds(left, segment)
+            boundary = _structural_boundary_kind(edge_kinds)
             left_pause = _pause_intent(left.pause_after, left_ref.locator)
             right_pause = _pause_intent(segment.pause_before, ref.locator)
             media_change = (left.directives.audio is None) != (audio is None)
@@ -108,29 +109,44 @@ def group_initial_plan(index: SourceSegmentIndex, profile: RenderProfile) -> tup
                 else None
             )
             authored_break = _has_timed_or_named(left_pause) or _has_timed_or_named(right_pause)
-            should_close = policy_split or hard_reason is not None or authored_break
+            authored_none_only = not authored_break and any(
+                intent is not None and intent.type == "none" for intent in (left_pause, right_pause)
+            )
+            parenthetical_policy_break = (
+                "parenthetical" in edge_kinds
+                and _parenthetical_pause_enabled(profile)
+                and not authored_none_only
+            )
+            should_close = (
+                policy_split
+                or hard_reason is not None
+                or authored_break
+                or parenthetical_policy_break
+            )
             if should_close:
-                actual_end = (
-                    "voice_change" if voice_change else boundary if policy_split else "none"
-                )
+                if voice_change:
+                    semantic_boundary = "voice_change"
+                elif policy_split:
+                    semantic_boundary = boundary
+                elif parenthetical_policy_break:
+                    semantic_boundary = "parenthetical"
+                else:
+                    semantic_boundary = None
                 if group_source:
                     close_group(
                         planning_level="hard" if hard_reason else profile.planning.split,
                         split_reason=hard_reason or "policy",
-                        semantic_end=actual_end,
+                        semantic_end=semantic_boundary or "none",
                     )
                 pause = _resolve_pause(
                     left_pause,
                     right_pause,
-                    semantic_end=("voice_change" if voice_change else boundary)
-                    if policy_split or voice_change
-                    else None,
+                    semantic_end=semantic_boundary,
                     profile=profile,
                     capacity_cut=False,
                 )
                 if pause is not None:
                     flow.append(pause)
-
         if audio is not None:
             if group_source:
                 close_group(planning_level="hard", split_reason="media", semantic_end=boundary)
@@ -210,17 +226,28 @@ def _effective_state(
     return role_name, role.language, segment.language, role
 
 
+def _boundary_kinds(left: FlowSegment, right: FlowSegment) -> frozenset[str]:
+    return frozenset(left.boundary_after).union(right.boundary_before)
+
+
+def _structural_boundary_kind(kinds: Iterable[str]) -> str:
+    return max(
+        (kind for kind in kinds if kind in _STRUCTURAL_BOUNDARY_PRIORITY),
+        key=_STRUCTURAL_BOUNDARY_PRIORITY.__getitem__,
+        default="none",
+    )
+
+
 def _boundary_kind(left: FlowSegment, right: FlowSegment) -> str:
-    kinds = set(left.boundary_after).union(right.boundary_before)
-    return max(kinds, key=lambda kind: _BOUNDARY_PRIORITY.get(kind, 0), default="none")
+    return _structural_boundary_kind(_boundary_kinds(left, right))
 
 
 def _terminal_boundary(segment: FlowSegment) -> str:
-    return max(
-        segment.boundary_after,
-        key=lambda kind: _BOUNDARY_PRIORITY.get(kind, 0),
-        default="none",
-    )
+    return _structural_boundary_kind(segment.boundary_after)
+
+
+def _parenthetical_pause_enabled(profile: RenderProfile) -> bool:
+    return profile.pauses.mode == "manual" and "parenthetical" in profile.pauses.durations_ms
 
 
 def _policy_splits(policy: str, boundary: str) -> bool:
@@ -692,7 +719,7 @@ def _child_speech(
         planning_level=planning_level,
         split_reason=split_reason,
         semantic_end=semantic_end
-        if semantic_end in {"clause", "sentence", "paragraph", "voice_change"}
+        if semantic_end in {"clause", "sentence", "paragraph", "parenthetical", "voice_change"}
         else "none",
         tokens=index.tokens_for(source, required_fields=role_profile.requirements.token_fields),
         controls=index.controls_for(source),

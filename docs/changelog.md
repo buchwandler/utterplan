@@ -4,7 +4,11 @@
 
 ## [Unreleased]
 
-## [v0.6.12] - Unreleased
+## [v0.6.12] - 2026-10-29
+
+### Added
+
+- Added opt-in parenthetical request splitting and configurable pauses to RenderPlan projection
 
 ### Changed
 

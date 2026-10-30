@@ -183,6 +183,42 @@ def test_replan_replaces_only_failed_occurrence_and_preserves_later_id() -> None
     assert rebuilt.plan_id != previous.plan_id
 
 
+def test_replan_preserves_parenthetical_semantic_end_on_last_clause_child() -> None:
+    plan = _plan(
+        FlowSegment("A ", "en-US", boundary_after=("clause",)),
+        FlowSegment("B ", "en-US", boundary_after=("parenthetical",)),
+        FlowSegment(
+            "(x)",
+            "en-US",
+            boundary_before=("parenthetical",),
+            boundary_after=("sentence",),
+        ),
+    )
+    profile = replace(
+        _profile(),
+        pauses=PausePolicy(
+            mode="manual",
+            durations_ms={"clause": 180, "parenthetical": 180, "sentence": 500},
+        ),
+        profile_id=None,
+    )
+    index, profile, previous = _build_previous(plan, profile)
+    failed = previous.speech[0]
+    assert failed.text == "A B "
+    assert failed.semantic_end == "parenthetical"
+
+    flow = replan_flow(index, profile, previous, _preflight(previous, profile, (failed,)))
+    speech = _speech_text(flow)
+
+    assert [item.text for item in speech] == ["A ", "B ", "(x)"]
+    assert [item.semantic_end for item in speech] == ["clause", "parenthetical", "sentence"]
+    assert [item.reason for item in flow if isinstance(item, PauseItem)] == [
+        "capacity",
+        "parenthetical",
+        "sentence",
+    ]
+
+
 def test_successful_prior_splits_survive_replanning_an_unrelated_child() -> None:
     plan = _plan(
         FlowSegment("A1 ", "en-US", boundary_after=("clause",)),

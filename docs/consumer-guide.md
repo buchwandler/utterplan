@@ -2,7 +2,7 @@
 
 UtterPlan ends at a semantic planning boundary. A renderer consumes the public `FlowPlan` and begins G2P after planning. It does not need a TOML round trip when planner and renderer run in the same process.
 
-The schema-v7 plan is renderer-independent: `FlowUnit` grouping is fixed paragraph-local, while `FlowSegment` boundary arrays carry safe cut opportunities. Segments are not necessarily TTS calls, and UtterPlan's linguistic tokens are not model-token counts. A consumer may choose sentence, paragraph, or engine-token-budget chunks and native, automatic, or manual pause realization without changing the saved plan.
+The schema-v7 plan is renderer-independent: `FlowUnit` grouping is fixed paragraph-local, while `FlowSegment` boundary arrays carry safe cut opportunities. Segments are not necessarily TTS calls, and UtterPlan's linguistic tokens are not model-token counts. Consumers choose sentence, paragraph, or engine-token-budget chunks and native, automatic, or manual pause realization without changing the saved plan. Optional RenderPlan projection can also opt in to splitting sentence requests at stored parenthetical edges through an explicit manual RenderProfile pause policy; this does not change the FlowPlan.
 
 For persistence across processes, save a current plan as `.utterplan.toml` and load it with `FlowPlan.load()`. `to_toml()` / `from_toml()` provide text round-tripping, and `plan_id` identifies executable semantics rather than TOML formatting. Batch reports and optional compiler traces are operational/provenance artifacts, not plans.
 
@@ -39,6 +39,7 @@ In Python, `PlannerConfig.document_format` defaults to `"plain"`; select `"ssmd"
 - `directives`: typed voice, pronunciation, prosody, emphasis, say-as, substitution, audio, and extension data.
 - `markers` and optional `heading` metadata already localized to the owning segment.
 
+RenderPlan's parenthetical policy is independent of FlowPlan compilation. Only a manual RenderProfile that explicitly includes `pauses.parenthetical` activates it; a zero duration still splits requests; omitting the key preserves current behavior, and `mode = "none"` disables this automatic policy even if a stale duration remains. Newly created Kokoro profiles seed `180ms` in VoiceRender, but existing user profiles are not mutated. The original `(` and `)` remain in speech text, and only UtterPlan's stored semantic boundaries are used.
 Token offsets are half-open Python-character ranges into the owning `segment.text`. Do not use them to slice document text or add offsets from another segment. Consumers preserve stored segment order but decide downstream chunk boundaries; a segment is not necessarily one TTS call.
 Token `pos`, `tag`, `lemma`, and `morph` describe that exact prepared text and are the authoritative linguistic context, not model-token IDs or counts. Consumers may pass them through without retokenizing or rerunning spaCy. Optional replacements are provenance only: their output spans are segment-local, source values are original spellings, and they do not alter hashes independently of the source digest and are not synthesis inputs.
 
