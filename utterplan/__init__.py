@@ -116,6 +116,7 @@ from .renderability import (
     preflight_renderability,
 )
 from .renderplan_export import build_render_plan
+from .renderplan_pause_timing import PauseTimingConfig, PauseTimingMode
 from .role_coverage import (
     LogicalRoleInventory,
     ProfileRoleCoverage,
@@ -192,6 +193,8 @@ __all__ = [
     "UtterancePlanner",
     "ChunkMode",
     "PausePolicy",
+    "PauseTimingConfig",
+    "PauseTimingMode",
     "PreviewChunk",
     "SegmentRef",
     "preview_plan",

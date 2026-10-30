@@ -56,6 +56,16 @@ def test_compile_cli_defaults() -> None:
     assert args.renderability == "repair"
 
 
+def test_render_plan_pause_timing_parser_modes_and_default() -> None:
+    parser = build_parser()
+    args = ["render-plan", "plan.toml", "--profile", "voice.toml", "--output", "out.toml"]
+    assert parser.parse_args(args).pause_timing is None
+    for mode in ("fixed", "natural", "engaging"):
+        assert parser.parse_args([*args, "--pause-timing", mode]).pause_timing == mode
+    with pytest.raises(SystemExit):
+        parser.parse_args([*args, "--pause-timing", "dramatic"])
+
+
 @pytest.mark.parametrize(
     "argv",
     (

@@ -164,6 +164,21 @@ engine-backed profiles, then preflights and renders the resulting RenderPlans.
 UtterPlan's single-file `render-plan` command remains the low-level projection and
 deterministic replan primitive.
 
+### Context-aware pause timing
+
+RenderPlan projection can keep the RenderProfile's configured pause durations or adapt already-existing automatic clause, sentence, and paragraph pauses to their local text context. The profile remains the baseline scale; no new pause is created. `fixed` is the compatibility default and preserves current behavior. `natural` adds moderate variation, while `engaging` uses stronger audiobook-oriented dynamics. Authored timed pauses, named strengths, authored `none`, capacity cuts, and voice-change pauses are not retimed.
+
+Choose a preset for an initial projection with either `utterplan render-plan` or `utterplan bundle render`:
+
+```bash
+utterplan bundle render novel.ssmd-bundle \
+  --profile narration.renderprofile.toml \
+  --pause-timing engaging
+```
+
+Python callers can pass the typed `PauseTimingConfig` to `build_render_plan` or `render_bundle`; omitting it selects `fixed`. Replanning preserves the pauses already present and does not accept a new timing preset. Adaptive bundle outputs have distinct `--pt-natural-v1` or `--pt-engaging-v1` variant suffixes; fixed variant names stay unchanged. See the [architecture note](docs/pause-timing-architecture.md), [CLI](docs/cli.md#produce-or-replan-a-renderplan), [Python API](docs/python-api.md#build-and-replan-a-renderplan), and [bundle guide](docs/bundles.md#render) for details.
+
+For downstream listening evaluation, render fixed, natural, and engaging plans from the same synthesized speech WAVs. Compare repeated cadence, short consecutive and long explanatory sentences, punctuation, paragraph/dialogue transitions, authored pauses, and total inserted silence. Judge whether the rhythm is less timer-like and whether engaging becomes rushed; do not decide from total chapter duration alone. If it sounds rushed, adjust the preset bias/clamps rather than changing the projection boundary.
 Character-spelling segments keep exact identity in their portable token lemmas: a single alphanumeric token under `say_as = {interpret_as = "characters"}` has the exact token surface as its lemma, even when a linguistic provider reports a context-sensitive lowercase lemma. Ordinary lexical lemmas retain compact casefold-default encoding. Newly generated RenderPlans use schema v2 and store each used role's concrete configuration once in a top-level `[bindings.<role>]` table. The RenderPlan codec restores the complete `SpeechItem.binding` mapping on load; this changes disk layout, not the consumer API.
 
 ### Troubleshooting RenderProfile identity mismatch
@@ -287,15 +302,22 @@ The optional RenderPlan producer consumes the stored prepared plan directly:
 
 ```python
 from renderplan.codec import load_profile, save_plan
-from utterplan import FlowPlan, build_render_plan
+from utterplan import FlowPlan, PauseTimingConfig, PauseTimingMode, build_render_plan
 
 source = FlowPlan.load("chapter.utterplan.toml")
 profile = load_profile("voice.renderprofile.toml")
-render_plan = build_render_plan(source, profile)
+mode: PauseTimingMode = "engaging"
+render_plan = build_render_plan(
+    source,
+    profile,
+    pause_timing=PauseTimingConfig(mode),
+)
 save_plan(render_plan, "chapter.renderplan.toml")
 ```
 
-Use `build_render_plan(..., previous_plan=previous, preflight=report)` for deterministic refinement; both values are required together. The RenderPlan path rejects historical UtterPlan schemas and does not depend on a renderer or audio runtime. See the [RenderPlan CLI](docs/cli.md#produce-or-replan-a-renderplan) and [Python API](docs/python-api.md#build-and-replan-a-renderplan) guides.
+`PauseTimingConfig` and the `PauseTimingMode` type alias are exported from the `utterplan` package. Passing `PauseTimingConfig("natural")` or `PauseTimingConfig("engaging")` adapts only existing automatic clause, sentence, and paragraph pauses during initial projection. The RenderProfile supplies their baseline durations; fixed remains the default when `pause_timing` is omitted. Authored pause intents, capacity cuts, and voice-change timing remain unchanged.
+
+Use `build_render_plan(..., previous_plan=previous, preflight=report)` for deterministic refinement; both values are required together. The RenderPlan path rejects historical UtterPlan schemas and does not depend on a renderer or audio runtime. During replan, omit `pause_timing`; existing pauses are preserved and an explicit timing configuration is rejected. See the [RenderPlan CLI](docs/cli.md#produce-or-replan-a-renderplan) and [Python API](docs/python-api.md#build-and-replan-a-renderplan) guides.
 
 For operational progress from a long-running Python plan, pass `on_progress` to
 `UtterancePlanner.plan`, `UtterancePlanner.compile`, or `compile_document`. The

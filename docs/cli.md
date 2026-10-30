@@ -30,8 +30,13 @@ call a renderer, or calculate backend model-token counts:
 ```bash
 utterplan render-plan chapter.utterplan.toml \\
   --profile voice.renderprofile.toml \\
+  --pause-timing engaging \\
   --output chapter.renderplan.toml
 ```
+
+`--pause-timing {fixed,natural,engaging}` selects the duration policy for an initial RenderPlan projection; omitting it is equivalent to `fixed`, which preserves the RenderProfile's automatic pause durations. `natural` adds moderate context variation and `engaging` stronger audiobook-oriented variation. Only already-materialized automatic clause, sentence, and paragraph pauses are adapted. Authored timed pauses, named strengths and `none`, capacity cuts, and voice-change pauses keep their existing behavior; the option does not create pause positions. The RenderProfile remains the baseline duration scale.
+
+The human summary reports the selected mode. `--json` includes a `pause_timing` provenance object (mode and algorithm version) outside the RenderPlan payload. Bundle reports record the same metadata. Adaptive bundle variants include `--pt-natural-v1` or `--pt-engaging-v1` before the profile fingerprint; fixed variant names remain unchanged.
 
 Replanning requires both the exact previous RenderPlan and its matching preflight
 report. Only failed speech occurrences are refined; successful partitions remain:
@@ -49,6 +54,8 @@ utterplan render-plan chapter.utterplan.toml \\
 require `--force`. `--explain` formats the generated plan and replan decisions; it
 does not invoke planning a second time. `--json` emits a versioned JSON wrapper to
 stdout while the RenderPlan artifact remains TOML at `--output`.
+
+`--pause-timing` applies only to initial projection. Supplying it together with `--previous` and `--preflight` is rejected; replanning preserves the pause durations from the previous RenderPlan.
 
 ## Logical roles and complete-profile coverage
 
@@ -149,7 +156,7 @@ utterplan bundle compile BUNDLE [--chapters SELECTOR]
   [--diagnostics {warnings,all,none}]
 
 utterplan bundle render BUNDLE --profile PROFILE [--chapters SELECTOR]
-  [--utterplan-dir PATH] [--output-root PATH] [--variant LABEL]
+  [--utterplan-dir PATH] [--output-root PATH] [--variant LABEL] [--pause-timing {fixed,natural,engaging}]
   [--force] [--fail-fast] [--report PATH]
 
 utterplan bundle replan BUNDLE --variant VARIANT [--chapters SELECTOR]

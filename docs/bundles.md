@@ -5,7 +5,7 @@ UtterPlan's bundle lifecycle accepts one canonical `<name>.ssmd-bundle/` root an
 ```bash
 utterplan bundle compile novel.ssmd-bundle --chapters 5-17
 utterplan bundle compile story.ssmd-bundle
-utterplan bundle render novel.ssmd-bundle --chapters 5-17 --profile narration.renderprofile.toml
+utterplan bundle render novel.ssmd-bundle --chapters 5-17 --profile narration.renderprofile.toml --pause-timing engaging
 utterplan bundle render story.ssmd-bundle --profile narration.renderprofile.toml
 ```
 
@@ -75,6 +75,8 @@ utterplan bundle render novel.ssmd-bundle \
 
 The default RenderPlan root is `<bundle>/renderplan/`. Each variant includes a canonical `renderprofile.toml` snapshot, RenderPlan artifacts, and `render-report.toml`; book variants also maintain `renderplan-set.toml` as the active collection index. The variant directory combines a readable label with the RenderProfile identity fingerprint. `--variant` changes the label without removing the fingerprint. `--utterplan-dir`, `--output-root`, and `--report` override their respective locations.
 
+Pass `--pause-timing natural` or `--pause-timing engaging` for adaptive automatic clause, sentence, and paragraph pause durations. Omitted timing is `fixed` and keeps the existing RenderProfile durations. Authored pauses and structural capacity/voice-change behavior are preserved. Book and document outputs report the selected mode and algorithm as `[pause_timing]` metadata. Adaptive variants use `--pt-natural-v1` or `--pt-engaging-v1` in the logical label before the profile fingerprint (for example, `narration--pt-engaging-v1--<profile-fingerprint>`); custom `--variant` labels receive the same suffix. Fixed variant names are unchanged, so the modes do not collide. Replan selects an existing variant and does not accept a pause-timing option.
+
 Role coverage is checked before new variant artifacts are written. The selected profile must cover every required logical role, including its default role when any speech has no explicit role. Profile identity mismatches, unsafe paths, and metadata collisions are not bypassed by `--force`.
 
 ### Troubleshooting stale RenderProfile identity
@@ -108,13 +110,14 @@ The supplied workspace path is resolved first. The resolved directory must be na
 The public services share the manifest dispatch and selection behavior used by the CLI:
 
 ```python
-from utterplan import compile_bundle, replan_bundle, render_bundle
+from utterplan import PauseTimingConfig, compile_bundle, replan_bundle, render_bundle
 
 compiled = compile_bundle("novel.ssmd-bundle", chapters="5-17")
 projected = render_bundle(
     "novel.ssmd-bundle",
     profile="narration.renderprofile.toml",
     chapters="5-17",
+    pause_timing=PauseTimingConfig("engaging"),
 )
 
 assert compiled.kind == projected.kind == "book"
@@ -122,6 +125,6 @@ assert compiled.exit_code == projected.exit_code == 0
 print(projected.variant)
 ```
 
-`compile_bundle()`, `render_bundle()`, and `replan_bundle()` accept paths and keyword options. Their result records expose the resolved bundle, kind, selection, per-item outcomes, artifact paths, reports, and exit status. Optional progress and start callbacks receive typed records; services do not print. Invalid or unsafe requests raise `BundleServiceError` or `BundleReplanError`, while item-level failures are returned in result outcomes.
+`compile_bundle()`, `render_bundle()`, and `replan_bundle()` accept paths and keyword options. Their result records expose the resolved bundle, kind, selection, per-item outcomes, artifact paths, reports, and exit status. Optional progress and start callbacks receive typed records; services do not print. `render_bundle()` accepts `pause_timing=PauseTimingConfig("natural")` or `PauseTimingConfig("engaging")`; omission is fixed compatibility behavior. `replan_bundle()` selects an existing timing-specific variant and does not take a timing override. Invalid or unsafe requests raise `BundleServiceError` or `BundleReplanError`, while item-level failures are returned in result outcomes.
 
 For a successful full bundle compile, `BundleCompileResult.role_inventory_path` is the canonical `role-inventory.toml` path. It is `None` for partial selections and any compile with a failed item; in those cases the prior whole-bundle inventory, if present, remains untouched. The artifact is additive and does not alter plan identity or bundle rendering.

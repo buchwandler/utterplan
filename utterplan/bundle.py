@@ -18,6 +18,7 @@ from .batch import BatchProgressCallback, CompileOutcome
 from .bundle_role_inventory import build_bundle_role_inventory, save_bundle_role_inventory
 from .config import PlannerConfig
 from .renderplan_batch import RenderOutcome
+from .renderplan_pause_timing import PauseTimingConfig
 from .ssmd_bundle import (
     BundleKind,
     SsmdBundleError,
@@ -229,6 +230,7 @@ def render_bundle(
     profile: str | Path,
     chapters: str = "all",
     variant: str | None = None,
+    pause_timing: PauseTimingConfig | None = None,
     utterplan_dir: str | Path | None = None,
     output_root: str | Path | None = None,
     report: str | Path | None = None,
@@ -251,6 +253,7 @@ def render_bundle(
                 profile=profile,
                 chapters=selector,
                 variant=variant,
+                pause_timing=pause_timing,
                 utterplan_dir=utterplan_dir,
                 output_root=output_root,
                 report=report,
@@ -303,6 +306,7 @@ def render_bundle(
             bundle_index=index,
             profile=profile,
             variant=variant,
+            pause_timing=pause_timing,
             utterplan_dir=utterplan_dir,
             output_root=output_root,
             report=report,

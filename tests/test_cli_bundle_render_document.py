@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 import tomlkit
-from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
+from renderplan import PauseItem, PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
 from renderplan import codec as renderplan_codec
 
 from utterplan.cli import main
@@ -92,9 +92,17 @@ def _multi_role_profile(path: Path, *, include_cast: bool) -> RenderProfile:
     return profile
 
 
-def _variant_dir(root: Path, profile_path: Path, *, label: str = "narration") -> Path:
+def _variant_dir(
+    root: Path,
+    profile_path: Path,
+    *,
+    label: str = "narration",
+    pause_timing: str | None = None,
+) -> Path:
     profile = renderplan_codec.load_profile(profile_path)
     profile_id = profile.profile_id or profile.computed_id()
+    if pause_timing not in {None, "fixed"}:
+        label = f"{label}--pt-{pause_timing}-v1"
     return root / "renderplan" / f"{label}--{profile_id.removeprefix('sha256:')[:12]}"
 
 
@@ -393,3 +401,34 @@ def test_document_bundle_render_rejects_non_all_selector(
     assert result == 2
     assert "document bundles only support --chapters all" in captured.err
     assert not (root / "renderplan").exists()
+
+
+def test_pause_timing_modes_create_distinct_document_variants_and_reports(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _workspace(tmp_path)
+    FlowPlan(
+        language="en-US",
+        flow=(FlowUnit((FlowSegment("Hello there.", "en-US", boundary_after=("sentence",)),)),),
+    ).save(root / "utterplan" / "document.utterplan.toml")
+    profile_path = tmp_path / "narration.renderprofile.toml"
+    _profile(profile_path)
+    durations: dict[str, int] = {}
+    variants: set[Path] = set()
+
+    for mode in ("fixed", "natural", "engaging"):
+        assert _render(root, profile_path, "--pause-timing", mode) == 0
+        capsys.readouterr()
+        variant_dir = _variant_dir(root, profile_path, pause_timing=mode)
+        variants.add(variant_dir)
+        plan = renderplan_codec.load_plan(variant_dir / "document.renderplan.toml")
+        pause = next(item for item in plan.flow if isinstance(item, PauseItem))
+        durations[mode] = pause.duration_ms
+        report = tomlkit.parse((variant_dir / "render-report.toml").read_text(encoding="utf-8"))
+        assert dict(report["pause_timing"]) == {
+            "mode": mode,
+            "algorithm": "utterplan.pause-timing.v1",
+        }
+
+    assert len(variants) == 3
+    assert len(set(durations.values())) == 3

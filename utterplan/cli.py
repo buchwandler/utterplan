@@ -45,6 +45,11 @@ from .preview import PreviewChunk, preview_plan
 from .renderability import format_renderability_error
 from .renderplan_batch import RenderOutcome
 from .renderplan_export import build_render_plan, format_render_plan_explanation
+from .renderplan_pause_timing import (
+    PAUSE_TIMING_ALGORITHM,
+    PauseTimingConfig,
+    PauseTimingMode,
+)
 from .renderprofile_io import load_render_profile
 from .role_coverage import logical_role_inventory, profile_role_coverage
 from .source_input import _format_for_path as _format_source_path
@@ -214,6 +219,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     bundle_render.add_argument("--profile", type=Path, required=True)
     bundle_render.add_argument("--chapters", default="all", metavar="SELECTOR")
+    bundle_render.add_argument(
+        "--pause-timing",
+        choices=("fixed", "natural", "engaging"),
+        default=None,
+        help="automatic semantic pause timing for the projected RenderPlans",
+    )
     bundle_render.add_argument("--variant")
     bundle_render.add_argument("--utterplan-dir", type=Path)
     bundle_render.add_argument("--output-root", type=Path)
@@ -319,6 +330,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     render_plan_parser.add_argument(
         "--preflight", type=Path, help="matching RenderPlan preflight report TOML"
+    )
+    render_plan_parser.add_argument(
+        "--pause-timing",
+        choices=("fixed", "natural", "engaging"),
+        default=None,
+        help=(
+            "automatic semantic pause timing: fixed preserves RenderProfile durations, "
+            "natural adds moderate context adaptation, engaging uses stronger dynamics"
+        ),
     )
     render_plan_parser.add_argument(
         "-o", "--output", type=Path, required=True, help="write the RenderPlan TOML"
@@ -718,6 +738,7 @@ def _render_bundle(args: argparse.Namespace) -> int:
         print(f"  selected:  {len(selected_ids)}", file=sys.stderr)
         print(f"  profile:   {args.profile}", file=sys.stderr)
         print(f"  variant:   {progress.variant}", file=sys.stderr)
+        print(f"  pause timing: {args.pause_timing or 'fixed'}", file=sys.stderr)
         if progress.required_roles:
             print(f"  roles:      {', '.join(progress.required_roles)}", file=sys.stderr)
         print("  coverage:   complete", file=sys.stderr)
@@ -747,6 +768,11 @@ def _render_bundle(args: argparse.Namespace) -> int:
             profile=args.profile,
             chapters=args.chapters,
             variant=args.variant,
+            pause_timing=(
+                PauseTimingConfig(cast(PauseTimingMode, args.pause_timing))
+                if args.pause_timing is not None
+                else None
+            ),
             utterplan_dir=args.utterplan_dir,
             output_root=args.output_root,
             report=args.report,
@@ -1126,6 +1152,11 @@ def _load_plan_file(path: Path) -> FlowPlan:
 def _render_plan_command(args: argparse.Namespace) -> int:
     if (args.previous is None) != (args.preflight is None):
         raise _CliUsageError("--previous and --preflight must be supplied together")
+    if args.previous is not None and args.pause_timing is not None:
+        raise _CliUsageError(
+            "--pause-timing applies only to initial RenderPlan projection; "
+            "replanning preserves pause timing from --previous"
+        )
     if args.output.exists() and not args.force:
         raise _CliUsageError(f"output exists: {args.output}; use --force to replace it")
 
@@ -1141,7 +1172,17 @@ def _render_plan_command(args: argparse.Namespace) -> int:
         profile,
         previous_plan=previous,
         preflight=preflight,
+        pause_timing=(
+            PauseTimingConfig(cast(PauseTimingMode, args.pause_timing))
+            if args.pause_timing is not None
+            else None
+        ),
     )
+    timing_mode = args.pause_timing or ("preserved" if previous is not None else "fixed")
+    timing_provenance: dict[str, object] = {
+        "mode": timing_mode,
+        "algorithm": PAUSE_TIMING_ALGORITHM if previous is None else None,
+    }
     renderplan_codec.save_plan(plan, args.output)
 
     explanation = (
@@ -1154,6 +1195,7 @@ def _render_plan_command(args: argparse.Namespace) -> int:
             "format": "utterplan-render-plan",
             "version": 1,
             "output": str(args.output),
+            "pause_timing": timing_provenance,
             "role_coverage": {
                 "default_role": coverage.default_role,
                 "required": list(coverage.required_roles),
@@ -1169,6 +1211,7 @@ def _render_plan_command(args: argparse.Namespace) -> int:
     else:
         print(f"roles: {', '.join(coverage.required_roles) or 'none'}", file=sys.stderr)
         print("coverage: complete", file=sys.stderr)
+        print(f"pause timing: {timing_mode}", file=sys.stderr)
         if explanation is not None:
             print(explanation, end="")
         else:

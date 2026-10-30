@@ -15,7 +15,12 @@ from .batch import BatchProgressCallback, CompileOutcome, CompileRequest, compil
 from .config import PlannerConfig
 from .model import FlowPlan
 from .renderplan_export import build_render_plan
-from .renderplan_workspace import profile_fingerprint, render_variant_label
+from .renderplan_pause_timing import PAUSE_TIMING_ALGORITHM, PauseTimingConfig
+from .renderplan_workspace import (
+    pause_timing_variant_label,
+    profile_fingerprint,
+    render_variant_label,
+)
 from .renderprofile_io import load_render_profile
 from .role_coverage import assert_profile_role_coverage
 from .ssmd_bundle import SsmdBundleError, SsmdBundleIndex, bundle_item_path, load_ssmd_bundle
@@ -216,6 +221,7 @@ def _render_document_service(
     *,
     profile: str | Path,
     variant: str | None = None,
+    pause_timing: PauseTimingConfig | None = None,
     utterplan_dir: str | Path | None = None,
     output_root: str | Path | None = None,
     report: str | Path | None = None,
@@ -255,9 +261,8 @@ def _render_document_service(
         active_profile = loaded_profile.profile
         coverage = assert_profile_role_coverage(source_plan, active_profile)
         profile_id = loaded_profile.profile_id
-        variant_name = (
-            f"{render_variant_label(profile_path, variant)}--{profile_fingerprint(profile_id)}"
-        )
+        timing = pause_timing or PauseTimingConfig()
+        variant_name = f"{pause_timing_variant_label(render_variant_label(profile_path, variant), timing)}--{profile_fingerprint(profile_id)}"
         variant_root = (
             Path(output_root).expanduser().resolve(strict=False)
             if output_root is not None
@@ -340,7 +345,7 @@ def _render_document_service(
                     f"RenderPlan already exists (use --force): {renderplan_path}"
                 )
 
-        plan = build_render_plan(source_plan, active_profile).with_identity()
+        plan = build_render_plan(source_plan, active_profile, pause_timing=timing).with_identity()
         if on_start is not None:
             on_start(
                 DocumentRenderStart(
@@ -365,6 +370,10 @@ def _render_document_service(
         renderplan_codec.save_plan(plan, renderplan_path)
         report_data: dict[str, Any] = {
             "format": "utterplan.render-bundle-report",
+            "pause_timing": {
+                "mode": timing.mode,
+                "algorithm": PAUSE_TIMING_ALGORITHM,
+            },
             "version": 1,
             "status": "ok",
             "workspace": str(index.root.resolve()),

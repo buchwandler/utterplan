@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from renderplan import (
+    PauseItem,
     PausePolicy,
     PlanningPolicy,
     PreflightCheck,
@@ -29,6 +30,8 @@ from utterplan import (
     compile_document,
 )
 from utterplan.cli import main
+from utterplan.model import PauseIntent
+from utterplan.renderplan_pause_timing import PauseTimingConfig
 from utterplan.renderplan_projection import RenderPlanProjectionError
 
 
@@ -154,12 +157,39 @@ def test_render_plan_cli_initial_json_replan_and_explain(tmp_path: Path, capsys)
         )
         == 0
     )
-    initial_output = json.loads(capsys.readouterr().out)
+    initial_capture = capsys.readouterr()
+    initial_output = json.loads(initial_capture.out)
+    assert initial_output["pause_timing"] == {
+        "mode": "fixed",
+        "algorithm": "utterplan.pause-timing.v1",
+    }
+    assert initial_capture.err == ""
     previous = renderplan_codec.load_plan(initial_path)
     assert initial_output["plan"]["plan_id"] == previous.plan_id
 
     report = _preflight(previous, profile)
     renderplan_codec.save_preflight(report, preflight_path)
+    assert (
+        main(
+            [
+                "render-plan",
+                str(source_path),
+                "--profile",
+                str(profile_path),
+                "--previous",
+                str(initial_path),
+                "--preflight",
+                str(preflight_path),
+                "--output",
+                str(next_path),
+                "--pause-timing",
+                "engaging",
+            ]
+        )
+        == 2
+    )
+    assert "--pause-timing applies only to initial RenderPlan projection" in capsys.readouterr().err
+    assert not next_path.exists()
     assert (
         main(
             [
@@ -459,3 +489,158 @@ def test_render_plan_stale_profile_is_rejected_before_output(
     assert "Regenerate or re-save the RenderProfile with its producer" in error
     assert "--force does not bypass profile identity validation" in error
     assert not output_path.exists()
+
+
+def test_context_timing_changes_only_automatic_pause_duration_and_identity() -> None:
+    source = _source()
+    profile = _profile()
+    fixed = build_render_plan(source, profile)
+    natural = build_render_plan(source, profile, pause_timing=PauseTimingConfig("natural"))
+    engaging = build_render_plan(source, profile, pause_timing=PauseTimingConfig("engaging"))
+
+    def pause_items(plan):
+        return [
+            (index, item) for index, item in enumerate(plan.flow) if isinstance(item, PauseItem)
+        ]
+
+    fixed_pauses = pause_items(fixed)
+    natural_pauses = pause_items(natural)
+    engaging_pauses = pause_items(engaging)
+    assert len(fixed_pauses) == len(natural_pauses) == len(engaging_pauses) == 1
+    assert fixed_pauses[0][0] == natural_pauses[0][0] == engaging_pauses[0][0]
+    assert fixed_pauses[0][1].reason == natural_pauses[0][1].reason == engaging_pauses[0][1].reason
+    assert fixed_pauses[0][1].duration_ms == 500
+    assert natural_pauses[0][1].duration_ms != 500
+    assert engaging_pauses[0][1].duration_ms != 500
+    assert fixed.speech == natural.speech == engaging.speech
+    assert fixed.source_plan_id == natural.source_plan_id == engaging.source_plan_id
+    assert fixed.render_profile_id == natural.render_profile_id == engaging.render_profile_id
+    assert fixed.plan_id != natural.plan_id != engaging.plan_id
+    for plan in (fixed, natural, engaging):
+        plan.validate_against_profile(profile)
+
+
+def test_authored_pause_intents_are_unchanged_by_adaptive_projection() -> None:
+    profile = replace(
+        _profile(),
+        pauses=PausePolicy(mode="manual", durations_ms={"sentence": 500, "strong": 800}),
+    )
+    intents = (
+        PauseIntent("timed", "650ms"),
+        PauseIntent("strong"),
+        PauseIntent("none"),
+    )
+    for intent in intents:
+        source = FlowPlan(
+            language="en-US",
+            flow=(
+                FlowUnit(
+                    (
+                        FlowSegment(
+                            "one two three.",
+                            "en-US",
+                            pause_after=intent,
+                            boundary_after=("sentence",),
+                        ),
+                    )
+                ),
+            ),
+        )
+        fixed = build_render_plan(source, profile)
+        engaging = build_render_plan(source, profile, pause_timing=PauseTimingConfig("engaging"))
+        fixed_pause = next(item for item in fixed.flow if isinstance(item, PauseItem))
+        engaging_pause = next(item for item in engaging.flow if isinstance(item, PauseItem))
+        assert (engaging_pause.duration_ms, engaging_pause.reason) == (
+            fixed_pause.duration_ms,
+            fixed_pause.reason,
+        )
+
+
+def test_replanning_rejects_explicit_pause_timing() -> None:
+    source = _source()
+    profile = _profile()
+    previous = build_render_plan(source, profile, pause_timing=PauseTimingConfig("engaging"))
+    with pytest.raises(RenderPlanProjectionError, match="pause_timing applies only to initial"):
+        build_render_plan(
+            source,
+            profile,
+            previous_plan=previous,
+            preflight=_preflight(previous, profile),
+            pause_timing=PauseTimingConfig("natural"),
+        )
+
+
+def test_boundary_context_uses_complete_group_and_incoming_flow_segment() -> None:
+    source = FlowPlan(
+        language="en-US",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment("The earlier", "en-US"),
+                    FlowSegment(" thought finished.", "en-US", boundary_after=("sentence",)),
+                    FlowSegment("And tomorrow.", "en-US"),
+                )
+            ),
+        ),
+    )
+    profile = _profile()
+    fixed = build_render_plan(source, profile)
+    engaging = build_render_plan(source, profile, pause_timing=PauseTimingConfig("engaging"))
+    fixed_pause = next(item for item in fixed.flow if isinstance(item, PauseItem))
+    engaging_pause = next(item for item in engaging.flow if isinstance(item, PauseItem))
+    assert fixed.speech[0].text == "The earlier thought finished."
+    assert fixed_pause.reason == engaging_pause.reason == "sentence"
+    assert engaging_pause.duration_ms < fixed_pause.duration_ms
+
+
+@pytest.mark.parametrize("mode", ("fixed", "natural", "engaging"))
+def test_render_plan_cli_pause_timing_provenance(tmp_path: Path, capsys, mode: str) -> None:
+    source_path = tmp_path / "chapter.utterplan.toml"
+    profile_path = tmp_path / "voice.renderprofile.toml"
+    output_path = tmp_path / f"chapter-{mode}.renderplan.toml"
+    human_output_path = tmp_path / f"chapter-{mode}-human.renderplan.toml"
+    _source().save(source_path)
+    profile = _profile()
+    renderplan_codec.save_profile(profile, profile_path)
+
+    assert (
+        main(
+            [
+                "render-plan",
+                str(source_path),
+                "--profile",
+                str(profile_path),
+                "--output",
+                str(output_path),
+                "--pause-timing",
+                mode,
+                "--json",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["pause_timing"] == {
+        "mode": mode,
+        "algorithm": "utterplan.pause-timing.v1",
+    }
+    plan = renderplan_codec.load_plan(output_path)
+    pause = next(item for item in plan.flow if isinstance(item, PauseItem))
+    assert pause.duration_ms == 500 if mode == "fixed" else pause.duration_ms != 500
+
+    assert (
+        main(
+            [
+                "render-plan",
+                str(source_path),
+                "--profile",
+                str(profile_path),
+                "--output",
+                str(human_output_path),
+                "--pause-timing",
+                mode,
+            ]
+        )
+        == 0
+    )
+    assert f"pause timing: {mode}" in capsys.readouterr().err

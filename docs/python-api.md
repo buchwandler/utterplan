@@ -56,11 +56,16 @@ the exact prior RenderPlan and its matching preflight report together:
 
 ```python
 from renderplan.codec import load_plan, load_preflight, load_profile, save_plan
-from utterplan import FlowPlan, build_render_plan
+from utterplan import FlowPlan, PauseTimingConfig, PauseTimingMode, build_render_plan
 
 source = FlowPlan.load("chapter.utterplan.toml")
 profile = load_profile("voice.renderprofile.toml")
-plan = build_render_plan(source, profile)
+mode: PauseTimingMode = "engaging"
+plan = build_render_plan(
+    source,
+    profile,
+    pause_timing=PauseTimingConfig(mode),
+)
 save_plan(plan, "chapter.renderplan.toml")
 
 previous = load_plan("chapter.renderplan.toml")
@@ -74,10 +79,14 @@ next_plan = build_render_plan(
 save_plan(next_plan, "chapter.next.renderplan.toml")
 ```
 
+`PauseTimingConfig` and `PauseTimingMode` are public package-root exports. Omit `pause_timing` for the `fixed` compatibility default, or select `natural` for moderate adaptation and `engaging` for stronger audiobook-oriented variation. Only automatic clause, sentence, and paragraph pause durations change; authored pauses, capacity cuts, and voice-change timing are preserved. See the [timing architecture](pause-timing-architecture.md).
+
 The previous plan and preflight are a required pair. UtterPlan preserves successful
 prior partitions and replaces only exact failed speech occurrences. Backend metrics
 remain diagnostics supplied by preflight; UtterPlan does not estimate them. Use
 `utterplan render-plan --explain` to format the already-built decisions.
+
+When refining, omit `pause_timing`: replanning preserves the existing `PauseItem`s and rejects an explicit timing configuration rather than retiming a chapter.
 
 ### Inspect logical role coverage
 
@@ -215,13 +224,14 @@ from utterplan.renderplan_batch import RenderRequest, new_renderplan_set, render
 `compile_bundle()`, `render_bundle()`, and `replan_bundle()` are the public Python counterparts of `utterplan bundle compile|render|replan`. They accept a canonical `<name>.ssmd-bundle/` path and dispatch book or document behavior from its manifest. The CLI delegates to these services, so selection and path-safety rules are shared.
 
 ```python
-from utterplan import compile_bundle, replan_bundle, render_bundle
+from utterplan import PauseTimingConfig, compile_bundle, replan_bundle, render_bundle
 
 compiled = compile_bundle("novel.ssmd-bundle", chapters="5-17")
 projected = render_bundle(
     "novel.ssmd-bundle",
     profile="narration.renderprofile.toml",
     chapters="5-17",
+    pause_timing=PauseTimingConfig("engaging"),
 )
 refined = replan_bundle(
     "novel.ssmd-bundle",
@@ -232,7 +242,7 @@ refined = replan_bundle(
 assert compiled.exit_code == projected.exit_code == refined.exit_code == 0
 ```
 
-The compile and render services accept paths and keyword options. `chapters` defaults to `"all"`; book bundles select manifest source numbers, while document bundles accept only `"all"`. Rendering requires an explicit `profile`; replanning requires the exact active `variant`. Options include output/report paths, force and fail-fast behavior, compile planning settings, and optional progress/start callbacks. Services do not print.
+The compile and render services accept paths and keyword options. `chapters` defaults to `"all"`; book bundles select manifest source numbers, while document bundles accept only `"all"`. Rendering requires an explicit `profile`; replanning requires the exact active `variant`. Options include output/report paths, force and fail-fast behavior, compile planning settings, and optional progress/start callbacks. Services do not print. `render_bundle()` accepts `pause_timing=PauseTimingConfig("natural")` or `PauseTimingConfig("engaging")`; omission is fixed compatibility behavior. `replan_bundle()` selects an existing timing-specific variant and does not take a timing override.
 
 `BundleCompileResult`, `BundleRenderResult`, and `BundleReplanResult` expose the resolved bundle, manifest-declared kind, selected item IDs, per-item outcomes, generated paths, reports, and exit status. Their start records provide resolved configuration to optional callbacks. Invalid or unsafe shared requests raise `BundleServiceError` or `BundleReplanError`; item-level failures are reported in result outcomes. The package also exports manifest loader, selector, item-path, result, start, and callback types for integrations that need to inspect dispatch results.
 

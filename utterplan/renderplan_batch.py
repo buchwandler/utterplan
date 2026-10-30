@@ -31,6 +31,10 @@ from .atomic_io import atomic_write_text
 from .exceptions import UtterPlanError
 from .model import FlowPlan
 from .renderplan_export import build_render_plan
+from .renderplan_pause_timing import (
+    PAUSE_TIMING_ALGORITHM,
+    PauseTimingConfig,
+)
 
 
 def new_renderplan_set(
@@ -102,6 +106,7 @@ def render_to_files(
     requests: Sequence[RenderRequest],
     *,
     profile: RenderProfile,
+    pause_timing: PauseTimingConfig | None = None,
     renderplan_set: RenderPlanSet,
     set_path: str | Path,
     report_path: str | Path,
@@ -112,6 +117,7 @@ def render_to_files(
 ) -> list[RenderOutcome]:
     """Project and persist chapters incrementally, keeping successful outputs on failure."""
     validate_renderplan_set(renderplan_set)
+    pause_timing = pause_timing or PauseTimingConfig()
     profile_id = profile.profile_id or profile.computed_id()
     if profile_id != renderplan_set.profile_id:
         raise RenderPlanSetError(
@@ -129,6 +135,7 @@ def render_to_files(
         requested=len(requests),
         complete=False,
         value=renderplan_set,
+        pause_timing=pause_timing,
     )
     stopped = False
     active_set = renderplan_set
@@ -155,6 +162,7 @@ def render_to_files(
                 set_path=selected_set_path,
                 force=force,
                 chapter_order=chapter_order or {},
+                pause_timing=pause_timing,
             )
             if outcome.status == "written":
                 active_set = updated_set
@@ -165,6 +173,7 @@ def render_to_files(
             requested=len(requests),
             complete=False,
             value=renderplan_set,
+            pause_timing=pause_timing,
         )
         if on_progress is not None:
             on_progress(outcome)
@@ -177,6 +186,7 @@ def render_to_files(
         requested=len(requests),
         complete=True,
         value=renderplan_set,
+        pause_timing=pause_timing,
     )
     return outcomes
 
@@ -211,6 +221,7 @@ def _render_one(
     total: int,
     profile: RenderProfile,
     renderplan_set: RenderPlanSet,
+    pause_timing: PauseTimingConfig,
     set_path: Path,
     force: bool,
     chapter_order: Mapping[str, int],
@@ -258,7 +269,7 @@ def _render_one(
 
     source_plan_id = source_plan.plan_id
     try:
-        plan = build_render_plan(source_plan, profile).with_identity()
+        plan = build_render_plan(source_plan, profile, pause_timing=pause_timing).with_identity()
     except (OSError, ValueError, TypeError) as exc:
         return (
             _render_failure(
@@ -403,6 +414,7 @@ def _write_render_report(
     requested: int,
     complete: bool,
     value: RenderPlanSet,
+    pause_timing: PauseTimingConfig,
 ) -> None:
     items: list[dict[str, Any]] = []
     for outcome in outcomes:
@@ -430,6 +442,10 @@ def _write_render_report(
         for status in ("written", "failed", "skipped")
     }
     report = {
+        "pause_timing": {
+            "mode": pause_timing.mode,
+            "algorithm": PAUSE_TIMING_ALGORITHM,
+        },
         "format": "utterplan-render-report",
         "version": 1,
         "requested": requested,

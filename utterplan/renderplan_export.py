@@ -18,6 +18,7 @@ from renderplan import (
 from ._version import __version__
 from .model import FlowPlan
 from .renderplan_grouping import group_initial_plan
+from .renderplan_pause_timing import PauseTimingConfig
 from .renderplan_projection import RenderPlanProjectionError, build_source_index
 from .renderplan_replan import replan_flow
 from .role_coverage import assert_profile_role_coverage
@@ -29,6 +30,7 @@ def build_render_plan(
     *,
     previous_plan: RenderPlan | None = None,
     preflight: PreflightReport | None = None,
+    pause_timing: PauseTimingConfig | None = None,
 ) -> RenderPlan:
     """Project a schema-v7 FlowPlan or refine its matching prior RenderPlan."""
     if not isinstance(profile, RenderProfile):
@@ -42,10 +44,16 @@ def build_render_plan(
             "replanning requires both previous_plan and preflight; omit both for an initial build",
             code="renderplan.replan.inputs",
         )
+    if previous_plan is not None and pause_timing is not None:
+        raise RenderPlanProjectionError(
+            "pause_timing applies only to initial RenderPlan projection; replanning preserves "
+            "pause timing from previous_plan",
+            code="renderplan.replan.pause_timing",
+        )
     assert_profile_role_coverage(utterplan, profile)
     profile_id = profile.profile_id or profile.computed_id()
     if previous_plan is None:
-        flow = group_initial_plan(index, profile)
+        flow = group_initial_plan(index, profile, pause_timing=pause_timing)
     else:
         assert preflight is not None
         flow = replan_flow(index, profile, previous_plan, preflight)

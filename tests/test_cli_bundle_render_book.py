@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import tomlkit
 from renderplan import (
+    PauseItem,
     PausePolicy,
     PlanningPolicy,
     RenderProfile,
@@ -146,8 +147,15 @@ def _render(
     )
 
 
-def _variant(root: Path, profile: RenderProfile, label: str = "narration") -> Path:
+def _variant(
+    root: Path,
+    profile: RenderProfile,
+    label: str = "narration",
+    pause_timing: str | None = None,
+) -> Path:
     profile_id = profile.profile_id or profile.computed_id()
+    if pause_timing not in {None, "fixed"}:
+        label = f"{label}--pt-{pause_timing}-v1"
     return root / "renderplan" / f"{label}--{profile_id.removeprefix('sha256:')[:12]}"
 
 
@@ -170,6 +178,19 @@ def test_render_book_parser_defaults_and_required_profile() -> None:
     assert args.command == "bundle" and args.bundle_command == "render"
     assert args.chapters == "1,3-5"
     assert args.variant is None
+    assert args.pause_timing is None
+    adaptive_args = build_parser().parse_args(
+        [
+            "bundle",
+            "render",
+            "book.ssmd-bundle",
+            "--profile",
+            "narration.renderprofile.toml",
+            "--pause-timing",
+            "engaging",
+        ]
+    )
+    assert adaptive_args.pause_timing == "engaging"
     assert args.output_root is None
     assert args.utterplan_dir is None
     assert args.report is None
@@ -612,3 +633,43 @@ def test_existing_set_and_snapshot_mismatches_are_not_bypassed_by_force(
     assert _render(root, profile_a_path, "--chapters", "6", "--variant", "shared", "--force") == 2
     assert "snapshot identity" in capsys.readouterr().err
     assert not (variant_a / "chapter-0006.renderplan.toml").exists()
+
+
+def test_pause_timing_modes_create_distinct_book_variants_and_reports(
+    tmp_path: Path, capsys
+) -> None:
+    root = _write_book(tmp_path / "pause-timing.ssmd-bundle", (5,))
+    profile_path = root / "narration.renderprofile.toml"
+    profile = _profile(profile_path)
+    durations: dict[str, int] = {}
+    variant_paths: set[Path] = set()
+
+    for mode in ("fixed", "natural", "engaging"):
+        assert _render(root, profile_path, "--pause-timing", mode) == 0
+        capsys.readouterr()
+        variant = _variant(root, profile, pause_timing=mode)
+        variant_paths.add(variant)
+        renderplan_set = load_renderplan_set(variant / "renderplan-set.toml")
+        report = _report(variant / "render-report.toml")
+        plan = renderplan_codec.load_plan(variant / "chapter-0005.renderplan.toml")
+        pause = next(item for item in plan.flow if isinstance(item, PauseItem))
+        durations[mode] = pause.duration_ms
+        logical_label = "narration" if mode == "fixed" else f"narration--pt-{mode}-v1"
+        assert renderplan_set.variant == logical_label
+        assert report["pause_timing"] == {
+            "mode": mode,
+            "algorithm": "utterplan.pause-timing.v1",
+        }
+
+    assert len(variant_paths) == 3
+    assert len(set(durations.values())) == 3
+
+
+def test_custom_book_variant_label_keeps_adaptive_timing_identity(tmp_path: Path, capsys) -> None:
+    root = _write_book(tmp_path / "custom-pause-timing.ssmd-bundle", (5,))
+    profile_path = root / "narration.renderprofile.toml"
+    profile = _profile(profile_path)
+    assert _render(root, profile_path, "--variant", "cast6", "--pause-timing", "engaging") == 0
+    capsys.readouterr()
+    variant = _variant(root, profile, "cast6", "engaging")
+    assert (variant / "chapter-0005.renderplan.toml").is_file()

@@ -17,17 +17,29 @@ from renderplan import (
 )
 
 from .model import FlowSegment, PauseIntent
+from .renderplan_pause_timing import (
+    PauseTimingConfig,
+    PauseTimingContext,
+    resolve_automatic_pause_duration,
+)
 from .renderplan_projection import RenderPlanProjectionError, SourceSegmentIndex, SourceSegmentRef
 
 FlowItem: TypeAlias = AudioItem | PauseItem | SpeechItem
 
 _TIMED_PAUSE = re.compile(r"^(0|[1-9][0-9]*)ms$")
 _STRUCTURAL_BOUNDARY_PRIORITY = {"clause": 1, "sentence": 2, "paragraph": 3, "voice_change": 4}
+_ADAPTIVE_BOUNDARIES = frozenset({"clause", "sentence", "paragraph"})
 _AUTHORED_PAUSES = frozenset({"timed", "x-weak", "weak", "medium", "strong", "x-strong"})
 
 
-def group_initial_plan(index: SourceSegmentIndex, profile: RenderProfile) -> tuple[FlowItem, ...]:
+def group_initial_plan(
+    index: SourceSegmentIndex,
+    profile: RenderProfile,
+    *,
+    pause_timing: PauseTimingConfig | None = None,
+) -> tuple[FlowItem, ...]:
     """Build ordered speech/audio/pause operations using only v7 source semantics."""
+    pause_timing = pause_timing or PauseTimingConfig()
     flow: list[FlowItem] = []
     group_source: list[SourceSpan] = []
     group_state: tuple[str, str, str, RoleProfile] | None = None
@@ -132,6 +144,11 @@ def group_initial_plan(index: SourceSegmentIndex, profile: RenderProfile) -> tup
                     semantic_boundary = "parenthetical"
                 else:
                     semantic_boundary = None
+                pause_context = (
+                    _build_pause_context(index, semantic_boundary, tuple(group_source), ref)
+                    if group_source and semantic_boundary in _ADAPTIVE_BOUNDARIES
+                    else None
+                )
                 if group_source:
                     close_group(
                         planning_level="hard" if hard_reason else profile.planning.split,
@@ -143,6 +160,8 @@ def group_initial_plan(index: SourceSegmentIndex, profile: RenderProfile) -> tup
                     right_pause,
                     semantic_end=semantic_boundary,
                     profile=profile,
+                    context=pause_context,
+                    pause_timing=pause_timing,
                     capacity_cut=False,
                 )
                 if pause is not None:
@@ -175,6 +194,11 @@ def group_initial_plan(index: SourceSegmentIndex, profile: RenderProfile) -> tup
             if _policy_splits(profile.planning.split, terminal_boundary)
             else "none"
         )
+        pause_context = (
+            _build_pause_context(index, semantic_end, tuple(group_source), None)
+            if group_source and semantic_end in _ADAPTIVE_BOUNDARIES
+            else None
+        )
         if group_source:
             close_group(semantic_end=semantic_end)
         trailing = _resolve_pause(
@@ -183,6 +207,8 @@ def group_initial_plan(index: SourceSegmentIndex, profile: RenderProfile) -> tup
             semantic_end=semantic_end if semantic_end != "none" else None,
             profile=profile,
             capacity_cut=False,
+            context=pause_context,
+            pause_timing=pause_timing,
         )
         if trailing is not None:
             flow.append(trailing)
@@ -280,12 +306,41 @@ def _has_timed_or_named(intent: PauseIntent | None) -> bool:
     return intent is not None and intent.type in _AUTHORED_PAUSES
 
 
+def _build_pause_context(
+    index: SourceSegmentIndex,
+    boundary: str,
+    left_source: Sequence[SourceSpan],
+    right_ref: SourceSegmentRef | None,
+) -> PauseTimingContext:
+    """Capture the current speech group before close_group clears its source."""
+    slices = index.ordered_slices(left_source)
+    left_tokens = tuple(
+        token
+        for ref, start, end in slices
+        for token in ref.segment.tokens
+        if token.end > start and token.start < end
+    )
+    left_ref = slices[-1][0]
+    return PauseTimingContext(
+        boundary=boundary,
+        language=right_ref.segment.language if right_ref is not None else left_ref.segment.language,
+        left_text=index.text_for(left_source),
+        right_text=right_ref.segment.text if right_ref is not None else "",
+        left_tokens=left_tokens,
+        right_tokens=right_ref.segment.tokens if right_ref is not None else (),
+        left_heading=left_ref.segment.heading,
+        right_heading=right_ref.segment.heading if right_ref is not None else None,
+    )
+
+
 def _resolve_pause(
     left: PauseIntent | None,
     right: PauseIntent | None,
     *,
     semantic_end: str | None,
     profile: RenderProfile,
+    context: PauseTimingContext | None = None,
+    pause_timing: PauseTimingConfig | None = None,
     capacity_cut: bool,
 ) -> PauseItem | None:
     """Merge two authored edge intents once, then resolve to numeric milliseconds."""
@@ -326,7 +381,13 @@ def _resolve_pause(
     if has_none:
         return PauseItem(0, "authored_none")
     if semantic_end is not None:
-        return PauseItem(profile.pauses.durations_ms.get(semantic_end, 0), semantic_end)
+        base_ms = profile.pauses.durations_ms.get(semantic_end, 0)
+        duration_ms = base_ms
+        if semantic_end in _ADAPTIVE_BOUNDARIES and context is not None:
+            duration_ms = resolve_automatic_pause_duration(
+                base_ms, context, pause_timing or PauseTimingConfig()
+            ).duration_ms
+        return PauseItem(duration_ms, semantic_end)
     if capacity_cut:
         return PauseItem(0, "capacity")
     return None

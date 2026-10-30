@@ -26,6 +26,8 @@ from .batch import BatchProgressCallback, CompileOutcome, CompileRequest, compil
 from .config import PlannerConfig
 from .model import FlowPlan
 from .renderplan_batch import RenderOutcome, RenderRequest, new_renderplan_set, render_to_files
+from .renderplan_pause_timing import PauseTimingConfig
+from .renderplan_workspace import pause_timing_variant_label
 from .renderprofile_io import RenderProfileLoadError, load_render_profile
 from .role_coverage import profile_role_coverage
 from .ssmd_bundle import (
@@ -129,6 +131,7 @@ class BookRenderRequest:
     report: Path | None = None
     force: bool = False
     fail_fast: bool = False
+    pause_timing: PauseTimingConfig | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "book", Path(self.book))
@@ -292,6 +295,7 @@ def render_book(
     profile: str | Path,
     chapters: str = "all",
     variant: str | None = None,
+    pause_timing: PauseTimingConfig | None = None,
     utterplan_dir: str | Path | None = None,
     output_root: str | Path | None = None,
     report: str | Path | None = None,
@@ -312,7 +316,9 @@ def render_book(
         report=Path(report) if report is not None else None,
         force=force,
         fail_fast=fail_fast,
+        pause_timing=pause_timing,
     )
+    timing = request.pause_timing or PauseTimingConfig()
     try:
         index = _index if _index is not None else load_ssmd_bundle(request.book)
         if index.kind != "book":
@@ -343,7 +349,7 @@ def render_book(
     profile_path = loaded_profile.path
     profile_id = loaded_profile.profile_id
     fingerprint = profile_id.removeprefix("sha256:")[:12]
-    label = _render_variant_label(profile_path, request.variant)
+    label = pause_timing_variant_label(_render_variant_label(profile_path, request.variant), timing)
     variant_name = f"{label}--{fingerprint}"
 
     output_root_arg = request.output_root or (index.root / "renderplan")
@@ -525,6 +531,7 @@ def render_book(
                 render_requests,
                 profile=active_profile,
                 renderplan_set=renderplan_set,
+                pause_timing=timing,
                 set_path=set_path,
                 report_path=report_path,
                 force=request.force,

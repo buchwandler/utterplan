@@ -21,6 +21,7 @@ debugging
 :caption: Developer guide
 
 architecture
+pause-timing-architecture
 pykokoro-integration
 python-api
 changelog
