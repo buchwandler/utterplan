@@ -1,0 +1,55 @@
+rows:
+  - sha: 17f1aed9ce485ed86b9b3de9a28791cc3e435577
+    inspected: true
+    inspected_paths:
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.12/release.md
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.13/audit/commit-audit.yaml
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.13/entries/entry-0002.md
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.13/release.md
+      - .ledger/releaseledger/work/v0.6.13/audit-decisions.yaml
+      - .ledger/releaseledger/work/v0.6.13/audit.yaml
+      - .ledger/releaseledger/work/v0.6.13/entries.yaml
+      - .ledger/releaseledger/work/v0.6.13/evidence/874da57.patch
+      - .ledger/releaseledger/work/v0.6.13/evidence/88dc839.patch
+      - .ledger/releaseledger/work/v0.6.13/evidence/manifest.json
+      - .ledger/releaseledger/work/v0.6.13/range.json
+      - docs/changelog.md
+    observed_behavior: "Updated releaseledger metadata and the generated v0.6.13 changelog section; no product behavior changed"
+    public_impact: internal
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Release bookkeeping only; exclude from public changelog"
+    stale: false
+  - sha: bcc938f9b2753f5e9a06b41090b775b601fc33c8
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/bundles.md
+      - docs/cli.md
+      - docs/index.md
+      - docs/pause-timing-architecture.md
+      - docs/python-api.md
+      - tests/test_cli.py
+      - tests/test_cli_bundle_render_book.py
+      - tests/test_cli_bundle_render_document.py
+      - tests/test_renderplan_export.py
+      - tests/test_renderplan_pause_timing.py
+      - utterplan/__init__.py
+      - utterplan/_book_service.py
+      - utterplan/_document_service.py
+      - utterplan/bundle.py
+      - utterplan/cli.py
+      - utterplan/renderplan_batch.py
+      - utterplan/renderplan_export.py
+      - utterplan/renderplan_grouping.py
+      - utterplan/renderplan_pause_timing.py
+      - utterplan/renderplan_workspace.py
+    observed_behavior: "Added deterministic fixed, natural, and engaging automatic pause timing for initial RenderPlan projection, with stable provenance, variant naming, CLI/API support, and tests"
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Public behavior and documentation reviewed from the changed implementation and tests"
+    stale: false

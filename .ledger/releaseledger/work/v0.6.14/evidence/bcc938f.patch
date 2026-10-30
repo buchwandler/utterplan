@@ -1,0 +1,1705 @@
+ README.md                                |  28 +++-
+ docs/bundles.md                          |   9 +-
+ docs/cli.md                              |   9 +-
+ docs/index.md                            |   1 +
+ docs/pause-timing-architecture.md        |  34 +++++
+ docs/python-api.md                       |  18 ++-
+ tests/test_cli.py                        |  10 ++
+ tests/test_cli_bundle_render_book.py     |  63 ++++++++-
+ tests/test_cli_bundle_render_document.py |  43 +++++-
+ tests/test_renderplan_export.py          | 187 ++++++++++++++++++++++++-
+ tests/test_renderplan_pause_timing.py    | 202 +++++++++++++++++++++++++++
+ utterplan/__init__.py                    |   3 +
+ utterplan/_book_service.py               |   9 +-
+ utterplan/_document_service.py           |  19 ++-
+ utterplan/bundle.py                      |   4 +
+ utterplan/cli.py                         |  43 ++++++
+ utterplan/renderplan_batch.py            |  18 ++-
+ utterplan/renderplan_export.py           |  10 +-
+ utterplan/renderplan_grouping.py         |  65 ++++++++-
+ utterplan/renderplan_pause_timing.py     | 232 +++++++++++++++++++++++++++++++
+ utterplan/renderplan_workspace.py        |  11 +-
+ 21 files changed, 992 insertions(+), 26 deletions(-)
+
+diff --git a/README.md b/README.md
+index 2f140a9..61d7207 100644
+--- a/README.md
++++ b/README.md
+@@ -164,6 +164,21 @@ engine-backed profiles, then preflights and renders the resulting RenderPlans.
+ UtterPlan's single-file `render-plan` command remains the low-level projection and
+ deterministic replan primitive.
+
++### Context-aware pause timing
++
++RenderPlan projection can keep the RenderProfile's configured pause durations or adapt already-existing automatic clause, sentence, and paragraph pauses to their local text context. The profile remains the baseline scale; no new pause is created. `fixed` is the compatibility default and preserves current behavior. `natural` adds moderate variation, while `engaging` uses stronger audiobook-oriented dynamics. Authored timed pauses, named strengths, authored `none`, capacity cuts, and voice-change pauses are not retimed.
++
++Choose a preset for an initial projection with either `utterplan render-plan` or `utterplan bundle render`:
++
++```bash
++utterplan bundle render novel.ssmd-bundle \
++  --profile narration.renderprofile.toml \
++  --pause-timing engaging
++```
++
++Python callers can pass the typed `PauseTimingConfig` to `build_render_plan` or `render_bundle`; omitting it selects `fixed`. Replanning preserves the pauses already present and does not accept a new timing preset. Adaptive bundle outputs have distinct `--pt-natural-v1` or `--pt-engaging-v1` variant suffixes; fixed variant names stay unchanged. See the [architecture note](docs/pause-timing-architecture.md), [CLI](docs/cli.md#produce-or-replan-a-renderplan), [Python API](docs/python-api.md#build-and-replan-a-renderplan), and [bundle guide](docs/bundles.md#render) for details.
++
++For downstream listening evaluation, render fixed, natural, and engaging plans from the same synthesized speech WAVs. Compare repeated cadence, short consecutive and long explanatory sentences, punctuation, paragraph/dialogue transitions, authored pauses, and total inserted silence. Judge whether the rhythm is less timer-like and whether engaging becomes rushed; do not decide from total chapter duration alone. If it sounds rushed, adjust the preset bias/clamps rather than changing the projection boundary.
+ Character-spelling segments keep exact identity in their portable token lemmas: a single alphanumeric token under `say_as = {interpret_as = "characters"}` has the exact token surface as its lemma, even when a linguistic provider reports a context-sensitive lowercase lemma. Ordinary lexical lemmas retain compact casefold-default encoding. Newly generated RenderPlans use schema v2 and store each used role's concrete configuration once in a top-level `[bindings.<role>]` table. The RenderPlan codec restores the complete `SpeechItem.binding` mapping on load; this changes disk layout, not the consumer API.
+
+ ### Troubleshooting RenderProfile identity mismatch
+@@ -287,15 +302,22 @@ The optional RenderPlan producer consumes the stored prepared plan directly:
+
+ ```python
+ from renderplan.codec import load_profile, save_plan
+-from utterplan import FlowPlan, build_render_plan
++from utterplan import FlowPlan, PauseTimingConfig, PauseTimingMode, build_render_plan
+
+ source = FlowPlan.load("chapter.utterplan.toml")
+ profile = load_profile("voice.renderprofile.toml")
+-render_plan = build_render_plan(source, profile)
++mode: PauseTimingMode = "engaging"
++render_plan = build_render_plan(
++    source,
++    profile,
++    pause_timing=PauseTimingConfig(mode),
++)
+ save_plan(render_plan, "chapter.renderplan.toml")
+ ```
+
+-Use `build_render_plan(..., previous_plan=previous, preflight=report)` for deterministic refinement; both values are required together. The RenderPlan path rejects historical UtterPlan schemas and does not depend on a renderer or audio runtime. See the [RenderPlan CLI](docs/cli.md#produce-or-replan-a-renderplan) and [Python API](docs/python-api.md#build-and-replan-a-renderplan) guides.
++`PauseTimingConfig` and the `PauseTimingMode` type alias are exported from the `utterplan` package. Passing `PauseTimingConfig("natural")` or `PauseTimingConfig("engaging")` adapts only existing automatic clause, sentence, and paragraph pauses during initial projection. The RenderProfile supplies their baseline durations; fixed remains the default when `pause_timing` is omitted. Authored pause intents, capacity cuts, and voice-change timing remain unchanged.
++
++Use `build_render_plan(..., previous_plan=previous, preflight=report)` for deterministic refinement; both values are required together. The RenderPlan path rejects historical UtterPlan schemas and does not depend on a renderer or audio runtime. During replan, omit `pause_timing`; existing pauses are preserved and an explicit timing configuration is rejected. See the [RenderPlan CLI](docs/cli.md#produce-or-replan-a-renderplan) and [Python API](docs/python-api.md#build-and-replan-a-renderplan) guides.
+
+ For operational progress from a long-running Python plan, pass `on_progress` to
+ `UtterancePlanner.plan`, `UtterancePlanner.compile`, or `compile_document`. The
+diff --git a/docs/bundles.md b/docs/bundles.md
+index 6759ad2..07c548f 100644
+--- a/docs/bundles.md
++++ b/docs/bundles.md
+@@ -5,7 +5,7 @@ UtterPlan's bundle lifecycle accepts one canonical `<name>.ssmd-bundle/` root an
+ ```bash
+ utterplan bundle compile novel.ssmd-bundle --chapters 5-17
+ utterplan bundle compile story.ssmd-bundle
+-utterplan bundle render novel.ssmd-bundle --chapters 5-17 --profile narration.renderprofile.toml
++utterplan bundle render novel.ssmd-bundle --chapters 5-17 --profile narration.renderprofile.toml --pause-timing engaging
+ utterplan bundle render story.ssmd-bundle --profile narration.renderprofile.toml
+ ```
+
+@@ -75,6 +75,8 @@ utterplan bundle render novel.ssmd-bundle \
+
+ The default RenderPlan root is `<bundle>/renderplan/`. Each variant includes a canonical `renderprofile.toml` snapshot, RenderPlan artifacts, and `render-report.toml`; book variants also maintain `renderplan-set.toml` as the active collection index. The variant directory combines a readable label with the RenderProfile identity fingerprint. `--variant` changes the label without removing the fingerprint. `--utterplan-dir`, `--output-root`, and `--report` override their respective locations.
+
++Pass `--pause-timing natural` or `--pause-timing engaging` for adaptive automatic clause, sentence, and paragraph pause durations. Omitted timing is `fixed` and keeps the existing RenderProfile durations. Authored pauses and structural capacity/voice-change behavior are preserved. Book and document outputs report the selected mode and algorithm as `[pause_timing]` metadata. Adaptive variants use `--pt-natural-v1` or `--pt-engaging-v1` in the logical label before the profile fingerprint (for example, `narration--pt-engaging-v1--<profile-fingerprint>`); custom `--variant` labels receive the same suffix. Fixed variant names are unchanged, so the modes do not collide. Replan selects an existing variant and does not accept a pause-timing option.
++
+ Role coverage is checked before new variant artifacts are written. The selected profile must cover every required logical role, including its default role when any speech has no explicit role. Profile identity mismatches, unsafe paths, and metadata collisions are not bypassed by `--force`.
+
+ ### Troubleshooting stale RenderProfile identity
+@@ -108,13 +110,14 @@ The supplied workspace path is resolved first. The resolved directory must be na
+ The public services share the manifest dispatch and selection behavior used by the CLI:
+
+ ```python
+-from utterplan import compile_bundle, replan_bundle, render_bundle
++from utterplan import PauseTimingConfig, compile_bundle, replan_bundle, render_bundle
+
+ compiled = compile_bundle("novel.ssmd-bundle", chapters="5-17")
+ projected = render_bundle(
+     "novel.ssmd-bundle",
+     profile="narration.renderprofile.toml",
+     chapters="5-17",
++    pause_timing=PauseTimingConfig("engaging"),
+ )
+
+ assert compiled.kind == projected.kind == "book"
+@@ -122,6 +125,6 @@ assert compiled.exit_code == projected.exit_code == 0
+ print(projected.variant)
+ ```
+
+-`compile_bundle()`, `render_bundle()`, and `replan_bundle()` accept paths and keyword options. Their result records expose the resolved bundle, kind, selection, per-item outcomes, artifact paths, reports, and exit status. Optional progress and start callbacks receive typed records; services do not print. Invalid or unsafe requests raise `BundleServiceError` or `BundleReplanError`, while item-level failures are returned in result outcomes.
++`compile_bundle()`, `render_bundle()`, and `replan_bundle()` accept paths and keyword options. Their result records expose the resolved bundle, kind, selection, per-item outcomes, artifact paths, reports, and exit status. Optional progress and start callbacks receive typed records; services do not print. `render_bundle()` accepts `pause_timing=PauseTimingConfig("natural")` or `PauseTimingConfig("engaging")`; omission is fixed compatibility behavior. `replan_bundle()` selects an existing timing-specific variant and does not take a timing override. Invalid or unsafe requests raise `BundleServiceError` or `BundleReplanError`, while item-level failures are returned in result outcomes.
+
+ For a successful full bundle compile, `BundleCompileResult.role_inventory_path` is the canonical `role-inventory.toml` path. It is `None` for partial selections and any compile with a failed item; in those cases the prior whole-bundle inventory, if present, remains untouched. The artifact is additive and does not alter plan identity or bundle rendering.
+diff --git a/docs/cli.md b/docs/cli.md
+index b6cffeb..87f065b 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -30,9 +30,14 @@ call a renderer, or calculate backend model-token counts:
+ ```bash
+ utterplan render-plan chapter.utterplan.toml \\
+   --profile voice.renderprofile.toml \\
++  --pause-timing engaging \\
+   --output chapter.renderplan.toml
+ ```
+
++`--pause-timing {fixed,natural,engaging}` selects the duration policy for an initial RenderPlan projection; omitting it is equivalent to `fixed`, which preserves the RenderProfile's automatic pause durations. `natural` adds moderate context variation and `engaging` stronger audiobook-oriented variation. Only already-materialized automatic clause, sentence, and paragraph pauses are adapted. Authored timed pauses, named strengths and `none`, capacity cuts, and voice-change pauses keep their existing behavior; the option does not create pause positions. The RenderProfile remains the baseline duration scale.
++
++The human summary reports the selected mode. `--json` includes a `pause_timing` provenance object (mode and algorithm version) outside the RenderPlan payload. Bundle reports record the same metadata. Adaptive bundle variants include `--pt-natural-v1` or `--pt-engaging-v1` before the profile fingerprint; fixed variant names remain unchanged.
++
+ Replanning requires both the exact previous RenderPlan and its matching preflight
+ report. Only failed speech occurrences are refined; successful partitions remain:
+
+@@ -50,6 +55,8 @@ require `--force`. `--explain` formats the generated plan and replan decisions;
+ does not invoke planning a second time. `--json` emits a versioned JSON wrapper to
+ stdout while the RenderPlan artifact remains TOML at `--output`.
+
++`--pause-timing` applies only to initial projection. Supplying it together with `--previous` and `--preflight` is rejected; replanning preserves the pause durations from the previous RenderPlan.
++
+ ## Logical roles and complete-profile coverage
+
+ Role coverage is validated before grouping or replanning. The selected profile must contain every explicit speech role and, when any speech omits a role reference, its `default_role`. Missing roles are reported together as `renderplan.role.missing`; extra profile roles are allowed. The check is renderer-independent and does not add role data to the RenderPlan schema.
+@@ -149,7 +156,7 @@ utterplan bundle compile BUNDLE [--chapters SELECTOR]
+   [--diagnostics {warnings,all,none}]
+
+ utterplan bundle render BUNDLE --profile PROFILE [--chapters SELECTOR]
+-  [--utterplan-dir PATH] [--output-root PATH] [--variant LABEL]
++  [--utterplan-dir PATH] [--output-root PATH] [--variant LABEL] [--pause-timing {fixed,natural,engaging}]
+   [--force] [--fail-fast] [--report PATH]
+
+ utterplan bundle replan BUNDLE --variant VARIANT [--chapters SELECTOR]
+diff --git a/docs/index.md b/docs/index.md
+index 7042bd4..3c8a23b 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -21,6 +21,7 @@ debugging
+ :caption: Developer guide
+
+ architecture
++pause-timing-architecture
+ pykokoro-integration
+ python-api
+ changelog
+diff --git a/docs/pause-timing-architecture.md b/docs/pause-timing-architecture.md
+new file mode 100644
+index 0000000..027f297
+--- /dev/null
++++ b/docs/pause-timing-architecture.md
+@@ -0,0 +1,34 @@
++# Context-aware pause timing architecture
++
++UtterPlan chooses semantic pause opportunities when compiling a source document, but final milliseconds are selected during optional RenderPlan projection. This keeps compilation profile-independent and lets existing schema-v7 FlowPlans benefit without migration.
++
++```text
++FlowPlan v7
++  semantic boundary + local text/token/heading facts
++        |
++        v
++RenderProfile
++  baseline pause duration
++        |
++        v
++UtterPlan RenderPlan projection
++  fixed | natural | engaging timing policy
++        |
++        v
++RenderPlan
++  concrete PauseItem.duration_ms
++        |
++        v
++VoiceRender -> AudioCompose
++  speech synthesis -> materialize the selected silence
++```
++
++The RenderProfile remains the macro pacing control. `fixed` is the compatibility default and uses its configured automatic pause durations unchanged. `natural` and `engaging` apply deterministic, context-sensitive adjustments only to already-materialized automatic clause, sentence, and paragraph pauses. The policy uses only facts already present in the FlowPlan; it neither creates boundary positions nor loads NLP providers during projection.
++
++Authored timing is more authoritative than adaptation: explicit millisecond pauses, named strengths, and authored `none` keep their existing resolution. Capacity-cut pauses remain unchanged, and voice-change pauses stay fixed. Replanning preserves existing PauseItems and does not rerun the timing policy, so an explicit timing mode is accepted only for initial projection.
++
++The policy is a projection concern, not compilation semantics: it adds no fields to `.utterplan.toml`, changes neither the RenderProfile nor RenderPlan contract, and does not alter speech segmentation or topology. The chosen preset is reported as UtterPlan provenance and is incorporated into adaptive bundle variant labels to avoid output collisions. See the [CLI guide](cli.md#produce-or-replan-a-renderplan), [Python API](python-api.md#build-and-replan-a-renderplan), and [bundle guide](bundles.md#render) for usage.
++
++## Listening evaluation
++
++Compare fixed, natural, and engaging variants rendered from the same synthesized speech WAVs. Listen for repeated sentence cadence, short consecutive sentences, long explanatory sentences, questions, exclamations, ellipses, paragraph and dialogue transitions, authored pauses, and total inserted silence. The primary question is whether sentence boundaries stop sounding like a timer; also check whether engaging feels rushed. Do not judge only by chapter duration. If it sounds rushed, tune the engaging preset's bias or clamps rather than moving timing out of the projection layer.
+diff --git a/docs/python-api.md b/docs/python-api.md
+index 26690e5..c9cf87b 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -56,11 +56,16 @@ the exact prior RenderPlan and its matching preflight report together:
+
+ ```python
+ from renderplan.codec import load_plan, load_preflight, load_profile, save_plan
+-from utterplan import FlowPlan, build_render_plan
++from utterplan import FlowPlan, PauseTimingConfig, PauseTimingMode, build_render_plan
+
+ source = FlowPlan.load("chapter.utterplan.toml")
+ profile = load_profile("voice.renderprofile.toml")
+-plan = build_render_plan(source, profile)
++mode: PauseTimingMode = "engaging"
++plan = build_render_plan(
++    source,
++    profile,
++    pause_timing=PauseTimingConfig(mode),
++)
+ save_plan(plan, "chapter.renderplan.toml")
+
+ previous = load_plan("chapter.renderplan.toml")
+@@ -74,11 +79,15 @@ next_plan = build_render_plan(
+ save_plan(next_plan, "chapter.next.renderplan.toml")
+ ```
+
++`PauseTimingConfig` and `PauseTimingMode` are public package-root exports. Omit `pause_timing` for the `fixed` compatibility default, or select `natural` for moderate adaptation and `engaging` for stronger audiobook-oriented variation. Only automatic clause, sentence, and paragraph pause durations change; authored pauses, capacity cuts, and voice-change timing are preserved. See the [timing architecture](pause-timing-architecture.md).
++
+ The previous plan and preflight are a required pair. UtterPlan preserves successful
+ prior partitions and replaces only exact failed speech occurrences. Backend metrics
+ remain diagnostics supplied by preflight; UtterPlan does not estimate them. Use
+ `utterplan render-plan --explain` to format the already-built decisions.
+
++When refining, omit `pause_timing`: replanning preserves the existing `PauseItem`s and rejects an explicit timing configuration rather than retiming a chapter.
++
+ ### Inspect logical role coverage
+
+ The public role-coverage helpers expose source inventory independently of projection or renderer bindings. `logical_role_inventory()` counts explicit role references and speech using the profile default; `profile_role_coverage()` compares those requirements with one complete RenderProfile, preserving first-occurrence order for required roles and deterministic sorting for available roles. The returned `LogicalRoleInventory` and `ProfileRoleCoverage` types separate source inventory from profile coverage. Both functions are available from the package root:
+@@ -215,13 +224,14 @@ from utterplan.renderplan_batch import RenderRequest, new_renderplan_set, render
+ `compile_bundle()`, `render_bundle()`, and `replan_bundle()` are the public Python counterparts of `utterplan bundle compile|render|replan`. They accept a canonical `<name>.ssmd-bundle/` path and dispatch book or document behavior from its manifest. The CLI delegates to these services, so selection and path-safety rules are shared.
+
+ ```python
+-from utterplan import compile_bundle, replan_bundle, render_bundle
++from utterplan import PauseTimingConfig, compile_bundle, replan_bundle, render_bundle
+
+ compiled = compile_bundle("novel.ssmd-bundle", chapters="5-17")
+ projected = render_bundle(
+     "novel.ssmd-bundle",
+     profile="narration.renderprofile.toml",
+     chapters="5-17",
++    pause_timing=PauseTimingConfig("engaging"),
+ )
+ refined = replan_bundle(
+     "novel.ssmd-bundle",
+@@ -232,7 +242,7 @@ refined = replan_bundle(
+ assert compiled.exit_code == projected.exit_code == refined.exit_code == 0
+ ```
+
+-The compile and render services accept paths and keyword options. `chapters` defaults to `"all"`; book bundles select manifest source numbers, while document bundles accept only `"all"`. Rendering requires an explicit `profile`; replanning requires the exact active `variant`. Options include output/report paths, force and fail-fast behavior, compile planning settings, and optional progress/start callbacks. Services do not print.
++The compile and render services accept paths and keyword options. `chapters` defaults to `"all"`; book bundles select manifest source numbers, while document bundles accept only `"all"`. Rendering requires an explicit `profile`; replanning requires the exact active `variant`. Options include output/report paths, force and fail-fast behavior, compile planning settings, and optional progress/start callbacks. Services do not print. `render_bundle()` accepts `pause_timing=PauseTimingConfig("natural")` or `PauseTimingConfig("engaging")`; omission is fixed compatibility behavior. `replan_bundle()` selects an existing timing-specific variant and does not take a timing override.
+
+ `BundleCompileResult`, `BundleRenderResult`, and `BundleReplanResult` expose the resolved bundle, manifest-declared kind, selected item IDs, per-item outcomes, generated paths, reports, and exit status. Their start records provide resolved configuration to optional callbacks. Invalid or unsafe shared requests raise `BundleServiceError` or `BundleReplanError`; item-level failures are reported in result outcomes. The package also exports manifest loader, selector, item-path, result, start, and callback types for integrations that need to inspect dispatch results.
+
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index f97e3f3..f5f3d6b 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -56,6 +56,16 @@ def test_compile_cli_defaults() -> None:
+     assert args.renderability == "repair"
+
+
++def test_render_plan_pause_timing_parser_modes_and_default() -> None:
++    parser = build_parser()
++    args = ["render-plan", "plan.toml", "--profile", "voice.toml", "--output", "out.toml"]
++    assert parser.parse_args(args).pause_timing is None
++    for mode in ("fixed", "natural", "engaging"):
++        assert parser.parse_args([*args, "--pause-timing", mode]).pause_timing == mode
++    with pytest.raises(SystemExit):
++        parser.parse_args([*args, "--pause-timing", "dramatic"])
++
++
+ @pytest.mark.parametrize(
+     "argv",
+     (
+diff --git a/tests/test_cli_bundle_render_book.py b/tests/test_cli_bundle_render_book.py
+index 5d83d7d..701b3ca 100644
+--- a/tests/test_cli_bundle_render_book.py
++++ b/tests/test_cli_bundle_render_book.py
+@@ -8,6 +8,7 @@ from pathlib import Path
+ import pytest
+ import tomlkit
+ from renderplan import (
++    PauseItem,
+     PausePolicy,
+     PlanningPolicy,
+     RenderProfile,
+@@ -146,8 +147,15 @@ def _render(
+     )
+
+
+-def _variant(root: Path, profile: RenderProfile, label: str = "narration") -> Path:
++def _variant(
++    root: Path,
++    profile: RenderProfile,
++    label: str = "narration",
++    pause_timing: str | None = None,
++) -> Path:
+     profile_id = profile.profile_id or profile.computed_id()
++    if pause_timing not in {None, "fixed"}:
++        label = f"{label}--pt-{pause_timing}-v1"
+     return root / "renderplan" / f"{label}--{profile_id.removeprefix('sha256:')[:12]}"
+
+
+@@ -170,6 +178,19 @@ def test_render_book_parser_defaults_and_required_profile() -> None:
+     assert args.command == "bundle" and args.bundle_command == "render"
+     assert args.chapters == "1,3-5"
+     assert args.variant is None
++    assert args.pause_timing is None
++    adaptive_args = build_parser().parse_args(
++        [
++            "bundle",
++            "render",
++            "book.ssmd-bundle",
++            "--profile",
++            "narration.renderprofile.toml",
++            "--pause-timing",
++            "engaging",
++        ]
++    )
++    assert adaptive_args.pause_timing == "engaging"
+     assert args.output_root is None
+     assert args.utterplan_dir is None
+     assert args.report is None
+@@ -612,3 +633,43 @@ def test_existing_set_and_snapshot_mismatches_are_not_bypassed_by_force(
+     assert _render(root, profile_a_path, "--chapters", "6", "--variant", "shared", "--force") == 2
+     assert "snapshot identity" in capsys.readouterr().err
+     assert not (variant_a / "chapter-0006.renderplan.toml").exists()
++
++
++def test_pause_timing_modes_create_distinct_book_variants_and_reports(
++    tmp_path: Path, capsys
++) -> None:
++    root = _write_book(tmp_path / "pause-timing.ssmd-bundle", (5,))
++    profile_path = root / "narration.renderprofile.toml"
++    profile = _profile(profile_path)
++    durations: dict[str, int] = {}
++    variant_paths: set[Path] = set()
++
++    for mode in ("fixed", "natural", "engaging"):
++        assert _render(root, profile_path, "--pause-timing", mode) == 0
++        capsys.readouterr()
++        variant = _variant(root, profile, pause_timing=mode)
++        variant_paths.add(variant)
++        renderplan_set = load_renderplan_set(variant / "renderplan-set.toml")
++        report = _report(variant / "render-report.toml")
++        plan = renderplan_codec.load_plan(variant / "chapter-0005.renderplan.toml")
++        pause = next(item for item in plan.flow if isinstance(item, PauseItem))
++        durations[mode] = pause.duration_ms
++        logical_label = "narration" if mode == "fixed" else f"narration--pt-{mode}-v1"
++        assert renderplan_set.variant == logical_label
++        assert report["pause_timing"] == {
++            "mode": mode,
++            "algorithm": "utterplan.pause-timing.v1",
++        }
++
++    assert len(variant_paths) == 3
++    assert len(set(durations.values())) == 3
++
++
++def test_custom_book_variant_label_keeps_adaptive_timing_identity(tmp_path: Path, capsys) -> None:
++    root = _write_book(tmp_path / "custom-pause-timing.ssmd-bundle", (5,))
++    profile_path = root / "narration.renderprofile.toml"
++    profile = _profile(profile_path)
++    assert _render(root, profile_path, "--variant", "cast6", "--pause-timing", "engaging") == 0
++    capsys.readouterr()
++    variant = _variant(root, profile, "cast6", "engaging")
++    assert (variant / "chapter-0005.renderplan.toml").is_file()
+diff --git a/tests/test_cli_bundle_render_document.py b/tests/test_cli_bundle_render_document.py
+index 9b419f1..28ba974 100644
+--- a/tests/test_cli_bundle_render_document.py
++++ b/tests/test_cli_bundle_render_document.py
+@@ -5,7 +5,7 @@ from pathlib import Path
+
+ import pytest
+ import tomlkit
+-from renderplan import PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
++from renderplan import PauseItem, PausePolicy, PlanningPolicy, RenderProfile, RoleProfile
+ from renderplan import codec as renderplan_codec
+
+ from utterplan.cli import main
+@@ -92,9 +92,17 @@ def _multi_role_profile(path: Path, *, include_cast: bool) -> RenderProfile:
+     return profile
+
+
+-def _variant_dir(root: Path, profile_path: Path, *, label: str = "narration") -> Path:
++def _variant_dir(
++    root: Path,
++    profile_path: Path,
++    *,
++    label: str = "narration",
++    pause_timing: str | None = None,
++) -> Path:
+     profile = renderplan_codec.load_profile(profile_path)
+     profile_id = profile.profile_id or profile.computed_id()
++    if pause_timing not in {None, "fixed"}:
++        label = f"{label}--pt-{pause_timing}-v1"
+     return root / "renderplan" / f"{label}--{profile_id.removeprefix('sha256:')[:12]}"
+
+
+@@ -393,3 +401,34 @@ def test_document_bundle_render_rejects_non_all_selector(
+     assert result == 2
+     assert "document bundles only support --chapters all" in captured.err
+     assert not (root / "renderplan").exists()
++
++
++def test_pause_timing_modes_create_distinct_document_variants_and_reports(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    root = _workspace(tmp_path)
++    FlowPlan(
++        language="en-US",
++        flow=(FlowUnit((FlowSegment("Hello there.", "en-US", boundary_after=("sentence",)),)),),
++    ).save(root / "utterplan" / "document.utterplan.toml")
++    profile_path = tmp_path / "narration.renderprofile.toml"
++    _profile(profile_path)
++    durations: dict[str, int] = {}
++    variants: set[Path] = set()
++
++    for mode in ("fixed", "natural", "engaging"):
++        assert _render(root, profile_path, "--pause-timing", mode) == 0
++        capsys.readouterr()
++        variant_dir = _variant_dir(root, profile_path, pause_timing=mode)
++        variants.add(variant_dir)
++        plan = renderplan_codec.load_plan(variant_dir / "document.renderplan.toml")
++        pause = next(item for item in plan.flow if isinstance(item, PauseItem))
++        durations[mode] = pause.duration_ms
++        report = tomlkit.parse((variant_dir / "render-report.toml").read_text(encoding="utf-8"))
++        assert dict(report["pause_timing"]) == {
++            "mode": mode,
++            "algorithm": "utterplan.pause-timing.v1",
++        }
++
++    assert len(variants) == 3
++    assert len(set(durations.values())) == 3
+diff --git a/tests/test_renderplan_export.py b/tests/test_renderplan_export.py
+index 877090f..0364e2c 100644
+--- a/tests/test_renderplan_export.py
++++ b/tests/test_renderplan_export.py
+@@ -6,6 +6,7 @@ from pathlib import Path
+
+ import pytest
+ from renderplan import (
++    PauseItem,
+     PausePolicy,
+     PlanningPolicy,
+     PreflightCheck,
+@@ -29,6 +30,8 @@ from utterplan import (
+     compile_document,
+ )
+ from utterplan.cli import main
++from utterplan.model import PauseIntent
++from utterplan.renderplan_pause_timing import PauseTimingConfig
+ from utterplan.renderplan_projection import RenderPlanProjectionError
+
+
+@@ -154,12 +157,39 @@ def test_render_plan_cli_initial_json_replan_and_explain(tmp_path: Path, capsys)
+         )
+         == 0
+     )
+-    initial_output = json.loads(capsys.readouterr().out)
++    initial_capture = capsys.readouterr()
++    initial_output = json.loads(initial_capture.out)
++    assert initial_output["pause_timing"] == {
++        "mode": "fixed",
++        "algorithm": "utterplan.pause-timing.v1",
++    }
++    assert initial_capture.err == ""
+     previous = renderplan_codec.load_plan(initial_path)
+     assert initial_output["plan"]["plan_id"] == previous.plan_id
+
+     report = _preflight(previous, profile)
+     renderplan_codec.save_preflight(report, preflight_path)
++    assert (
++        main(
++            [
++                "render-plan",
++                str(source_path),
++                "--profile",
++                str(profile_path),
++                "--previous",
++                str(initial_path),
++                "--preflight",
++                str(preflight_path),
++                "--output",
++                str(next_path),
++                "--pause-timing",
++                "engaging",
++            ]
++        )
++        == 2
++    )
++    assert "--pause-timing applies only to initial RenderPlan projection" in capsys.readouterr().err
++    assert not next_path.exists()
+     assert (
+         main(
+             [
+@@ -459,3 +489,158 @@ def test_render_plan_stale_profile_is_rejected_before_output(
+     assert "Regenerate or re-save the RenderProfile with its producer" in error
+     assert "--force does not bypass profile identity validation" in error
+     assert not output_path.exists()
++
++
++def test_context_timing_changes_only_automatic_pause_duration_and_identity() -> None:
++    source = _source()
++    profile = _profile()
++    fixed = build_render_plan(source, profile)
++    natural = build_render_plan(source, profile, pause_timing=PauseTimingConfig("natural"))
++    engaging = build_render_plan(source, profile, pause_timing=PauseTimingConfig("engaging"))
++
++    def pause_items(plan):
++        return [
++            (index, item) for index, item in enumerate(plan.flow) if isinstance(item, PauseItem)
++        ]
++
++    fixed_pauses = pause_items(fixed)
++    natural_pauses = pause_items(natural)
++    engaging_pauses = pause_items(engaging)
++    assert len(fixed_pauses) == len(natural_pauses) == len(engaging_pauses) == 1
++    assert fixed_pauses[0][0] == natural_pauses[0][0] == engaging_pauses[0][0]
++    assert fixed_pauses[0][1].reason == natural_pauses[0][1].reason == engaging_pauses[0][1].reason
++    assert fixed_pauses[0][1].duration_ms == 500
++    assert natural_pauses[0][1].duration_ms != 500
++    assert engaging_pauses[0][1].duration_ms != 500
++    assert fixed.speech == natural.speech == engaging.speech
++    assert fixed.source_plan_id == natural.source_plan_id == engaging.source_plan_id
++    assert fixed.render_profile_id == natural.render_profile_id == engaging.render_profile_id
++    assert fixed.plan_id != natural.plan_id != engaging.plan_id
++    for plan in (fixed, natural, engaging):
++        plan.validate_against_profile(profile)
++
++
++def test_authored_pause_intents_are_unchanged_by_adaptive_projection() -> None:
++    profile = replace(
++        _profile(),
++        pauses=PausePolicy(mode="manual", durations_ms={"sentence": 500, "strong": 800}),
++    )
++    intents = (
++        PauseIntent("timed", "650ms"),
++        PauseIntent("strong"),
++        PauseIntent("none"),
++    )
++    for intent in intents:
++        source = FlowPlan(
++            language="en-US",
++            flow=(
++                FlowUnit(
++                    (
++                        FlowSegment(
++                            "one two three.",
++                            "en-US",
++                            pause_after=intent,
++                            boundary_after=("sentence",),
++                        ),
++                    )
++                ),
++            ),
++        )
++        fixed = build_render_plan(source, profile)
++        engaging = build_render_plan(source, profile, pause_timing=PauseTimingConfig("engaging"))
++        fixed_pause = next(item for item in fixed.flow if isinstance(item, PauseItem))
++        engaging_pause = next(item for item in engaging.flow if isinstance(item, PauseItem))
++        assert (engaging_pause.duration_ms, engaging_pause.reason) == (
++            fixed_pause.duration_ms,
++            fixed_pause.reason,
++        )
++
++
++def test_replanning_rejects_explicit_pause_timing() -> None:
++    source = _source()
++    profile = _profile()
++    previous = build_render_plan(source, profile, pause_timing=PauseTimingConfig("engaging"))
++    with pytest.raises(RenderPlanProjectionError, match="pause_timing applies only to initial"):
++        build_render_plan(
++            source,
++            profile,
++            previous_plan=previous,
++            preflight=_preflight(previous, profile),
++            pause_timing=PauseTimingConfig("natural"),
++        )
++
++
++def test_boundary_context_uses_complete_group_and_incoming_flow_segment() -> None:
++    source = FlowPlan(
++        language="en-US",
++        flow=(
++            FlowUnit(
++                (
++                    FlowSegment("The earlier", "en-US"),
++                    FlowSegment(" thought finished.", "en-US", boundary_after=("sentence",)),
++                    FlowSegment("And tomorrow.", "en-US"),
++                )
++            ),
++        ),
++    )
++    profile = _profile()
++    fixed = build_render_plan(source, profile)
++    engaging = build_render_plan(source, profile, pause_timing=PauseTimingConfig("engaging"))
++    fixed_pause = next(item for item in fixed.flow if isinstance(item, PauseItem))
++    engaging_pause = next(item for item in engaging.flow if isinstance(item, PauseItem))
++    assert fixed.speech[0].text == "The earlier thought finished."
++    assert fixed_pause.reason == engaging_pause.reason == "sentence"
++    assert engaging_pause.duration_ms < fixed_pause.duration_ms
++
++
++@pytest.mark.parametrize("mode", ("fixed", "natural", "engaging"))
++def test_render_plan_cli_pause_timing_provenance(tmp_path: Path, capsys, mode: str) -> None:
++    source_path = tmp_path / "chapter.utterplan.toml"
++    profile_path = tmp_path / "voice.renderprofile.toml"
++    output_path = tmp_path / f"chapter-{mode}.renderplan.toml"
++    human_output_path = tmp_path / f"chapter-{mode}-human.renderplan.toml"
++    _source().save(source_path)
++    profile = _profile()
++    renderplan_codec.save_profile(profile, profile_path)
++
++    assert (
++        main(
++            [
++                "render-plan",
++                str(source_path),
++                "--profile",
++                str(profile_path),
++                "--output",
++                str(output_path),
++                "--pause-timing",
++                mode,
++                "--json",
++            ]
++        )
++        == 0
++    )
++    payload = json.loads(capsys.readouterr().out)
++    assert payload["pause_timing"] == {
++        "mode": mode,
++        "algorithm": "utterplan.pause-timing.v1",
++    }
++    plan = renderplan_codec.load_plan(output_path)
++    pause = next(item for item in plan.flow if isinstance(item, PauseItem))
++    assert pause.duration_ms == 500 if mode == "fixed" else pause.duration_ms != 500
++
++    assert (
++        main(
++            [
++                "render-plan",
++                str(source_path),
++                "--profile",
++                str(profile_path),
++                "--output",
++                str(human_output_path),
++                "--pause-timing",
++                mode,
++            ]
++        )
++        == 0
++    )
++    assert f"pause timing: {mode}" in capsys.readouterr().err
+diff --git a/tests/test_renderplan_pause_timing.py b/tests/test_renderplan_pause_timing.py
+new file mode 100644
+index 0000000..5214338
+--- /dev/null
++++ b/tests/test_renderplan_pause_timing.py
+@@ -0,0 +1,202 @@
++from __future__ import annotations
++
++import pytest
++
++from utterplan.model import TokenView
++from utterplan.renderplan_pause_timing import (
++    PauseTimingConfig,
++    PauseTimingContext,
++    PauseTimingDecision,
++    resolve_automatic_pause_duration,
++)
++
++
++def _context(
++    left: str = "Go.",
++    right: str = "Tomorrow.",
++    *,
++    boundary: str = "sentence",
++    language: str = "en",
++    left_tokens: tuple[TokenView, ...] = (),
++    right_tokens: tuple[TokenView, ...] = (),
++    left_heading: int | None = None,
++    right_heading: int | None = None,
++) -> PauseTimingContext:
++    return PauseTimingContext(
++        boundary=boundary,
++        language=language,
++        left_text=left,
++        right_text=right,
++        left_tokens=left_tokens,
++        right_tokens=right_tokens,
++        left_heading=left_heading,
++        right_heading=right_heading,
++    )
++
++
++def _duration(
++    left: str,
++    *,
++    right: str = "Tomorrow.",
++    mode: str = "engaging",
++    language: str = "en",
++    boundary: str = "sentence",
++) -> PauseTimingDecision:
++    return resolve_automatic_pause_duration(
++        500, _context(left, right, language=language, boundary=boundary), PauseTimingConfig(mode)
++    )
++
++
++def test_fixed_preserves_baseline_for_every_context() -> None:
++    contexts = (
++        _context("Go.", "And then?"),
++        _context("A very long sentence with lots of lexical words.", "But next."),
++        _context("I thought…", "", boundary="paragraph", right_heading=1),
++    )
++    for context in contexts:
++        decision = resolve_automatic_pause_duration(503, context, PauseTimingConfig())
++        assert decision == PauseTimingDecision(503, 503, 1000, ("fixed",))
++
++
++def test_short_and_long_groups_receive_different_deterministic_durations() -> None:
++    short = _duration("Go.")
++    long = _duration("The long complicated sentence finished after many words.")
++    assert short.duration_ms < long.duration_ms
++    assert short == _duration("Go.")
++    assert all(decision.duration_ms % 10 == 0 for decision in (short, long))
++
++
++def test_question_and_ellipsis_score_more_than_ordinary_period() -> None:
++    period = _duration("Are you sure.")
++    question = _duration("Are you sure?")
++    ellipsis = _duration("Are you sure…")
++    assert question.duration_ms > period.duration_ms
++    assert ellipsis.duration_ms > question.duration_ms
++    assert "punctuation:ellipsis:+160" in ellipsis.features
++
++
++def test_continuation_connective_shortens_english_boundary() -> None:
++    connective = _duration("A finished sentence.", right="And another sentence.")
++    ordinary = _duration("A finished sentence.", right="Tomorrow another sentence.")
++    assert connective.duration_ms < ordinary.duration_ms
++    assert "connective:and:-90" in connective.features
++
++
++def test_connective_uses_lemma_when_available() -> None:
++    right_tokens = (TokenView(0, 5, lemma="and", pos="CCONJ"),)
++    context = _context("A sentence.", "plus text", right_tokens=right_tokens)
++    decision = resolve_automatic_pause_duration(500, context, PauseTimingConfig("engaging"))
++    assert "connective:and:-90" in decision.features
++    assert "pos:next-conjunction:-50" in decision.features
++
++
++def test_pos_facts_are_optional_and_function_word_adjustments_apply() -> None:
++    left = "We were waiting for"
++    right = "and everyone arrived"
++    no_pos = _duration(left, right=right)
++    left_tokens = (
++        TokenView(0, 2, lemma="we", pos="PRON"),
++        TokenView(3, 7, lemma="be", pos="AUX"),
++        TokenView(8, 15, lemma="wait", pos="VERB"),
++        TokenView(16, 19, lemma="for", pos="ADP"),
++    )
++    right_tokens = (
++        TokenView(0, 3, lemma="and", pos="CCONJ"),
++        TokenView(4, 12, lemma="everyone", pos="PRON"),
++    )
++    with_pos = resolve_automatic_pause_duration(
++        500,
++        _context(left, right, left_tokens=left_tokens, right_tokens=right_tokens),
++        PauseTimingConfig("engaging"),
++    )
++    assert with_pos.duration_ms < no_pos.duration_ms
++    assert "pos:next-conjunction:-50+pos:final-function-word:-80" in with_pos.features
++
++
++def test_pos_token_count_excludes_punctuation() -> None:
++    text = "Go now."
++    tokens = (
++        TokenView(0, 2, lemma="go", pos="VERB"),
++        TokenView(3, 6, lemma="now", pos="ADV"),
++        TokenView(6, 7, pos="PUNCT"),
++    )
++    decision = resolve_automatic_pause_duration(
++        500, _context(text, left_tokens=tokens), PauseTimingConfig("natural")
++    )
++    assert "length:tokens:2" in decision.features
++
++
++def test_text_word_count_fallback_is_used_when_pos_is_unavailable() -> None:
++    tokens = (TokenView(0, 2), TokenView(3, 6), TokenView(6, 7))
++    decision = resolve_automatic_pause_duration(
++        500,
++        _context("Go now.", left_tokens=tokens),
++        PauseTimingConfig("natural"),
++    )
++    assert "length:text:2" in decision.features
++
++
++def test_english_connective_table_is_not_applied_to_other_languages() -> None:
++    english = _duration("A sentence.", right="And another.", language="en-US")
++    french = _duration("A sentence.", right="And another.", language="fr")
++    assert english.duration_ms < french.duration_ms
++    assert not any(feature.startswith("connective:") for feature in french.features)
++
++
++@pytest.mark.parametrize("boundary", ["clause", "sentence", "paragraph"])
++def test_adaptive_factor_stays_within_boundary_clamps(boundary: str) -> None:
++    low_context = _context(
++        "Go,",
++        "and",
++        boundary=boundary,
++        left_tokens=(TokenView(0, 2, pos="ADP"),),
++        right_tokens=(TokenView(0, 3, pos="SCONJ"),),
++    )
++    high_text = " ".join(["word"] * 30) + "…"
++    high_context = _context(high_text, "next", boundary=boundary, right_heading=1)
++    for mode in ("natural", "engaging"):
++        low = resolve_automatic_pause_duration(500, low_context, PauseTimingConfig(mode))
++        high = resolve_automatic_pause_duration(500, high_context, PauseTimingConfig(mode))
++        limits = {
++            "natural": {"clause": (750, 1250), "sentence": (760, 1200), "paragraph": (820, 1180)},
++            "engaging": {"clause": (600, 1150), "sentence": (600, 1150), "paragraph": (700, 1120)},
++        }
++        minimum, maximum = limits[mode][boundary]
++        assert low.factor_permille == minimum
++        assert high.factor_permille == maximum
++
++
++def test_heading_transition_increases_structural_pause() -> None:
++    ordinary = _duration("A complete sentence.", boundary="paragraph")
++    heading = resolve_automatic_pause_duration(
++        500,
++        _context("A complete sentence.", boundary="paragraph", right_heading=2),
++        PauseTimingConfig("natural"),
++    )
++    assert heading.duration_ms > ordinary.duration_ms
++    assert heading.features[-1] == "heading:transition:+120"
++
++
++def test_zero_baseline_voice_change_and_unknown_boundary_are_not_adapted() -> None:
++    context = _context("An unusually long sentence…", boundary="sentence")
++    zero = resolve_automatic_pause_duration(0, context, PauseTimingConfig("engaging"))
++    voice = resolve_automatic_pause_duration(
++        503,
++        _context("An unusually long sentence…", boundary="voice_change"),
++        PauseTimingConfig("engaging"),
++    )
++    other = resolve_automatic_pause_duration(
++        503,
++        _context("An unusually long sentence…", boundary="parenthetical"),
++        PauseTimingConfig("engaging"),
++    )
++    assert zero == PauseTimingDecision(0, 0, 1000, ("zero-base",))
++    assert voice.duration_ms == 503
++    assert other.duration_ms == 503
++
++
++def test_config_rejects_unknown_mode_and_resolver_requires_integer_baseline() -> None:
++    with pytest.raises(ValueError, match="unsupported pause timing mode"):
++        PauseTimingConfig("dramatic")  # type: ignore[arg-type]
++    with pytest.raises(TypeError, match="base_ms must be an integer"):
++        resolve_automatic_pause_duration(500.0, _context(), PauseTimingConfig())  # type: ignore[arg-type]
+diff --git a/utterplan/__init__.py b/utterplan/__init__.py
+index 54e7f6f..924a791 100644
+--- a/utterplan/__init__.py
++++ b/utterplan/__init__.py
+@@ -116,6 +116,7 @@ from .renderability import (
+     preflight_renderability,
+ )
+ from .renderplan_export import build_render_plan
++from .renderplan_pause_timing import PauseTimingConfig, PauseTimingMode
+ from .role_coverage import (
+     LogicalRoleInventory,
+     ProfileRoleCoverage,
+@@ -192,6 +193,8 @@ __all__ = [
+     "UtterancePlanner",
+     "ChunkMode",
+     "PausePolicy",
++    "PauseTimingConfig",
++    "PauseTimingMode",
+     "PreviewChunk",
+     "SegmentRef",
+     "preview_plan",
+diff --git a/utterplan/_book_service.py b/utterplan/_book_service.py
+index 871236f..6058aa1 100644
+--- a/utterplan/_book_service.py
++++ b/utterplan/_book_service.py
+@@ -26,6 +26,8 @@ from .batch import BatchProgressCallback, CompileOutcome, CompileRequest, compil
+ from .config import PlannerConfig
+ from .model import FlowPlan
+ from .renderplan_batch import RenderOutcome, RenderRequest, new_renderplan_set, render_to_files
++from .renderplan_pause_timing import PauseTimingConfig
++from .renderplan_workspace import pause_timing_variant_label
+ from .renderprofile_io import RenderProfileLoadError, load_render_profile
+ from .role_coverage import profile_role_coverage
+ from .ssmd_bundle import (
+@@ -129,6 +131,7 @@ class BookRenderRequest:
+     report: Path | None = None
+     force: bool = False
+     fail_fast: bool = False
++    pause_timing: PauseTimingConfig | None = None
+
+     def __post_init__(self) -> None:
+         object.__setattr__(self, "book", Path(self.book))
+@@ -292,6 +295,7 @@ def render_book(
+     profile: str | Path,
+     chapters: str = "all",
+     variant: str | None = None,
++    pause_timing: PauseTimingConfig | None = None,
+     utterplan_dir: str | Path | None = None,
+     output_root: str | Path | None = None,
+     report: str | Path | None = None,
+@@ -312,7 +316,9 @@ def render_book(
+         report=Path(report) if report is not None else None,
+         force=force,
+         fail_fast=fail_fast,
++        pause_timing=pause_timing,
+     )
++    timing = request.pause_timing or PauseTimingConfig()
+     try:
+         index = _index if _index is not None else load_ssmd_bundle(request.book)
+         if index.kind != "book":
+@@ -343,7 +349,7 @@ def render_book(
+     profile_path = loaded_profile.path
+     profile_id = loaded_profile.profile_id
+     fingerprint = profile_id.removeprefix("sha256:")[:12]
+-    label = _render_variant_label(profile_path, request.variant)
++    label = pause_timing_variant_label(_render_variant_label(profile_path, request.variant), timing)
+     variant_name = f"{label}--{fingerprint}"
+
+     output_root_arg = request.output_root or (index.root / "renderplan")
+@@ -525,6 +531,7 @@ def render_book(
+                 render_requests,
+                 profile=active_profile,
+                 renderplan_set=renderplan_set,
++                pause_timing=timing,
+                 set_path=set_path,
+                 report_path=report_path,
+                 force=request.force,
+diff --git a/utterplan/_document_service.py b/utterplan/_document_service.py
+index 9286c18..bd4e6f3 100644
+--- a/utterplan/_document_service.py
++++ b/utterplan/_document_service.py
+@@ -15,7 +15,12 @@ from .batch import BatchProgressCallback, CompileOutcome, CompileRequest, compil
+ from .config import PlannerConfig
+ from .model import FlowPlan
+ from .renderplan_export import build_render_plan
+-from .renderplan_workspace import profile_fingerprint, render_variant_label
++from .renderplan_pause_timing import PAUSE_TIMING_ALGORITHM, PauseTimingConfig
++from .renderplan_workspace import (
++    pause_timing_variant_label,
++    profile_fingerprint,
++    render_variant_label,
++)
+ from .renderprofile_io import load_render_profile
+ from .role_coverage import assert_profile_role_coverage
+ from .ssmd_bundle import SsmdBundleError, SsmdBundleIndex, bundle_item_path, load_ssmd_bundle
+@@ -216,6 +221,7 @@ def _render_document_service(
+     *,
+     profile: str | Path,
+     variant: str | None = None,
++    pause_timing: PauseTimingConfig | None = None,
+     utterplan_dir: str | Path | None = None,
+     output_root: str | Path | None = None,
+     report: str | Path | None = None,
+@@ -255,9 +261,8 @@ def _render_document_service(
+         active_profile = loaded_profile.profile
+         coverage = assert_profile_role_coverage(source_plan, active_profile)
+         profile_id = loaded_profile.profile_id
+-        variant_name = (
+-            f"{render_variant_label(profile_path, variant)}--{profile_fingerprint(profile_id)}"
+-        )
++        timing = pause_timing or PauseTimingConfig()
++        variant_name = f"{pause_timing_variant_label(render_variant_label(profile_path, variant), timing)}--{profile_fingerprint(profile_id)}"
+         variant_root = (
+             Path(output_root).expanduser().resolve(strict=False)
+             if output_root is not None
+@@ -340,7 +345,7 @@ def _render_document_service(
+                     f"RenderPlan already exists (use --force): {renderplan_path}"
+                 )
+
+-        plan = build_render_plan(source_plan, active_profile).with_identity()
++        plan = build_render_plan(source_plan, active_profile, pause_timing=timing).with_identity()
+         if on_start is not None:
+             on_start(
+                 DocumentRenderStart(
+@@ -365,6 +370,10 @@ def _render_document_service(
+         renderplan_codec.save_plan(plan, renderplan_path)
+         report_data: dict[str, Any] = {
+             "format": "utterplan.render-bundle-report",
++            "pause_timing": {
++                "mode": timing.mode,
++                "algorithm": PAUSE_TIMING_ALGORITHM,
++            },
+             "version": 1,
+             "status": "ok",
+             "workspace": str(index.root.resolve()),
+diff --git a/utterplan/bundle.py b/utterplan/bundle.py
+index a2569dc..248e166 100644
+--- a/utterplan/bundle.py
++++ b/utterplan/bundle.py
+@@ -18,6 +18,7 @@ from .batch import BatchProgressCallback, CompileOutcome
+ from .bundle_role_inventory import build_bundle_role_inventory, save_bundle_role_inventory
+ from .config import PlannerConfig
+ from .renderplan_batch import RenderOutcome
++from .renderplan_pause_timing import PauseTimingConfig
+ from .ssmd_bundle import (
+     BundleKind,
+     SsmdBundleError,
+@@ -229,6 +230,7 @@ def render_bundle(
+     profile: str | Path,
+     chapters: str = "all",
+     variant: str | None = None,
++    pause_timing: PauseTimingConfig | None = None,
+     utterplan_dir: str | Path | None = None,
+     output_root: str | Path | None = None,
+     report: str | Path | None = None,
+@@ -251,6 +253,7 @@ def render_bundle(
+                 profile=profile,
+                 chapters=selector,
+                 variant=variant,
++                pause_timing=pause_timing,
+                 utterplan_dir=utterplan_dir,
+                 output_root=output_root,
+                 report=report,
+@@ -303,6 +306,7 @@ def render_bundle(
+             bundle_index=index,
+             profile=profile,
+             variant=variant,
++            pause_timing=pause_timing,
+             utterplan_dir=utterplan_dir,
+             output_root=output_root,
+             report=report,
+diff --git a/utterplan/cli.py b/utterplan/cli.py
+index 08a4cd2..4c61856 100644
+--- a/utterplan/cli.py
++++ b/utterplan/cli.py
+@@ -45,6 +45,11 @@ from .preview import PreviewChunk, preview_plan
+ from .renderability import format_renderability_error
+ from .renderplan_batch import RenderOutcome
+ from .renderplan_export import build_render_plan, format_render_plan_explanation
++from .renderplan_pause_timing import (
++    PAUSE_TIMING_ALGORITHM,
++    PauseTimingConfig,
++    PauseTimingMode,
++)
+ from .renderprofile_io import load_render_profile
+ from .role_coverage import logical_role_inventory, profile_role_coverage
+ from .source_input import _format_for_path as _format_source_path
+@@ -214,6 +219,12 @@ def build_parser() -> argparse.ArgumentParser:
+     )
+     bundle_render.add_argument("--profile", type=Path, required=True)
+     bundle_render.add_argument("--chapters", default="all", metavar="SELECTOR")
++    bundle_render.add_argument(
++        "--pause-timing",
++        choices=("fixed", "natural", "engaging"),
++        default=None,
++        help="automatic semantic pause timing for the projected RenderPlans",
++    )
+     bundle_render.add_argument("--variant")
+     bundle_render.add_argument("--utterplan-dir", type=Path)
+     bundle_render.add_argument("--output-root", type=Path)
+@@ -320,6 +331,15 @@ def build_parser() -> argparse.ArgumentParser:
+     render_plan_parser.add_argument(
+         "--preflight", type=Path, help="matching RenderPlan preflight report TOML"
+     )
++    render_plan_parser.add_argument(
++        "--pause-timing",
++        choices=("fixed", "natural", "engaging"),
++        default=None,
++        help=(
++            "automatic semantic pause timing: fixed preserves RenderProfile durations, "
++            "natural adds moderate context adaptation, engaging uses stronger dynamics"
++        ),
++    )
+     render_plan_parser.add_argument(
+         "-o", "--output", type=Path, required=True, help="write the RenderPlan TOML"
+     )
+@@ -718,6 +738,7 @@ def _render_bundle(args: argparse.Namespace) -> int:
+         print(f"  selected:  {len(selected_ids)}", file=sys.stderr)
+         print(f"  profile:   {args.profile}", file=sys.stderr)
+         print(f"  variant:   {progress.variant}", file=sys.stderr)
++        print(f"  pause timing: {args.pause_timing or 'fixed'}", file=sys.stderr)
+         if progress.required_roles:
+             print(f"  roles:      {', '.join(progress.required_roles)}", file=sys.stderr)
+         print("  coverage:   complete", file=sys.stderr)
+@@ -747,6 +768,11 @@ def _render_bundle(args: argparse.Namespace) -> int:
+             profile=args.profile,
+             chapters=args.chapters,
+             variant=args.variant,
++            pause_timing=(
++                PauseTimingConfig(cast(PauseTimingMode, args.pause_timing))
++                if args.pause_timing is not None
++                else None
++            ),
+             utterplan_dir=args.utterplan_dir,
+             output_root=args.output_root,
+             report=args.report,
+@@ -1126,6 +1152,11 @@ def _load_plan_file(path: Path) -> FlowPlan:
+ def _render_plan_command(args: argparse.Namespace) -> int:
+     if (args.previous is None) != (args.preflight is None):
+         raise _CliUsageError("--previous and --preflight must be supplied together")
++    if args.previous is not None and args.pause_timing is not None:
++        raise _CliUsageError(
++            "--pause-timing applies only to initial RenderPlan projection; "
++            "replanning preserves pause timing from --previous"
++        )
+     if args.output.exists() and not args.force:
+         raise _CliUsageError(f"output exists: {args.output}; use --force to replace it")
+
+@@ -1141,7 +1172,17 @@ def _render_plan_command(args: argparse.Namespace) -> int:
+         profile,
+         previous_plan=previous,
+         preflight=preflight,
++        pause_timing=(
++            PauseTimingConfig(cast(PauseTimingMode, args.pause_timing))
++            if args.pause_timing is not None
++            else None
++        ),
+     )
++    timing_mode = args.pause_timing or ("preserved" if previous is not None else "fixed")
++    timing_provenance: dict[str, object] = {
++        "mode": timing_mode,
++        "algorithm": PAUSE_TIMING_ALGORITHM if previous is None else None,
++    }
+     renderplan_codec.save_plan(plan, args.output)
+
+     explanation = (
+@@ -1154,6 +1195,7 @@ def _render_plan_command(args: argparse.Namespace) -> int:
+             "format": "utterplan-render-plan",
+             "version": 1,
+             "output": str(args.output),
++            "pause_timing": timing_provenance,
+             "role_coverage": {
+                 "default_role": coverage.default_role,
+                 "required": list(coverage.required_roles),
+@@ -1169,6 +1211,7 @@ def _render_plan_command(args: argparse.Namespace) -> int:
+     else:
+         print(f"roles: {', '.join(coverage.required_roles) or 'none'}", file=sys.stderr)
+         print("coverage: complete", file=sys.stderr)
++        print(f"pause timing: {timing_mode}", file=sys.stderr)
+         if explanation is not None:
+             print(explanation, end="")
+         else:
+diff --git a/utterplan/renderplan_batch.py b/utterplan/renderplan_batch.py
+index 21ee582..739d29f 100644
+--- a/utterplan/renderplan_batch.py
++++ b/utterplan/renderplan_batch.py
+@@ -31,6 +31,10 @@ from .atomic_io import atomic_write_text
+ from .exceptions import UtterPlanError
+ from .model import FlowPlan
+ from .renderplan_export import build_render_plan
++from .renderplan_pause_timing import (
++    PAUSE_TIMING_ALGORITHM,
++    PauseTimingConfig,
++)
+
+
+ def new_renderplan_set(
+@@ -102,6 +106,7 @@ def render_to_files(
+     requests: Sequence[RenderRequest],
+     *,
+     profile: RenderProfile,
++    pause_timing: PauseTimingConfig | None = None,
+     renderplan_set: RenderPlanSet,
+     set_path: str | Path,
+     report_path: str | Path,
+@@ -112,6 +117,7 @@ def render_to_files(
+ ) -> list[RenderOutcome]:
+     """Project and persist chapters incrementally, keeping successful outputs on failure."""
+     validate_renderplan_set(renderplan_set)
++    pause_timing = pause_timing or PauseTimingConfig()
+     profile_id = profile.profile_id or profile.computed_id()
+     if profile_id != renderplan_set.profile_id:
+         raise RenderPlanSetError(
+@@ -129,6 +135,7 @@ def render_to_files(
+         requested=len(requests),
+         complete=False,
+         value=renderplan_set,
++        pause_timing=pause_timing,
+     )
+     stopped = False
+     active_set = renderplan_set
+@@ -155,6 +162,7 @@ def render_to_files(
+                 set_path=selected_set_path,
+                 force=force,
+                 chapter_order=chapter_order or {},
++                pause_timing=pause_timing,
+             )
+             if outcome.status == "written":
+                 active_set = updated_set
+@@ -165,6 +173,7 @@ def render_to_files(
+             requested=len(requests),
+             complete=False,
+             value=renderplan_set,
++            pause_timing=pause_timing,
+         )
+         if on_progress is not None:
+             on_progress(outcome)
+@@ -177,6 +186,7 @@ def render_to_files(
+         requested=len(requests),
+         complete=True,
+         value=renderplan_set,
++        pause_timing=pause_timing,
+     )
+     return outcomes
+
+@@ -211,6 +221,7 @@ def _render_one(
+     total: int,
+     profile: RenderProfile,
+     renderplan_set: RenderPlanSet,
++    pause_timing: PauseTimingConfig,
+     set_path: Path,
+     force: bool,
+     chapter_order: Mapping[str, int],
+@@ -258,7 +269,7 @@ def _render_one(
+
+     source_plan_id = source_plan.plan_id
+     try:
+-        plan = build_render_plan(source_plan, profile).with_identity()
++        plan = build_render_plan(source_plan, profile, pause_timing=pause_timing).with_identity()
+     except (OSError, ValueError, TypeError) as exc:
+         return (
+             _render_failure(
+@@ -403,6 +414,7 @@ def _write_render_report(
+     requested: int,
+     complete: bool,
+     value: RenderPlanSet,
++    pause_timing: PauseTimingConfig,
+ ) -> None:
+     items: list[dict[str, Any]] = []
+     for outcome in outcomes:
+@@ -430,6 +442,10 @@ def _write_render_report(
+         for status in ("written", "failed", "skipped")
+     }
+     report = {
++        "pause_timing": {
++            "mode": pause_timing.mode,
++            "algorithm": PAUSE_TIMING_ALGORITHM,
++        },
+         "format": "utterplan-render-report",
+         "version": 1,
+         "requested": requested,
+diff --git a/utterplan/renderplan_export.py b/utterplan/renderplan_export.py
+index 3bce5c3..82b4af6 100644
+--- a/utterplan/renderplan_export.py
++++ b/utterplan/renderplan_export.py
+@@ -18,6 +18,7 @@ from renderplan import (
+ from ._version import __version__
+ from .model import FlowPlan
+ from .renderplan_grouping import group_initial_plan
++from .renderplan_pause_timing import PauseTimingConfig
+ from .renderplan_projection import RenderPlanProjectionError, build_source_index
+ from .renderplan_replan import replan_flow
+ from .role_coverage import assert_profile_role_coverage
+@@ -29,6 +30,7 @@ def build_render_plan(
+     *,
+     previous_plan: RenderPlan | None = None,
+     preflight: PreflightReport | None = None,
++    pause_timing: PauseTimingConfig | None = None,
+ ) -> RenderPlan:
+     """Project a schema-v7 FlowPlan or refine its matching prior RenderPlan."""
+     if not isinstance(profile, RenderProfile):
+@@ -42,10 +44,16 @@ def build_render_plan(
+             "replanning requires both previous_plan and preflight; omit both for an initial build",
+             code="renderplan.replan.inputs",
+         )
++    if previous_plan is not None and pause_timing is not None:
++        raise RenderPlanProjectionError(
++            "pause_timing applies only to initial RenderPlan projection; replanning preserves "
++            "pause timing from previous_plan",
++            code="renderplan.replan.pause_timing",
++        )
+     assert_profile_role_coverage(utterplan, profile)
+     profile_id = profile.profile_id or profile.computed_id()
+     if previous_plan is None:
+-        flow = group_initial_plan(index, profile)
++        flow = group_initial_plan(index, profile, pause_timing=pause_timing)
+     else:
+         assert preflight is not None
+         flow = replan_flow(index, profile, previous_plan, preflight)
+diff --git a/utterplan/renderplan_grouping.py b/utterplan/renderplan_grouping.py
+index 2ff6f76..5a3fa21 100644
+--- a/utterplan/renderplan_grouping.py
++++ b/utterplan/renderplan_grouping.py
+@@ -17,17 +17,29 @@ from renderplan import (
+ )
+
+ from .model import FlowSegment, PauseIntent
++from .renderplan_pause_timing import (
++    PauseTimingConfig,
++    PauseTimingContext,
++    resolve_automatic_pause_duration,
++)
+ from .renderplan_projection import RenderPlanProjectionError, SourceSegmentIndex, SourceSegmentRef
+
+ FlowItem: TypeAlias = AudioItem | PauseItem | SpeechItem
+
+ _TIMED_PAUSE = re.compile(r"^(0|[1-9][0-9]*)ms$")
+ _STRUCTURAL_BOUNDARY_PRIORITY = {"clause": 1, "sentence": 2, "paragraph": 3, "voice_change": 4}
++_ADAPTIVE_BOUNDARIES = frozenset({"clause", "sentence", "paragraph"})
+ _AUTHORED_PAUSES = frozenset({"timed", "x-weak", "weak", "medium", "strong", "x-strong"})
+
+
+-def group_initial_plan(index: SourceSegmentIndex, profile: RenderProfile) -> tuple[FlowItem, ...]:
++def group_initial_plan(
++    index: SourceSegmentIndex,
++    profile: RenderProfile,
++    *,
++    pause_timing: PauseTimingConfig | None = None,
++) -> tuple[FlowItem, ...]:
+     """Build ordered speech/audio/pause operations using only v7 source semantics."""
++    pause_timing = pause_timing or PauseTimingConfig()
+     flow: list[FlowItem] = []
+     group_source: list[SourceSpan] = []
+     group_state: tuple[str, str, str, RoleProfile] | None = None
+@@ -132,6 +144,11 @@ def group_initial_plan(index: SourceSegmentIndex, profile: RenderProfile) -> tup
+                     semantic_boundary = "parenthetical"
+                 else:
+                     semantic_boundary = None
++                pause_context = (
++                    _build_pause_context(index, semantic_boundary, tuple(group_source), ref)
++                    if group_source and semantic_boundary in _ADAPTIVE_BOUNDARIES
++                    else None
++                )
+                 if group_source:
+                     close_group(
+                         planning_level="hard" if hard_reason else profile.planning.split,
+@@ -143,6 +160,8 @@ def group_initial_plan(index: SourceSegmentIndex, profile: RenderProfile) -> tup
+                     right_pause,
+                     semantic_end=semantic_boundary,
+                     profile=profile,
++                    context=pause_context,
++                    pause_timing=pause_timing,
+                     capacity_cut=False,
+                 )
+                 if pause is not None:
+@@ -175,6 +194,11 @@ def group_initial_plan(index: SourceSegmentIndex, profile: RenderProfile) -> tup
+             if _policy_splits(profile.planning.split, terminal_boundary)
+             else "none"
+         )
++        pause_context = (
++            _build_pause_context(index, semantic_end, tuple(group_source), None)
++            if group_source and semantic_end in _ADAPTIVE_BOUNDARIES
++            else None
++        )
+         if group_source:
+             close_group(semantic_end=semantic_end)
+         trailing = _resolve_pause(
+@@ -183,6 +207,8 @@ def group_initial_plan(index: SourceSegmentIndex, profile: RenderProfile) -> tup
+             semantic_end=semantic_end if semantic_end != "none" else None,
+             profile=profile,
+             capacity_cut=False,
++            context=pause_context,
++            pause_timing=pause_timing,
+         )
+         if trailing is not None:
+             flow.append(trailing)
+@@ -280,12 +306,41 @@ def _has_timed_or_named(intent: PauseIntent | None) -> bool:
+     return intent is not None and intent.type in _AUTHORED_PAUSES
+
+
++def _build_pause_context(
++    index: SourceSegmentIndex,
++    boundary: str,
++    left_source: Sequence[SourceSpan],
++    right_ref: SourceSegmentRef | None,
++) -> PauseTimingContext:
++    """Capture the current speech group before close_group clears its source."""
++    slices = index.ordered_slices(left_source)
++    left_tokens = tuple(
++        token
++        for ref, start, end in slices
++        for token in ref.segment.tokens
++        if token.end > start and token.start < end
++    )
++    left_ref = slices[-1][0]
++    return PauseTimingContext(
++        boundary=boundary,
++        language=right_ref.segment.language if right_ref is not None else left_ref.segment.language,
++        left_text=index.text_for(left_source),
++        right_text=right_ref.segment.text if right_ref is not None else "",
++        left_tokens=left_tokens,
++        right_tokens=right_ref.segment.tokens if right_ref is not None else (),
++        left_heading=left_ref.segment.heading,
++        right_heading=right_ref.segment.heading if right_ref is not None else None,
++    )
++
++
+ def _resolve_pause(
+     left: PauseIntent | None,
+     right: PauseIntent | None,
+     *,
+     semantic_end: str | None,
+     profile: RenderProfile,
++    context: PauseTimingContext | None = None,
++    pause_timing: PauseTimingConfig | None = None,
+     capacity_cut: bool,
+ ) -> PauseItem | None:
+     """Merge two authored edge intents once, then resolve to numeric milliseconds."""
+@@ -326,7 +381,13 @@ def _resolve_pause(
+     if has_none:
+         return PauseItem(0, "authored_none")
+     if semantic_end is not None:
+-        return PauseItem(profile.pauses.durations_ms.get(semantic_end, 0), semantic_end)
++        base_ms = profile.pauses.durations_ms.get(semantic_end, 0)
++        duration_ms = base_ms
++        if semantic_end in _ADAPTIVE_BOUNDARIES and context is not None:
++            duration_ms = resolve_automatic_pause_duration(
++                base_ms, context, pause_timing or PauseTimingConfig()
++            ).duration_ms
++        return PauseItem(duration_ms, semantic_end)
+     if capacity_cut:
+         return PauseItem(0, "capacity")
+     return None
+diff --git a/utterplan/renderplan_pause_timing.py b/utterplan/renderplan_pause_timing.py
+new file mode 100644
+index 0000000..5b11273
+--- /dev/null
++++ b/utterplan/renderplan_pause_timing.py
+@@ -0,0 +1,232 @@
++"""Deterministic context-aware timing for automatic RenderPlan pauses.
++
++This module consumes only serializable FlowPlan facts and never loads NLP or
++rendering/audio providers. Authored pause intent is resolved by the caller and
++must not be sent through this automatic timing policy.
++"""
++
++from __future__ import annotations
++
++import re
++from dataclasses import dataclass
++from typing import Literal
++
++from .model import TokenView
++
++PauseTimingMode = Literal["fixed", "natural", "engaging"]
++PAUSE_TIMING_ALGORITHM = "utterplan.pause-timing.v1"
++
++_WORD_PATTERN = re.compile(r"[^\W_]+(?:['’][^\W_]+)*", re.UNICODE)
++_CLOSING_PUNCTUATION = "\"'”’»)]}〉》」』】〕〗〙〛"
++_CONNECTIVES = frozenset(
++    {
++        "and",
++        "but",
++        "or",
++        "so",
++        "then",
++        "yet",
++        "because",
++        "while",
++        "when",
++        "as",
++        "which",
++        "who",
++        "that",
++    }
++)
++_FUNCTION_POS = frozenset({"DET", "ADP", "AUX", "PART", "CCONJ", "SCONJ"})
++
++_AMPLITUDE = {"natural": 700, "engaging": 1000}
++_BOUNDARY_BIAS = {
++    "natural": {"clause": 0, "sentence": 0, "paragraph": -30},
++    "engaging": {"clause": -70, "sentence": -110, "paragraph": -100},
++}
++_FACTOR_LIMITS = {
++    "natural": {
++        "clause": (750, 1250),
++        "sentence": (760, 1200),
++        "paragraph": (820, 1180),
++    },
++    "engaging": {
++        "clause": (600, 1150),
++        "sentence": (600, 1150),
++        "paragraph": (700, 1120),
++    },
++}
++
++
++@dataclass(frozen=True, slots=True)
++class PauseTimingConfig:
++    """Select the automatic pause timing preset; fixed preserves old behavior."""
++
++    mode: PauseTimingMode = "fixed"
++
++    def __post_init__(self) -> None:
++        if self.mode not in {"fixed", "natural", "engaging"}:
++            raise ValueError(f"unsupported pause timing mode {self.mode!r}")
++
++
++@dataclass(frozen=True, slots=True)
++class PauseTimingContext:
++    """Local facts around one already-materialized semantic boundary."""
++
++    boundary: str
++    language: str
++    left_text: str
++    right_text: str
++    left_tokens: tuple[TokenView, ...] = ()
++    right_tokens: tuple[TokenView, ...] = ()
++    left_heading: int | None = None
++    right_heading: int | None = None
++
++
++@dataclass(frozen=True, slots=True)
++class PauseTimingDecision:
++    """Resolved milliseconds and an optional stable explanation for testing."""
++
++    base_ms: int
++    duration_ms: int
++    factor_permille: int
++    features: tuple[str, ...]
++
++
++def resolve_automatic_pause_duration(
++    base_ms: int,
++    context: PauseTimingContext,
++    config: PauseTimingConfig,
++) -> PauseTimingDecision:
++    """Scale an existing automatic pause using stable integer-only heuristics."""
++    if type(base_ms) is not int:
++        raise TypeError("base_ms must be an integer")
++    if base_ms <= 0:
++        return PauseTimingDecision(base_ms, 0, 1000, ("zero-base",))
++    if config.mode == "fixed":
++        return PauseTimingDecision(base_ms, base_ms, 1000, ("fixed",))
++    if context.boundary == "voice_change":
++        return PauseTimingDecision(base_ms, base_ms, 1000, ("fixed-boundary",))
++    if context.boundary not in _BOUNDARY_BIAS[config.mode]:
++        return PauseTimingDecision(base_ms, base_ms, 1000, ("unsupported-boundary",))
++
++    raw = 0
++    features: list[str] = []
++    for adjustment, feature in (
++        _length_adjustment(context.left_text, context.left_tokens),
++        _punctuation_adjustment(context.left_text),
++        _connective_adjustment(context),
++        _pos_adjustment(context.left_tokens, context.right_tokens),
++        _heading_adjustment(context),
++    ):
++        raw += adjustment
++        if feature is not None:
++            features.append(feature)
++
++    amplitude = _AMPLITUDE[config.mode]
++    bias = _BOUNDARY_BIAS[config.mode][context.boundary]
++    scaled = bias + _integer_scale(raw, amplitude)
++    low, high = _FACTOR_LIMITS[config.mode][context.boundary]
++    factor = min(high, max(low, 1000 + scaled))
++    duration = (base_ms * factor + 500) // 1000
++    duration = ((duration + 5) // 10) * 10
++    return PauseTimingDecision(base_ms, duration, factor, tuple(features))
++
++
++def _integer_scale(value: int, amplitude: int) -> int:
++    """Round a signed permille product to nearest integer, ties away from zero."""
++    product = value * amplitude
++    if product >= 0:
++        return (product + 500) // 1000
++    return -((-product + 500) // 1000)
++
++
++def _length_adjustment(text: str, tokens: tuple[TokenView, ...]) -> tuple[int, str]:
++    if tokens and any(token.pos is not None for token in tokens):
++        count = sum(token.pos != "PUNCT" for token in tokens)
++        source = "tokens"
++    else:
++        count = len(_WORD_PATTERN.findall(text))
++        source = "text"
++    if count <= 3:
++        return -160, f"length:{source}:{count}"
++    if count <= 7:
++        return -100, f"length:{source}:{count}"
++    if count <= 16:
++        return 0, f"length:{source}:{count}"
++    if count <= 25:
++        return 60, f"length:{source}:{count}"
++    return 100, f"length:{source}:{count}"
++
++
++def _punctuation_adjustment(text: str) -> tuple[int, str | None]:
++    ending = text.rstrip().rstrip(_CLOSING_PUNCTUATION)
++    if ending.endswith(("...", "…")):
++        return 160, "punctuation:ellipsis:+160"
++    for punctuation, adjustment in (
++        ("?", 60),
++        ("!", 40),
++        (":", 60),
++        (";", 40),
++        (",", -50),
++        ("—", 20),
++    ):
++        if ending.endswith(punctuation):
++            return adjustment, f"punctuation:{punctuation}:{adjustment:+d}"
++    return 0, None
++
++
++def _connective_adjustment(context: PauseTimingContext) -> tuple[int, str | None]:
++    language = context.language.casefold().replace("_", "-").split("-", 1)[0]
++    if language != "en":
++        return 0, None
++    word = _first_word(context.right_text, context.right_tokens)
++    if word in _CONNECTIVES:
++        return -90, f"connective:{word}:-90"
++    return 0, None
++
++
++def _first_word(text: str, tokens: tuple[TokenView, ...]) -> str:
++    for token in tokens:
++        if token.pos == "PUNCT":
++            continue
++        lemma = token.lemma.strip().casefold() if token.lemma else ""
++        if lemma:
++            return lemma
++        surface = token.surface(text).strip().casefold()
++        if surface:
++            return surface
++    match = _WORD_PATTERN.search(text)
++    return match.group(0).casefold() if match else ""
++
++
++def _pos_adjustment(
++    left_tokens: tuple[TokenView, ...], right_tokens: tuple[TokenView, ...]
++) -> tuple[int, str | None]:
++    adjustment = 0
++    features: list[str] = []
++    next_pos = next((token.pos for token in right_tokens if token.pos != "PUNCT"), None)
++    if next_pos in {"CCONJ", "SCONJ"}:
++        adjustment -= 50
++        features.append("pos:next-conjunction:-50")
++    previous_pos = next(
++        (token.pos for token in reversed(left_tokens) if token.pos != "PUNCT"), None
++    )
++    if previous_pos in _FUNCTION_POS:
++        adjustment -= 80
++        features.append("pos:final-function-word:-80")
++    return adjustment, "+".join(features) if features else None
++
++
++def _heading_adjustment(context: PauseTimingContext) -> tuple[int, str | None]:
++    if context.right_heading is not None and context.right_heading != context.left_heading:
++        return 120, "heading:transition:+120"
++    return 0, None
++
++
++__all__ = [
++    "PAUSE_TIMING_ALGORITHM",
++    "PauseTimingConfig",
++    "PauseTimingContext",
++    "PauseTimingDecision",
++    "PauseTimingMode",
++    "resolve_automatic_pause_duration",
++]
+diff --git a/utterplan/renderplan_workspace.py b/utterplan/renderplan_workspace.py
+index 48fbea4..149a412 100644
+--- a/utterplan/renderplan_workspace.py
++++ b/utterplan/renderplan_workspace.py
+@@ -5,6 +5,8 @@ from __future__ import annotations
+ import re
+ from pathlib import Path
+
++from .renderplan_pause_timing import PauseTimingConfig
++
+
+ def render_variant_label(profile_path: Path, override: str | None = None) -> str:
+     if override is None:
+@@ -16,8 +18,15 @@ def render_variant_label(profile_path: Path, override: str | None = None) -> str
+     return re.sub(r"[^a-z0-9_.-]+", "-", raw_label.lower()).strip("._-") or "profile"
+
+
++def pause_timing_variant_label(base: str, config: PauseTimingConfig) -> str:
++    """Add a stable policy suffix while preserving fixed-mode variant names."""
++    if config.mode == "fixed":
++        return base
++    return f"{base}--pt-{config.mode}-v1"
++
++
+ def profile_fingerprint(profile_id: str) -> str:
+     return profile_id.removeprefix("sha256:")[:12]
+
+
+-__all__ = ["profile_fingerprint", "render_variant_label"]
++__all__ = ["pause_timing_variant_label", "profile_fingerprint", "render_variant_label"]

@@ -1,0 +1,70 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.6.14
+git_base_ref: 874da577a7afbbaa58ba15a9f1a70096797ad4b0
+git_base_sha: 874da577a7afbbaa58ba15a9f1a70096797ad4b0
+git_head_ref: bcc938f9b2753f5e9a06b41090b775b601fc33c8
+git_head_sha: bcc938f9b2753f5e9a06b41090b775b601fc33c8
+include_merges: nontrivial
+entries:
+  - kind: internal
+    summary: "Documented v0.6.13 release metadata and generated changelog section"
+    status: accepted
+    internal: true
+    source_refs:
+      - git:17f1aed9ce485ed86b9b3de9a28791cc3e435577
+    paths:
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.12/release.md
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.13/audit/commit-audit.yaml
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.13/entries/entry-0002.md
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.13/release.md
+      - .ledger/releaseledger/work/v0.6.13/audit-decisions.yaml
+      - .ledger/releaseledger/work/v0.6.13/audit.yaml
+      - .ledger/releaseledger/work/v0.6.13/entries.yaml
+      - .ledger/releaseledger/work/v0.6.13/evidence/874da57.patch
+      - .ledger/releaseledger/work/v0.6.13/evidence/88dc839.patch
+      - .ledger/releaseledger/work/v0.6.13/evidence/manifest.json
+      - .ledger/releaseledger/work/v0.6.13/range.json
+      - docs/changelog.md
+    sources:
+      - git:17f1aed9ce485ed86b9b3de9a28791cc3e435577
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added configurable fixed, natural, and engaging pause timing for initial RenderPlan projection"
+    status: accepted
+    source_refs:
+      - git:bcc938f9b2753f5e9a06b41090b775b601fc33c8
+    paths:
+      - README.md
+      - docs/bundles.md
+      - docs/cli.md
+      - docs/index.md
+      - docs/pause-timing-architecture.md
+      - docs/python-api.md
+      - tests/test_cli.py
+      - tests/test_cli_bundle_render_book.py
+      - tests/test_cli_bundle_render_document.py
+      - tests/test_renderplan_export.py
+      - tests/test_renderplan_pause_timing.py
+      - utterplan/__init__.py
+      - utterplan/_book_service.py
+      - utterplan/_document_service.py
+      - utterplan/bundle.py
+      - utterplan/cli.py
+      - utterplan/renderplan_batch.py
+      - utterplan/renderplan_export.py
+      - utterplan/renderplan_grouping.py
+      - utterplan/renderplan_pause_timing.py
+      - utterplan/renderplan_workspace.py
+    sources:
+      - git:bcc938f9b2753f5e9a06b41090b775b601fc33c8
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

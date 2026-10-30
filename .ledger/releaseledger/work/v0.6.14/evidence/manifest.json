@@ -1,0 +1,69 @@
+{
+  "candidate_count": 2,
+  "candidates": [
+    {
+      "additions": 1004,
+      "deletions": 6,
+      "patch_file": "17f1aed.patch",
+      "patch_sha256": "2be9032621fc534060e8c32a87a03ea8b0d62257dc4523e52841bbaca1c82e61",
+      "paths": [
+        ".ledger/releaseledger/data/ledgers/main/events/events.jsonl",
+        ".ledger/releaseledger/data/ledgers/main/releases/v0.6.12/release.md",
+        ".ledger/releaseledger/data/ledgers/main/releases/v0.6.13/audit/commit-audit.yaml",
+        ".ledger/releaseledger/data/ledgers/main/releases/v0.6.13/entries/entry-0002.md",
+        ".ledger/releaseledger/data/ledgers/main/releases/v0.6.13/release.md",
+        ".ledger/releaseledger/work/v0.6.13/audit-decisions.yaml",
+        ".ledger/releaseledger/work/v0.6.13/audit.yaml",
+        ".ledger/releaseledger/work/v0.6.13/entries.yaml",
+        ".ledger/releaseledger/work/v0.6.13/evidence/874da57.patch",
+        ".ledger/releaseledger/work/v0.6.13/evidence/88dc839.patch",
+        ".ledger/releaseledger/work/v0.6.13/evidence/manifest.json",
+        ".ledger/releaseledger/work/v0.6.13/range.json",
+        "docs/changelog.md"
+      ],
+      "sha": "17f1aed9ce485ed86b9b3de9a28791cc3e435577",
+      "short_sha": "17f1aed",
+      "source_ref": "git:17f1aed9ce485ed86b9b3de9a28791cc3e435577"
+    },
+    {
+      "additions": 992,
+      "deletions": 26,
+      "patch_file": "bcc938f.patch",
+      "patch_sha256": "7333bc5a4970f73babfe70b197834146e24164315b17f7d7ea37950fb78f52ec",
+      "paths": [
+        "README.md",
+        "docs/bundles.md",
+        "docs/cli.md",
+        "docs/index.md",
+        "docs/pause-timing-architecture.md",
+        "docs/python-api.md",
+        "tests/test_cli.py",
+        "tests/test_cli_bundle_render_book.py",
+        "tests/test_cli_bundle_render_document.py",
+        "tests/test_renderplan_export.py",
+        "tests/test_renderplan_pause_timing.py",
+        "utterplan/__init__.py",
+        "utterplan/_book_service.py",
+        "utterplan/_document_service.py",
+        "utterplan/bundle.py",
+        "utterplan/cli.py",
+        "utterplan/renderplan_batch.py",
+        "utterplan/renderplan_export.py",
+        "utterplan/renderplan_grouping.py",
+        "utterplan/renderplan_pause_timing.py",
+        "utterplan/renderplan_workspace.py"
+      ],
+      "sha": "bcc938f9b2753f5e9a06b41090b775b601fc33c8",
+      "short_sha": "bcc938f",
+      "source_ref": "git:bcc938f9b2753f5e9a06b41090b775b601fc33c8"
+    }
+  ],
+  "git_base_ref": "874da577a7afbbaa58ba15a9f1a70096797ad4b0",
+  "git_base_sha": "874da577a7afbbaa58ba15a9f1a70096797ad4b0",
+  "git_head_ref": "bcc938f9b2753f5e9a06b41090b775b601fc33c8",
+  "git_head_sha": "bcc938f9b2753f5e9a06b41090b775b601fc33c8",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "v0.6.14",
+  "schema_version": 1
+}

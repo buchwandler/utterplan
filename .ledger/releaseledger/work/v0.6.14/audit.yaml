@@ -1,0 +1,77 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: v0.6.14
+git_base_ref: 874da577a7afbbaa58ba15a9f1a70096797ad4b0
+git_base_sha: 874da577a7afbbaa58ba15a9f1a70096797ad4b0
+git_head_ref: HEAD
+git_head_sha: bcc938f9b2753f5e9a06b41090b775b601fc33c8
+git_range: 874da577a7afbbaa58ba15a9f1a70096797ad4b0..bcc938f9b2753f5e9a06b41090b775b601fc33c8
+commit_count: 2
+rows:
+  - sha: 17f1aed9ce485ed86b9b3de9a28791cc3e435577
+    source_ref: git:17f1aed9ce485ed86b9b3de9a28791cc3e435577
+    short_sha: 17f1aed
+    changed_paths:
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.12/release.md
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.13/audit/commit-audit.yaml
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.13/entries/entry-0002.md
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.13/release.md
+      - .ledger/releaseledger/work/v0.6.13/audit-decisions.yaml
+      - .ledger/releaseledger/work/v0.6.13/audit.yaml
+      - .ledger/releaseledger/work/v0.6.13/entries.yaml
+      - .ledger/releaseledger/work/v0.6.13/evidence/874da57.patch
+      - .ledger/releaseledger/work/v0.6.13/evidence/88dc839.patch
+      - .ledger/releaseledger/work/v0.6.13/evidence/manifest.json
+      - .ledger/releaseledger/work/v0.6.13/range.json
+      - docs/changelog.md
+    stats:
+      files_changed: 13
+      insertions: 1004
+      deletions: 6
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "doc: changelog"
+  - sha: bcc938f9b2753f5e9a06b41090b775b601fc33c8
+    source_ref: git:bcc938f9b2753f5e9a06b41090b775b601fc33c8
+    short_sha: bcc938f
+    changed_paths:
+      - README.md
+      - docs/bundles.md
+      - docs/cli.md
+      - docs/index.md
+      - docs/pause-timing-architecture.md
+      - docs/python-api.md
+      - tests/test_cli.py
+      - tests/test_cli_bundle_render_book.py
+      - tests/test_cli_bundle_render_document.py
+      - tests/test_renderplan_export.py
+      - tests/test_renderplan_pause_timing.py
+      - utterplan/__init__.py
+      - utterplan/_book_service.py
+      - utterplan/_document_service.py
+      - utterplan/bundle.py
+      - utterplan/cli.py
+      - utterplan/renderplan_batch.py
+      - utterplan/renderplan_export.py
+      - utterplan/renderplan_grouping.py
+      - utterplan/renderplan_pause_timing.py
+      - utterplan/renderplan_workspace.py
+    stats:
+      files_changed: 21
+      insertions: 992
+      deletions: 26
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: different pause settings"
