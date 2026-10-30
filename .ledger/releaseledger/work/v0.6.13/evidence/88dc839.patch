@@ -1,0 +1,643 @@
+ .../data/ledgers/main/events/events.jsonl          |   2 +
+ .../main/releases/v0.6.12/entries/entry-0002.md    |  28 +++
+ .../data/ledgers/main/releases/v0.6.12/release.md  |   8 +-
+ docs/architecture.md                               |   2 +-
+ docs/changelog.md                                  |   6 +-
+ docs/consumer-guide.md                             |   3 +-
+ docs/format.md                                     |   1 +
+ pyproject.toml                                     |   2 +-
+ tests/test_renderplan_dependency_contract.py       |   2 +-
+ tests/test_renderplan_replan.py                    |  36 +++
+ tests/test_renderplan_v7_contract.py               | 267 +++++++++++++++++++++
+ utterplan/renderplan_grouping.py                   |  65 +++--
+ 12 files changed, 394 insertions(+), 28 deletions(-)
+
+diff --git a/.ledger/releaseledger/data/ledgers/main/events/events.jsonl b/.ledger/releaseledger/data/ledgers/main/events/events.jsonl
+index bb6553c..d200760 100644
+--- a/.ledger/releaseledger/data/ledgers/main/events/events.jsonl
++++ b/.ledger/releaseledger/data/ledgers/main/events/events.jsonl
+@@ -182,3 +182,5 @@
+ {"data":{"released_at":"2026-10-28"},"event":"release.finalized","event_id":"event-0182","record_revisions":{"release:v0.6.10":4},"release_version":"v0.6.10","schema_version":2}
+ {"data":{"status":"planned"},"event":"release.created","event_id":"event-0183","record_revisions":{"release:v0.6.12":1},"release_version":"v0.6.12","schema_version":2}
+ {"data":{"kind":"changed","status":"accepted"},"entry_id":"entry-0001","event":"entry.added","event_id":"event-0184","record_revisions":{"entry:v0.6.12/entry-0001":1,"release:v0.6.12":2},"release_version":"v0.6.12","schema_version":2}
++{"data":{"kind":"added","status":"accepted"},"entry_id":"entry-0002","event":"entry.added","event_id":"event-0185","record_revisions":{"entry:v0.6.12/entry-0002":1,"release:v0.6.12":3},"release_version":"v0.6.12","schema_version":2}
++{"data":{"released_at":"2026-10-29"},"event":"release.finalized","event_id":"event-0186","record_revisions":{"release:v0.6.12":4},"release_version":"v0.6.12","schema_version":2}
+diff --git a/.ledger/releaseledger/data/ledgers/main/releases/v0.6.12/entries/entry-0002.md b/.ledger/releaseledger/data/ledgers/main/releases/v0.6.12/entries/entry-0002.md
+new file mode 100644
+index 0000000..06fc7b4
+--- /dev/null
++++ b/.ledger/releaseledger/data/ledgers/main/releases/v0.6.12/entries/entry-0002.md
+@@ -0,0 +1,28 @@
++---
++schema_version: 2
++object_type: release_entry
++versioning:
++  schema_version: 1
++  revision: 1
++entry_id: entry-0002
++release_version: v0.6.12
++kind: added
++summary:
++  Added opt-in parenthetical request splitting and configurable pauses to RenderPlan
++  projection
++status: accepted
++audience: null
++scopes: []
++source_refs:
++  - tl:task-0051
++paths:
++  - utterplan/renderplan_grouping.py
++  - tests/test_renderplan_v7_contract.py
++issues: []
++prs: []
++sources: []
++contributors: []
++breaking: false
++internal: false
++order: 2
++---
+diff --git a/.ledger/releaseledger/data/ledgers/main/releases/v0.6.12/release.md b/.ledger/releaseledger/data/ledgers/main/releases/v0.6.12/release.md
+index c8d2823..24dcebe 100644
+--- a/.ledger/releaseledger/data/ledgers/main/releases/v0.6.12/release.md
++++ b/.ledger/releaseledger/data/ledgers/main/releases/v0.6.12/release.md
+@@ -3,12 +3,12 @@ schema_version: 2
+ object_type: release
+ versioning:
+   schema_version: 1
+-  revision: 2
++  revision: 4
+ version: v0.6.12
+-status: planned
++status: released
+ history_state: curated
+ title: UtterPlan v0.6.12
+-released_at: null
++released_at: "2026-10-29"
+ previous_version: v0.6.10
+ cancel_reason: null
+ superseded_by: null
+@@ -16,7 +16,7 @@ changelog_file: docs/changelog.md
+ boundary_ref: null
+ source_refs: []
+ source_count: null
+-entry_count: 1
++entry_count: 2
+ artifact_count: 0
+ git_base_ref: null
+ git_base_sha: null
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 54c80e3..b25badb 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -241,7 +241,7 @@ Supporting tactics:
+
+ After written-to-spoken preparation and before segmentation, UtterPlan inspects verified replacement records for the exact character-spelling transformation: an ASCII uppercase-letter/digit core of at least two characters becomes the same characters joined by single spaces, optionally retaining an identical `'s` or `’s` suffix. This derives a compiler-owned `say_as=characters` annotation over only the prepared character core. For example, `[ART]{sub=\"A R T\"}` keeps prepared text `A R T`; `[ART's]{sub=\"A R T's\"}` keeps `A R T's` and marks only `A R T`.
+
+-The derivation is portable executable intent, not a renderer-specific spelling rewrite. Prepared text never becomes `A- R- T`; a renderer adapter may choose that frontend form. Existing semantic-edge segmentation produces the exact controlled span, while RenderPlan sentence grouping retains the full sentence as one normal speech request with a request-local control. This feature adds neither a sentence split nor an automatic pause.
++The derivation is portable executable intent, not a renderer-specific spelling rewrite. Prepared text never becomes `A- R- T`; a renderer adapter may choose that frontend form. Existing semantic-edge segmentation produces the exact controlled span, while default RenderPlan sentence grouping retains the full sentence as one normal speech request with a request-local control. An explicit manual `pauses.parenthetical` duration is a separate opt-in policy: RenderPlan may split at UtterPlan's stored parenthetical edges and project pauses without reparsing or rewriting text; profiles without it keep the existing grouping.
+
+ Authored `say-as` semantics take precedence, and the consumed SSMD `sub` annotation remains consumed. The derived directive uses existing schema-v7 `SayAsDirective` serialization and identity hashing; replacement records remain diagnostic provenance and are not synthesis input. No schema version or migration changes are required.
+
+diff --git a/docs/changelog.md b/docs/changelog.md
+index 353ae7e..c07961f 100644
+--- a/docs/changelog.md
++++ b/docs/changelog.md
+@@ -4,7 +4,11 @@
+
+ ## [Unreleased]
+
+-## [v0.6.12] - Unreleased
++## [v0.6.12] - 2026-10-29
++
++### Added
++
++- Added opt-in parenthetical request splitting and configurable pauses to RenderPlan projection
+
+ ### Changed
+
+diff --git a/docs/consumer-guide.md b/docs/consumer-guide.md
+index 7cfa741..3424763 100644
+--- a/docs/consumer-guide.md
++++ b/docs/consumer-guide.md
+@@ -2,7 +2,7 @@
+
+ UtterPlan ends at a semantic planning boundary. A renderer consumes the public `FlowPlan` and begins G2P after planning. It does not need a TOML round trip when planner and renderer run in the same process.
+
+-The schema-v7 plan is renderer-independent: `FlowUnit` grouping is fixed paragraph-local, while `FlowSegment` boundary arrays carry safe cut opportunities. Segments are not necessarily TTS calls, and UtterPlan's linguistic tokens are not model-token counts. A consumer may choose sentence, paragraph, or engine-token-budget chunks and native, automatic, or manual pause realization without changing the saved plan.
++The schema-v7 plan is renderer-independent: `FlowUnit` grouping is fixed paragraph-local, while `FlowSegment` boundary arrays carry safe cut opportunities. Segments are not necessarily TTS calls, and UtterPlan's linguistic tokens are not model-token counts. Consumers choose sentence, paragraph, or engine-token-budget chunks and native, automatic, or manual pause realization without changing the saved plan. Optional RenderPlan projection can also opt in to splitting sentence requests at stored parenthetical edges through an explicit manual RenderProfile pause policy; this does not change the FlowPlan.
+
+ For persistence across processes, save a current plan as `.utterplan.toml` and load it with `FlowPlan.load()`. `to_toml()` / `from_toml()` provide text round-tripping, and `plan_id` identifies executable semantics rather than TOML formatting. Batch reports and optional compiler traces are operational/provenance artifacts, not plans.
+
+@@ -39,6 +39,7 @@ In Python, `PlannerConfig.document_format` defaults to `"plain"`; select `"ssmd"
+ - `directives`: typed voice, pronunciation, prosody, emphasis, say-as, substitution, audio, and extension data.
+ - `markers` and optional `heading` metadata already localized to the owning segment.
+
++RenderPlan's parenthetical policy is independent of FlowPlan compilation. Only a manual RenderProfile that explicitly includes `pauses.parenthetical` activates it; a zero duration still splits requests; omitting the key preserves current behavior, and `mode = "none"` disables this automatic policy even if a stale duration remains. Newly created Kokoro profiles seed `180ms` in VoiceRender, but existing user profiles are not mutated. The original `(` and `)` remain in speech text, and only UtterPlan's stored semantic boundaries are used.
+ Token offsets are half-open Python-character ranges into the owning `segment.text`. Do not use them to slice document text or add offsets from another segment. Consumers preserve stored segment order but decide downstream chunk boundaries; a segment is not necessarily one TTS call.
+ Token `pos`, `tag`, `lemma`, and `morph` describe that exact prepared text and are the authoritative linguistic context, not model-token IDs or counts. Consumers may pass them through without retokenizing or rerunning spaCy. Optional replacements are provenance only: their output spans are segment-local, source values are original spellings, and they do not alter hashes independently of the source digest and are not synthesis inputs.
+
+diff --git a/docs/format.md b/docs/format.md
+index a756800..1ac21d2 100644
+--- a/docs/format.md
++++ b/docs/format.md
+@@ -42,6 +42,7 @@ Each ordered `flow` entry is a `FlowUnit` with a stable local `hash` and one or
+
+ `boundary_before` / `boundary_after` list unique safe opportunities from `clause`, `sentence`, `paragraph`, `parenthetical`, and `voice_change` in canonical order; a parenthetical or sentence opportunity is not a pause directive. Authored pause intents are kept separately, so a boundary and an authored `none`, strength, or timed break can coexist at one edge. A `FlowSegment` is a semantic plan segment, not necessarily a renderer call or final TTS chunk.
+
++In optional RenderPlan projection, a RenderProfile with `pauses.mode = "manual"` and an explicit `pauses.parenthetical = "180ms"` turns each stored parenthetical edge into a speech-request boundary and one `PauseItem`. The key's presence activates the split even at `0ms`; omitting it preserves existing grouping, and `mode = "none"` disables it. Canonical text, source spans, and segment-local facts are not rewritten.
+ Consumers may project saved flow into `segment`, `clause`, `sentence`, or `paragraph` preview chunks without changing schema-v7 data. The public preview concatenates each selected chunk's stored `segment.text` exactly; token and replacement spans remain local to their original segments. Pause policies are projections only and do not persist renderer timing or activate boundaries in the plan.
+
+ Token `span` entries are half-open Python-character ranges local to their owning segment's `text`. `pos`, `tag`, `lemma`, and `morph` carry final prepared-text linguistic facts; dense columns align with spans and sparse columns use ascending `[token_index, value]` pairs. Absent lemma values derive from case-folded surface text; an explicit empty sparse lemma preserves an unknown value. These fields describe linguistic tokens, not engine token IDs or model-token counts; consumers may pass the context through without retokenizing or rerunning spaCy.
+diff --git a/pyproject.toml b/pyproject.toml
+index 7b378e9..e0cb5e2 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -17,7 +17,7 @@ dependencies = [
+   "ttsready>=0.2.3,<0.3",
+   "typing_extensions>=4.0",
+   "tomlkit>=0.13,<1",
+-  "renderplan>=0.2.0,<0.3",
++  "renderplan>=0.2.1,<0.3",
+  ]
+ classifiers = [
+   "Development Status :: 3 - Alpha",
+diff --git a/tests/test_renderplan_dependency_contract.py b/tests/test_renderplan_dependency_contract.py
+index 49be3e6..2aadd7e 100644
+--- a/tests/test_renderplan_dependency_contract.py
++++ b/tests/test_renderplan_dependency_contract.py
+@@ -29,4 +29,4 @@ def test_renderplan_collection_api_minimum_is_declared_as_runtime_dependency() -
+     project = tomlkit.parse(
+         (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+     ).unwrap()
+-    assert "renderplan>=0.2.0,<0.3" in project["project"]["dependencies"]
++    assert "renderplan>=0.2.1,<0.3" in project["project"]["dependencies"]
+diff --git a/tests/test_renderplan_replan.py b/tests/test_renderplan_replan.py
+index e01e192..71f5a6a 100644
+--- a/tests/test_renderplan_replan.py
++++ b/tests/test_renderplan_replan.py
+@@ -183,6 +183,42 @@ def test_replan_replaces_only_failed_occurrence_and_preserves_later_id() -> None
+     assert rebuilt.plan_id != previous.plan_id
+
+
++def test_replan_preserves_parenthetical_semantic_end_on_last_clause_child() -> None:
++    plan = _plan(
++        FlowSegment("A ", "en-US", boundary_after=("clause",)),
++        FlowSegment("B ", "en-US", boundary_after=("parenthetical",)),
++        FlowSegment(
++            "(x)",
++            "en-US",
++            boundary_before=("parenthetical",),
++            boundary_after=("sentence",),
++        ),
++    )
++    profile = replace(
++        _profile(),
++        pauses=PausePolicy(
++            mode="manual",
++            durations_ms={"clause": 180, "parenthetical": 180, "sentence": 500},
++        ),
++        profile_id=None,
++    )
++    index, profile, previous = _build_previous(plan, profile)
++    failed = previous.speech[0]
++    assert failed.text == "A B "
++    assert failed.semantic_end == "parenthetical"
++
++    flow = replan_flow(index, profile, previous, _preflight(previous, profile, (failed,)))
++    speech = _speech_text(flow)
++
++    assert [item.text for item in speech] == ["A ", "B ", "(x)"]
++    assert [item.semantic_end for item in speech] == ["clause", "parenthetical", "sentence"]
++    assert [item.reason for item in flow if isinstance(item, PauseItem)] == [
++        "capacity",
++        "parenthetical",
++        "sentence",
++    ]
++
++
+ def test_successful_prior_splits_survive_replanning_an_unrelated_child() -> None:
+     plan = _plan(
+         FlowSegment("A1 ", "en-US", boundary_after=("clause",)),
+diff --git a/tests/test_renderplan_v7_contract.py b/tests/test_renderplan_v7_contract.py
+index 2c293a8..bd6037c 100644
+--- a/tests/test_renderplan_v7_contract.py
++++ b/tests/test_renderplan_v7_contract.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+
++from dataclasses import replace
++
+ import pytest
+ from renderplan import (
+     AudioItem,
+@@ -217,6 +219,45 @@ def _group(plan: FlowPlan, profile: RenderProfile):
+     return group_initial_plan(build_source_index(plan), profile)
+
+
++def _parenthetical_plan(
++    *,
++    entry_pause: PauseIntent | None = None,
++    exit_pause: PauseIntent | None = None,
++) -> FlowPlan:
++    return FlowPlan(
++        language="en-US",
++        flow=(
++            FlowUnit(
++                (
++                    FlowSegment(
++                        "Before ",
++                        "en-US",
++                        tokens=(TokenView(0, 6),),
++                        pause_after=entry_pause,
++                        boundary_after=("parenthetical",),
++                    ),
++                    FlowSegment(
++                        "(aside)",
++                        "en-US",
++                        directives=SegmentDirectives(emphasis=EmphasisDirective("strong")),
++                        tokens=(TokenView(1, 6),),
++                        boundary_before=("parenthetical",),
++                        pause_after=exit_pause,
++                        boundary_after=("parenthetical",),
++                    ),
++                    FlowSegment(
++                        " after.",
++                        "en-US",
++                        tokens=(TokenView(1, 6),),
++                        boundary_before=("parenthetical",),
++                        boundary_after=("sentence",),
++                    ),
++                )
++            ),
++        ),
++    )
++
++
+ def test_sentence_grouping_joins_exact_prepared_text_and_ignores_clause_boundaries() -> None:
+     plan = FlowPlan(
+         language="en-US",
+@@ -240,6 +281,232 @@ def test_sentence_grouping_joins_exact_prepared_text_and_ignores_clause_boundari
+     assert next(item for item in flow if isinstance(item, PauseItem)).reason == "sentence"
+
+
++def test_parenthetical_boundaries_remain_joined_when_pause_policy_is_unset() -> None:
++    plan = _parenthetical_plan()
++    profile = _profile(pauses={"sentence": 500})
++
++    flow = _group(plan, profile)
++    speech = [item for item in flow if isinstance(item, SpeechItem)]
++    pauses = [item for item in flow if isinstance(item, PauseItem)]
++
++    assert [item.text for item in speech] == ["Before (aside) after."]
++    assert [item.semantic_end for item in speech] == ["sentence"]
++    assert [(item.duration_ms, item.reason) for item in pauses] == [(500, "sentence")]
++    assert _group(plan, profile) == flow
++
++
++@pytest.mark.parametrize("duration", (180, 0))
++def test_configured_parenthetical_edges_split_once_and_preserve_request_fidelity(
++    duration: int,
++) -> None:
++    plan = _parenthetical_plan()
++    profile = _profile(pauses={"parenthetical": duration, "sentence": 500})
++
++    flow = _group(plan, profile)
++    speech = [item for item in flow if isinstance(item, SpeechItem)]
++    pauses = [item for item in flow if isinstance(item, PauseItem)]
++
++    assert [type(item) for item in flow] == [
++        SpeechItem,
++        PauseItem,
++        SpeechItem,
++        PauseItem,
++        SpeechItem,
++        PauseItem,
++    ]
++    assert [item.text for item in speech] == ["Before ", "(aside)", " after."]
++    assert [item.semantic_end for item in speech] == [
++        "parenthetical",
++        "parenthetical",
++        "sentence",
++    ]
++    assert [(item.duration_ms, item.reason) for item in pauses] == [
++        (duration, "parenthetical"),
++        (duration, "parenthetical"),
++        (500, "sentence"),
++    ]
++    assert "".join(item.text for item in speech) == "Before (aside) after."
++    assert [item.source for item in speech] == [
++        (SourceSpan("f000000.s000", 0, 7),),
++        (SourceSpan("f000000.s001", 0, 7),),
++        (SourceSpan("f000000.s002", 0, 7),),
++    ]
++    assert [item.tokens.span if item.tokens is not None else None for item in speech] == [
++        ((0, 6),),
++        ((1, 6),),
++        ((1, 6),),
++    ]
++    assert [
++        [(control.start, control.end, control.name) for control in item.controls] for item in speech
++    ] == [[], [(0, 7, "emphasis")], []]
++    assert _group(plan, profile) == flow
++
++
++def test_parenthetical_policy_is_disabled_by_none_mode() -> None:
++    plan = _parenthetical_plan()
++    profile = _profile()
++    profile = replace(
++        profile,
++        pauses=PausePolicy(mode="none", durations_ms={"parenthetical": 180}),
++        profile_id=None,
++    )
++
++    flow = _group(plan, profile)
++
++    assert [item.text for item in flow if isinstance(item, SpeechItem)] == ["Before (aside) after."]
++    assert not any(isinstance(item, PauseItem) and item.reason == "parenthetical" for item in flow)
++
++
++def test_authored_none_suppresses_only_parenthetical_policy_splits() -> None:
++    plan = _parenthetical_plan(
++        entry_pause=PauseIntent("none"),
++        exit_pause=PauseIntent("none"),
++    )
++    profile = _profile(pauses={"parenthetical": 180, "sentence": 500})
++
++    flow = _group(plan, profile)
++
++    assert [item.text for item in flow if isinstance(item, SpeechItem)] == ["Before (aside) after."]
++    assert [(item.duration_ms, item.reason) for item in flow if isinstance(item, PauseItem)] == [
++        (500, "sentence")
++    ]
++
++
++def test_authored_none_resolves_coincident_sentence_parenthetical_edge() -> None:
++    edge = ("sentence", "parenthetical")
++    plan = FlowPlan(
++        language="en-US",
++        flow=(
++            FlowUnit(
++                (
++                    FlowSegment(
++                        "Before ",
++                        "en-US",
++                        pause_after=PauseIntent("none"),
++                        boundary_after=edge,
++                    ),
++                    FlowSegment(
++                        "(aside)",
++                        "en-US",
++                        boundary_before=edge,
++                        boundary_after=("sentence",),
++                    ),
++                )
++            ),
++        ),
++    )
++    profile = _profile(pauses={"parenthetical": 180, "sentence": 500})
++
++    flow = _group(plan, profile)
++    speech = [item for item in flow if isinstance(item, SpeechItem)]
++    pauses = [item for item in flow if isinstance(item, PauseItem)]
++
++    assert [item.text for item in speech] == ["Before ", "(aside)"]
++    assert speech[0].semantic_end == "sentence"
++    assert [(item.duration_ms, item.reason) for item in pauses] == [
++        (0, "authored_none"),
++        (500, "sentence"),
++    ]
++
++
++@pytest.mark.parametrize(
++    ("intent", "extra_pause", "expected"),
++    (
++        (PauseIntent("timed", "350ms"), {}, (350, "timed")),
++        (PauseIntent("strong"), {"strong": 400}, (400, "strong")),
++    ),
++)
++def test_authored_timed_and_named_pauses_win_at_parenthetical_edges(
++    intent: PauseIntent,
++    extra_pause: dict[str, int],
++    expected: tuple[int, str],
++) -> None:
++    plan = _parenthetical_plan(entry_pause=intent)
++    profile = _profile(pauses={"parenthetical": 180, **extra_pause})
++
++    flow = _group(plan, profile)
++
++    assert [
++        (item.duration_ms, item.reason)
++        for item in flow
++        if isinstance(item, PauseItem) and item.reason != "sentence"
++    ] == [expected, (180, "parenthetical")]
++
++
++def test_parenthetical_policy_uses_boundaries_not_surface_punctuation() -> None:
++    plan = FlowPlan(
++        language="en-US",
++        flow=(
++            FlowUnit(
++                (FlowSegment("The value (x) is fixed.", "en-US", boundary_after=("sentence",)),)
++            ),
++        ),
++    )
++    profile = _profile(pauses={"parenthetical": 180, "sentence": 500})
++
++    flow = _group(plan, profile)
++
++    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
++        "The value (x) is fixed."
++    ]
++    assert [item.reason for item in flow if isinstance(item, PauseItem)] == ["sentence"]
++
++
++def test_nested_parenthetical_edges_emit_one_pause_per_adjacency() -> None:
++    plan = FlowPlan(
++        language="en-US",
++        flow=(
++            FlowUnit(
++                (
++                    FlowSegment("outer ", "en-US", boundary_after=("parenthetical",)),
++                    FlowSegment(
++                        "(inside ",
++                        "en-US",
++                        boundary_before=("parenthetical",),
++                        boundary_after=("parenthetical",),
++                    ),
++                    FlowSegment(
++                        "(nested)",
++                        "en-US",
++                        boundary_before=("parenthetical",),
++                        boundary_after=("parenthetical",),
++                    ),
++                    FlowSegment(
++                        " again)",
++                        "en-US",
++                        boundary_before=("parenthetical",),
++                        boundary_after=("parenthetical",),
++                    ),
++                    FlowSegment(
++                        " end.",
++                        "en-US",
++                        boundary_before=("parenthetical",),
++                        boundary_after=("sentence",),
++                    ),
++                )
++            ),
++        ),
++    )
++    profile = _profile(pauses={"parenthetical": 180, "sentence": 500})
++
++    flow = _group(plan, profile)
++
++    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
++        "outer ",
++        "(inside ",
++        "(nested)",
++        " again)",
++        " end.",
++    ]
++    assert [(item.duration_ms, item.reason) for item in flow if isinstance(item, PauseItem)] == [
++        (180, "parenthetical"),
++        (180, "parenthetical"),
++        (180, "parenthetical"),
++        (180, "parenthetical"),
++        (500, "sentence"),
++    ]
++
++
+ def test_clause_and_paragraph_grouping_follow_topology_not_punctuation() -> None:
+     plan = FlowPlan(
+         language="en-US",
+diff --git a/utterplan/renderplan_grouping.py b/utterplan/renderplan_grouping.py
+index 3d468c4..2ff6f76 100644
+--- a/utterplan/renderplan_grouping.py
++++ b/utterplan/renderplan_grouping.py
+@@ -3,7 +3,7 @@
+ from __future__ import annotations
+
+ import re
+-from collections.abc import Sequence
++from collections.abc import Iterable, Sequence
+ from dataclasses import replace
+ from typing import Any, TypeAlias
+
+@@ -22,7 +22,7 @@ from .renderplan_projection import RenderPlanProjectionError, SourceSegmentIndex
+ FlowItem: TypeAlias = AudioItem | PauseItem | SpeechItem
+
+ _TIMED_PAUSE = re.compile(r"^(0|[1-9][0-9]*)ms$")
+-_BOUNDARY_PRIORITY = {"clause": 1, "sentence": 2, "paragraph": 3, "voice_change": 4}
++_STRUCTURAL_BOUNDARY_PRIORITY = {"clause": 1, "sentence": 2, "paragraph": 3, "voice_change": 4}
+ _AUTHORED_PAUSES = frozenset({"timed", "x-weak", "weak", "medium", "strong", "x-strong"})
+
+
+@@ -88,7 +88,8 @@ def group_initial_plan(index: SourceSegmentIndex, profile: RenderProfile) -> tup
+         else:
+             left_ref = refs[position - 1]
+             left = left_ref.segment
+-            boundary = _boundary_kind(left, segment)
++            edge_kinds = _boundary_kinds(left, segment)
++            boundary = _structural_boundary_kind(edge_kinds)
+             left_pause = _pause_intent(left.pause_after, left_ref.locator)
+             right_pause = _pause_intent(segment.pause_before, ref.locator)
+             media_change = (left.directives.audio is None) != (audio is None)
+@@ -108,29 +109,44 @@ def group_initial_plan(index: SourceSegmentIndex, profile: RenderProfile) -> tup
+                 else None
+             )
+             authored_break = _has_timed_or_named(left_pause) or _has_timed_or_named(right_pause)
+-            should_close = policy_split or hard_reason is not None or authored_break
++            authored_none_only = not authored_break and any(
++                intent is not None and intent.type == "none" for intent in (left_pause, right_pause)
++            )
++            parenthetical_policy_break = (
++                "parenthetical" in edge_kinds
++                and _parenthetical_pause_enabled(profile)
++                and not authored_none_only
++            )
++            should_close = (
++                policy_split
++                or hard_reason is not None
++                or authored_break
++                or parenthetical_policy_break
++            )
+             if should_close:
+-                actual_end = (
+-                    "voice_change" if voice_change else boundary if policy_split else "none"
+-                )
++                if voice_change:
++                    semantic_boundary = "voice_change"
++                elif policy_split:
++                    semantic_boundary = boundary
++                elif parenthetical_policy_break:
++                    semantic_boundary = "parenthetical"
++                else:
++                    semantic_boundary = None
+                 if group_source:
+                     close_group(
+                         planning_level="hard" if hard_reason else profile.planning.split,
+                         split_reason=hard_reason or "policy",
+-                        semantic_end=actual_end,
++                        semantic_end=semantic_boundary or "none",
+                     )
+                 pause = _resolve_pause(
+                     left_pause,
+                     right_pause,
+-                    semantic_end=("voice_change" if voice_change else boundary)
+-                    if policy_split or voice_change
+-                    else None,
++                    semantic_end=semantic_boundary,
+                     profile=profile,
+                     capacity_cut=False,
+                 )
+                 if pause is not None:
+                     flow.append(pause)
+-
+         if audio is not None:
+             if group_source:
+                 close_group(planning_level="hard", split_reason="media", semantic_end=boundary)
+@@ -210,19 +226,30 @@ def _effective_state(
+     return role_name, role.language, segment.language, role
+
+
+-def _boundary_kind(left: FlowSegment, right: FlowSegment) -> str:
+-    kinds = set(left.boundary_after).union(right.boundary_before)
+-    return max(kinds, key=lambda kind: _BOUNDARY_PRIORITY.get(kind, 0), default="none")
++def _boundary_kinds(left: FlowSegment, right: FlowSegment) -> frozenset[str]:
++    return frozenset(left.boundary_after).union(right.boundary_before)
+
+
+-def _terminal_boundary(segment: FlowSegment) -> str:
++def _structural_boundary_kind(kinds: Iterable[str]) -> str:
+     return max(
+-        segment.boundary_after,
+-        key=lambda kind: _BOUNDARY_PRIORITY.get(kind, 0),
++        (kind for kind in kinds if kind in _STRUCTURAL_BOUNDARY_PRIORITY),
++        key=_STRUCTURAL_BOUNDARY_PRIORITY.__getitem__,
+         default="none",
+     )
+
+
++def _boundary_kind(left: FlowSegment, right: FlowSegment) -> str:
++    return _structural_boundary_kind(_boundary_kinds(left, right))
++
++
++def _terminal_boundary(segment: FlowSegment) -> str:
++    return _structural_boundary_kind(segment.boundary_after)
++
++
++def _parenthetical_pause_enabled(profile: RenderProfile) -> bool:
++    return profile.pauses.mode == "manual" and "parenthetical" in profile.pauses.durations_ms
++
++
+ def _policy_splits(policy: str, boundary: str) -> bool:
+     if boundary == "voice_change":
+         return True
+@@ -692,7 +719,7 @@ def _child_speech(
+         planning_level=planning_level,
+         split_reason=split_reason,
+         semantic_end=semantic_end
+-        if semantic_end in {"clause", "sentence", "paragraph", "voice_change"}
++        if semantic_end in {"clause", "sentence", "paragraph", "parenthetical", "voice_change"}
+         else "none",
+         tokens=index.tokens_for(source, required_fields=role_profile.requirements.token_fields),
+         controls=index.controls_for(source),

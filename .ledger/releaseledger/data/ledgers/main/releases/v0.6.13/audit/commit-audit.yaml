@@ -1,0 +1,79 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 2
+release_version: v0.6.13
+git_base_ref: v0.6.12
+git_base_sha: 90bcab31c30e5cf5b66c015770f9a60aa94158ff
+git_head_ref: HEAD
+git_head_sha: 874da577a7afbbaa58ba15a9f1a70096797ad4b0
+git_range: 90bcab31c30e5cf5b66c015770f9a60aa94158ff..874da577a7afbbaa58ba15a9f1a70096797ad4b0
+commit_count: 2
+rows:
+  - sha: 88dc8392c136329d9ee147a1d2b5c267e5e120e7
+    source_ref: git:88dc8392c136329d9ee147a1d2b5c267e5e120e7
+    short_sha: 88dc839
+    changed_paths:
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.12/entries/entry-0002.md
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.12/release.md
+      - docs/architecture.md
+      - docs/changelog.md
+      - docs/consumer-guide.md
+      - docs/format.md
+      - pyproject.toml
+      - tests/test_renderplan_dependency_contract.py
+      - tests/test_renderplan_replan.py
+      - tests/test_renderplan_v7_contract.py
+      - utterplan/renderplan_grouping.py
+    stats:
+      files_changed: 12
+      insertions: 394
+      deletions: 28
+    inspected: true
+    inspected_paths:
+      - docs/architecture.md
+      - docs/changelog.md
+      - docs/consumer-guide.md
+      - docs/format.md
+      - pyproject.toml
+      - tests/test_renderplan_dependency_contract.py
+      - tests/test_renderplan_replan.py
+      - tests/test_renderplan_v7_contract.py
+      - utterplan/renderplan_grouping.py
+    observed_behavior:
+      RenderPlan projection now supports an explicit manual parenthetical
+      pause policy that splits at stored parenthetical boundaries, preserves source
+      text and spans, and honors authored pause precedence; the FlowPlan remains unchanged.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: parenthesis pause introduced"
+    notes:
+      Reviewed implementation, documentation, dependency contract, and regression
+      coverage; the existing accepted release entry is being moved from v0.6.12 to v0.6.13.
+  - sha: 874da577a7afbbaa58ba15a9f1a70096797ad4b0
+    source_ref: git:874da577a7afbbaa58ba15a9f1a70096797ad4b0
+    short_sha: 874da57
+    changed_paths:
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+    stats:
+      files_changed: 2
+      insertions: 3
+      deletions: 3
+    inspected: true
+    inspected_paths:
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+    observed_behavior:
+      CI-only checks and test installation now pin RenderPlan 0.2.1
+      instead of 0.2.0.
+    public_impact: internal
+    decision: internal
+    stale: false
+    evidence_subject: "chore: ci"
+    notes:
+      No user-facing behavior or public API change; retained as internal audit
+      coverage.

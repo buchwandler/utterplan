@@ -1,0 +1,39 @@
+ .github/workflows/python-publish.yml | 2 +-
+ .github/workflows/tests.yml          | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/.github/workflows/python-publish.yml b/.github/workflows/python-publish.yml
+index 13e35c9..05cb856 100644
+--- a/.github/workflows/python-publish.yml
++++ b/.github/workflows/python-publish.yml
+@@ -82,7 +82,7 @@ jobs:
+               assert has_range(requirements, "phrasplit", "0.3.9", "0.4")
+               assert has_range(requirements, "ssmd", "0.9.3", "0.10")
+               assert has_range(requirements, "ttsready", "0.2.3", "0.3")
+-              assert has_range(requirements, "renderplan", "0.2.0", "0.3")
++              assert has_range(requirements, "renderplan", "0.2.1", "0.3")
+               names = set(archive.namelist())
+               expected = {
+                   "utterplan/py.typed",
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index ca53380..d75ea66 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -51,7 +51,7 @@ jobs:
+             "ssmd==0.9.3" \
+             "ttsready==0.2.3" \
+             "spokenform==0.4.5" \
+-            "renderplan==0.2.0" \
++            "renderplan==0.2.1" \
+             "typing_extensions==4.0.0" \
+             "tomlkit==0.13.0"
+           python -m pip install --no-deps -e .
+@@ -120,7 +120,7 @@ jobs:
+               "phrasplit": ("0.3.9", "0.4"),
+               "ssmd": ("0.9.3", "0.10"),
+               "ttsready": ("0.2.3", "0.3"),
+-              "renderplan": ("0.2.0", "0.3"),
++              "renderplan": ("0.2.1", "0.3"),
+           }
+
+           def check_metadata(contents):

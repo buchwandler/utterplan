@@ -1,0 +1,49 @@
+{
+  "candidate_count": 2,
+  "candidates": [
+    {
+      "additions": 394,
+      "deletions": 28,
+      "patch_file": "88dc839.patch",
+      "patch_sha256": "b5dd2b0a522ac142cfd2f6a2f9c1a0b8c1e9c78a9ae4bd5c510552a7116c4bed",
+      "paths": [
+        ".ledger/releaseledger/data/ledgers/main/events/events.jsonl",
+        ".ledger/releaseledger/data/ledgers/main/releases/v0.6.12/entries/entry-0002.md",
+        ".ledger/releaseledger/data/ledgers/main/releases/v0.6.12/release.md",
+        "docs/architecture.md",
+        "docs/changelog.md",
+        "docs/consumer-guide.md",
+        "docs/format.md",
+        "pyproject.toml",
+        "tests/test_renderplan_dependency_contract.py",
+        "tests/test_renderplan_replan.py",
+        "tests/test_renderplan_v7_contract.py",
+        "utterplan/renderplan_grouping.py"
+      ],
+      "sha": "88dc8392c136329d9ee147a1d2b5c267e5e120e7",
+      "short_sha": "88dc839",
+      "source_ref": "git:88dc8392c136329d9ee147a1d2b5c267e5e120e7"
+    },
+    {
+      "additions": 3,
+      "deletions": 3,
+      "patch_file": "874da57.patch",
+      "patch_sha256": "7ec79667bada61d586c2f903ecc1991147c4bf09bba4496d26137c33f89f8d40",
+      "paths": [
+        ".github/workflows/python-publish.yml",
+        ".github/workflows/tests.yml"
+      ],
+      "sha": "874da577a7afbbaa58ba15a9f1a70096797ad4b0",
+      "short_sha": "874da57",
+      "source_ref": "git:874da577a7afbbaa58ba15a9f1a70096797ad4b0"
+    }
+  ],
+  "git_base_ref": "90bcab31c30e5cf5b66c015770f9a60aa94158ff",
+  "git_base_sha": "90bcab31c30e5cf5b66c015770f9a60aa94158ff",
+  "git_head_ref": "874da577a7afbbaa58ba15a9f1a70096797ad4b0",
+  "git_head_sha": "874da577a7afbbaa58ba15a9f1a70096797ad4b0",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "v0.6.13",
+  "schema_version": 1
+}

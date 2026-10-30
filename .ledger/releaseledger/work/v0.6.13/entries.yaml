@@ -1,0 +1,49 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.6.13
+git_base_ref: 90bcab31c30e5cf5b66c015770f9a60aa94158ff
+git_base_sha: 90bcab31c30e5cf5b66c015770f9a60aa94158ff
+git_head_ref: 874da577a7afbbaa58ba15a9f1a70096797ad4b0
+git_head_sha: 874da577a7afbbaa58ba15a9f1a70096797ad4b0
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: ""
+    status: draft
+    source_refs:
+      - git:88dc8392c136329d9ee147a1d2b5c267e5e120e7
+    paths:
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.12/entries/entry-0002.md
+      - .ledger/releaseledger/data/ledgers/main/releases/v0.6.12/release.md
+      - docs/architecture.md
+      - docs/changelog.md
+      - docs/consumer-guide.md
+      - docs/format.md
+      - pyproject.toml
+      - tests/test_renderplan_dependency_contract.py
+      - tests/test_renderplan_replan.py
+      - tests/test_renderplan_v7_contract.py
+      - utterplan/renderplan_grouping.py
+    sources:
+      - git:88dc8392c136329d9ee147a1d2b5c267e5e120e7
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: internal
+    summary: ""
+    status: draft
+    source_refs:
+      - git:874da577a7afbbaa58ba15a9f1a70096797ad4b0
+    paths:
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+    sources:
+      - git:874da577a7afbbaa58ba15a9f1a70096797ad4b0
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
