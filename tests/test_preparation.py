@@ -84,9 +84,10 @@ def test_multilingual_preparation_composes_run_offsets():
         'Hello [Bonjour.]{lang="fr"}'
     )
     assert plan.texts.spoken == "Hello Bonjour."
+    # The authored separator precedes the inline language span and remains in the default run.
     assert [(run.language, run.spoken_start, run.spoken_end) for run in plan.languages] == [
-        ("en-us", 0, 5),
-        ("fr", 5, 14),
+        ("en-us", 0, 6),
+        ("fr", 6, 14),
     ]
     assert plan.preparation.languages == ("en-us", "fr")
     payload = plan.to_dict()

@@ -38,7 +38,8 @@ def test_canonical_ssmd_09_compiles_to_deterministic_v7_flow() -> None:
 
     assert plan == repeated
     assert plan.schema_version == 7
-    assert plan.plan_id == "sha256:e69c94cb70f67c51d94428d5a00563d2eed9cba03d1687366eaabe654df03df1"
+    # Preserved authored whitespace changes the executable plan identity without a schema bump.
+    assert plan.plan_id == "sha256:66ad1b833f65080fe42f2cd90fbf1d32247c98f38448c0d14a6aca04719df6ff"
     assert plan.document.format == "ssmd"
     assert plan.document.ssmd_version == "0.9"
     assert plan.document.title == "Renderer-neutral SSMD 0.9 contract"
@@ -46,8 +47,8 @@ def test_canonical_ssmd_09_compiles_to_deterministic_v7_flow() -> None:
     assert len(plan.flow) == 7
 
     segments = [segment for unit in plan.flow for segment in unit.segments]
-    welcome = next(segment for segment in segments if segment.text == "Welcome")
-    important = next(segment for segment in segments if segment.text == "Important")
+    welcome = next(segment for segment in segments if segment.text == "Welcome ")
+    important = next(segment for segment in segments if segment.text == "Important ")
     inner = next(segment for segment in segments if segment.text.startswith("Inner scope"))
     assert welcome.language == "sr-Latn"
     assert welcome.directives.voice is not None

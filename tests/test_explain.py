@@ -97,7 +97,7 @@ def test_multilingual_segments_remain_in_render_order() -> None:
     labels = [output.index(label) for label in ("[en-us]", "[fr]")]
     assert labels[0] < labels[1]
     assert output.count("[en-us]") == 1
-    assert '[fr] " Bonjour."' in output
+    assert '[fr] "Bonjour."' in output
 
 
 def test_markers_are_shown_in_their_owning_flow_unit() -> None:

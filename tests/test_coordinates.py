@@ -19,7 +19,7 @@ def test_marker_after_replacement_maps_to_spoken_position():
     plan = UtterancePlanner(
         PlannerConfig(language="en-us", document_format="ssmd", text_preparation="spokenform")
     ).plan("Dr. @mark Smith.")
-    assert plan.texts.spoken == "Doctor Smith."
+    assert plan.texts.spoken == "Doctor  Smith."
     assert plan.markers[0].spoken_position == len("Doctor")
 
 

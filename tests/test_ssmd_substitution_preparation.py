@@ -431,3 +431,102 @@ def test_segmentation_diagnostic_offsets_slice_raw_ssmd_source(
     assert diagnostic.source_start is not None
     assert diagnostic.source_end is not None
     assert source[diagnostic.source_start : diagnostic.source_end] == "Tar*get"
+
+
+def test_reported_decimal_substitution_preserves_separator_through_flow_projection() -> None:
+    source = (
+        'Three hesitated for [.02]{sub="point zero two"} seconds while it parsed what I’d said.'
+    )
+    plan = _planner().plan(source)
+
+    expected_structural = "Three hesitated for .02 seconds while it parsed what I’d said."
+    expected_spoken = "Three hesitated for point zero two seconds while it parsed what I’d said."
+
+    assert plan.texts.structural == expected_structural
+    assert plan.texts.spoken == expected_spoken
+    assert "forpoint" not in plan.texts.spoken
+
+    replacement = plan.preparation.replacements[0]
+    assert replacement["source"] == ".02"
+    assert replacement["replacement"] == "point zero two"
+    assert (
+        plan.texts.spoken[replacement["output_start"] : replacement["output_end"]]
+        == "point zero two"
+    )
+
+    flow = project_compiler_plan(plan)
+    speech_text = "".join(segment.text for unit in flow.flow for segment in unit.segments)
+    token_surfaces = [
+        token.surface(segment.text)
+        for unit in flow.flow
+        for segment in unit.segments
+        for token in segment.tokens
+    ]
+
+    assert speech_text == expected_spoken
+    assert "forpoint" not in speech_text
+    assert "forpoint" not in token_surfaces
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_structural", "expected_spoken"),
+    [
+        (
+            'Wait [.2]{sub="point two"} seconds.',
+            "Wait .2 seconds.",
+            "Wait point two seconds.",
+        ),
+        (
+            'Wait [.02]{sub="point zero two"} seconds.',
+            "Wait .02 seconds.",
+            "Wait point zero two seconds.",
+        ),
+        (
+            'Wait [.125]{sub="point one two five"} seconds.',
+            "Wait .125 seconds.",
+            "Wait point one two five seconds.",
+        ),
+    ],
+)
+def test_leading_decimal_substitution_preserves_authored_separator(
+    source: str,
+    expected_structural: str,
+    expected_spoken: str,
+) -> None:
+    plan = _planner().plan(source)
+
+    assert plan.texts.structural == expected_structural
+    assert plan.texts.spoken == expected_spoken
+
+    replacement = plan.preparation.replacements[0]
+    assert (
+        expected_spoken[replacement["output_start"] : replacement["output_end"]]
+        == replacement["replacement"]
+    )
+
+
+def test_decimal_substitution_does_not_invent_missing_separator() -> None:
+    plan = _planner().plan('Wait[.02]{sub="point zero two"} seconds.')
+
+    assert plan.texts.structural == "Wait.02 seconds."
+    assert plan.texts.spoken == "Waitpoint zero two seconds."
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            '*Wait [.02]{sub="point zero two"} seconds.*',
+            "Wait point zero two seconds.",
+        ),
+        (
+            'Wait ([.02]{sub="point zero two"}) seconds.',
+            "Wait (point zero two) seconds.",
+        ),
+    ],
+)
+def test_decimal_substitution_preserves_separator_in_nested_inline_markup(
+    source: str,
+    expected: str,
+) -> None:
+    assert _planner().plan(source).texts.spoken == expected

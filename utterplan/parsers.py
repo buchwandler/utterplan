@@ -49,6 +49,13 @@ def effective_sequence_fallback_mode(
     )
 
 
+def _before_horizontal_whitespace(text: str, position: int) -> int:
+    """Anchor structural controls before a preserved horizontal separator."""
+    while position > 0 and text[position - 1] in " \\t":
+        position -= 1
+    return position
+
+
 class PlainDocumentParser:
     def parse(self, text: str, config: PlannerConfig) -> ParsedDocument:
         boundaries = tuple(
@@ -79,8 +86,12 @@ class SSMDDocumentParser:
             raise PlanningError("SSMD input requires the ssmd package") from exc
 
         try:
+            # Preserve authored clean-text whitespace until UtterPlan has applied semantic
+            # annotations such as `sub`; dependency normalization can otherwise erase a
+            # separator before a punctuation-leading replacement target.
             parsed = ssmd.parse_structure(
                 text,
+                normalize=False,
                 default_lang=None,
                 parse_yaml_header=config.ssmd.parse_yaml_header,
                 resolve_defaults=False,
@@ -190,6 +201,16 @@ class SSMDDocumentParser:
             )
             for i, (position, kind, attrs, source_start, source_end) in enumerate(recovered_audio)
         )
+        annotations = tuple(
+            replace(
+                item,
+                structural_start=_before_horizontal_whitespace(structural, item.structural_start),
+                structural_end=_before_horizontal_whitespace(structural, item.structural_end),
+            )
+            if item.kind == "audio" and item.structural_start == item.structural_end
+            else item
+            for item in annotations
+        )
         parsed_source = ParsedDocument(
             source_text=text,
             structural_text=structural,
@@ -204,6 +225,8 @@ class SSMDDocumentParser:
             kind = str(event.kind)
             position = int(getattr(event, "pos", getattr(event, "position", 0)))
             event_anchor = str(getattr(event, "anchor", attrs.get("anchor", "after")))
+            if kind in {"break", "mark"}:
+                position = _before_horizontal_whitespace(structural, position)
             if kind == "mark":
                 name = attrs.get("name") or attrs.get("marker") or "marker"
                 markers.append(Marker(f"marker-{len(markers):06d}", str(name), position, attrs))
@@ -665,6 +688,7 @@ def _recover_zero_width_audio_annotations(
     pieces.append(text[cursor:])
     reparsed = ssmd.parse_structure(
         "".join(pieces),
+        normalize=False,
         default_lang=None,
         parse_yaml_header=config.ssmd.parse_yaml_header,
         resolve_defaults=False,

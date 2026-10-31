@@ -174,7 +174,7 @@ def test_prepared_contract_uses_spoken_coordinates_and_public_token_fields() -> 
     ).plan(source)
     assert plan.texts.spoken == "Doctor Smith has five kilograms."
     annotation = plan.annotations[0]
-    assert annotation.spoken_start == 12
+    assert annotation.spoken_start == 13
     assert annotation.spoken_end == 16
     assert annotation.source_start == source.index("[has")
     assert annotation.source_end == source.index("}") + 1

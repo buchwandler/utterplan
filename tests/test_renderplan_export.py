@@ -292,6 +292,25 @@ def test_repository_ssmd_fixture_compiles_and_projects() -> None:
     assert any(control.name == "prosody" for control in projected.speech[0].controls)
 
 
+def test_reported_decimal_substitution_survives_renderplan_projection() -> None:
+    source = (
+        'Three hesitated for [.02]{sub="point zero two"} seconds while it parsed what I’d said.'
+    )
+    compiled = compile_document(
+        source,
+        input_format="ssmd",
+        config=PlannerConfig(language="en-US", linguistics=LinguisticsConfig(use_spacy=False)),
+    )
+
+    projected = build_render_plan(compiled.plan, _profile())
+    speech_text = "".join(item.text for item in projected.speech)
+
+    assert speech_text == (
+        "Three hesitated for point zero two seconds while it parsed what I’d said."
+    )
+    assert "forpoint" not in speech_text
+
+
 def test_render_plan_cli_requires_previous_and_preflight_as_a_pair(tmp_path: Path, capsys) -> None:
     source_path = tmp_path / "chapter.utterplan.toml"
     profile_path = tmp_path / "voice.renderprofile.toml"

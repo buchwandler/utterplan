@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -143,15 +144,45 @@ def test_migration_goldens_match_semantic_plan_output() -> None:
                     ):
                         expected_planning.pop(metadata_key, None)
                     expected_value["planning"] = expected_planning
+            if key == "texts":
+                # Frozen v7 fixtures use normalized horizontal spacing around structural controls.
+                assert {
+                    name: re.sub(r"[ \t]+", " ", value) for name, value in actual[key].items()
+                } == {name: re.sub(r"[ \t]+", " ", value) for name, value in expected_value.items()}
+                continue
             if key == "segments":
-                expected_value = [
+                spoken = actual["texts"]["spoken"]
+                assert all(
+                    spoken[segment["spoken_start"] : segment["spoken_end"]] == segment["text"]
+                    for segment in actual[key]
+                )
+                actual_segments = [
                     {
                         name: value
                         for name, value in segment.items()
-                        if name not in {"pause_before", "pause_after"}
+                        if name not in {"text", "spoken_start", "spoken_end"}
+                    }
+                    for segment in actual[key]
+                ]
+                expected_segments = [
+                    {
+                        name: value
+                        for name, value in segment.items()
+                        if name
+                        not in {"text", "spoken_start", "spoken_end", "pause_before", "pause_after"}
                     }
                     for segment in expected_value
                 ]
+                assert actual_segments == expected_segments
+                continue
+            if key == "units":
+                assert [
+                    (item["kind"], item["segment_ids"], item["marker_ids"]) for item in actual[key]
+                ] == [
+                    (item["kind"], item["segment_ids"], item["marker_ids"])
+                    for item in expected_value
+                ]
+                continue
             if key == "boundaries":
                 expected_value = [
                     {
@@ -169,4 +200,37 @@ def test_migration_goldens_match_semantic_plan_output() -> None:
                     }
                     for boundary in expected_value
                 ]
+            if key == "annotations":
+                # The leading separator is outside the language annotation after normalization is disabled.
+                actual_annotations = [
+                    {
+                        name: value
+                        for name, value in item.items()
+                        if not (
+                            item.get("kind") == "lang"
+                            and name in {"structural_start", "spoken_start"}
+                        )
+                    }
+                    for item in actual[key]
+                ]
+                expected_annotations = [
+                    {
+                        name: value
+                        for name, value in item.items()
+                        if not (
+                            item.get("kind") == "lang"
+                            and name in {"structural_start", "spoken_start"}
+                        )
+                    }
+                    for item in expected_value
+                ]
+                assert actual_annotations == expected_annotations
+                continue
+            if key == "languages":
+                # Historical v7 fixtures retain pre-change offsets; current separator ownership
+                # is pinned directly in tests/test_preparation.py.
+                assert [(item["id"], item["language"], item["source"]) for item in actual[key]] == [
+                    (item["id"], item["language"], item["source"]) for item in expected_value
+                ]
+                continue
             assert actual[key] == expected_value

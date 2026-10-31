@@ -23,7 +23,8 @@ def _installed_ssmd_version() -> tuple[int, int, int]:
 def test_canonical_scene_break_is_structural_not_renderer_text() -> None:
     plan = _planner().plan("Before.\n\n...p\n\nAfter.")
 
-    assert plan.texts.structural == "Before.\n\nAfter."
+    # The unnormalized structural parse retains both authored two-newline gaps around the break.
+    assert plan.texts.structural == "Before.\n\n\n\nAfter."
     assert all("...p" not in segment.text for segment in plan.segments)
 
 
@@ -384,3 +385,40 @@ def test_sequence_fallback_mode_roundtrips_and_is_part_of_plan_identity() -> Non
         document_metadata={**plan.document_metadata, "sequence_fallback_mode": "spell"},
     ).with_identity()
     assert changed_policy.plan_id != plan.plan_id
+
+
+def test_ssmd_parser_disables_dependency_whitespace_normalization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ssmd
+
+    from utterplan.parsers import SSMDDocumentParser
+
+    seen: dict[str, object] = {}
+
+    def fake_parse_structure(text: str, **kwargs: object) -> SimpleNamespace:
+        seen.update(kwargs)
+        return SimpleNamespace(
+            clean_text=text,
+            annotations=[],
+            events=[],
+            header={},
+            warnings=[],
+            diagnostics=[],
+            text_spans=[
+                SimpleNamespace(
+                    char_start=0,
+                    char_end=len(text),
+                    source_start=0,
+                    source_end=len(text),
+                )
+            ],
+        )
+
+    monkeypatch.setattr(ssmd, "parse_structure", fake_parse_structure)
+
+    parsed = SSMDDocumentParser().parse("Alpha beta.", _planner().config)
+
+    assert parsed.structural_text == "Alpha beta."
+    assert seen["normalize"] is False
+    assert seen["dialect"] == "0.9"

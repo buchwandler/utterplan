@@ -91,7 +91,7 @@ def test_fresh_compile_localizes_a_token_cut_by_ssmd_semantics() -> None:
 
     segments = _segments(result.plan)
     water_segment = next(segment for segment in segments if segment.text == "H2O")
-    assert any(segment.text == ", and" for segment in segments)
+    assert any(segment.text == ", and " for segment in segments)
     assert any(
         token.start == 0 and token.end == 3 and water_segment.text[token.start : token.end] == "H2O"
         for token in water_segment.tokens
