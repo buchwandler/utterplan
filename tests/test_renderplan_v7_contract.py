@@ -165,6 +165,120 @@ def test_sparse_optional_morphology_is_preserved_but_required_morph_fails() -> N
     assert error.value.token_index == 1
 
 
+@pytest.mark.parametrize("field_name", ("lemma", "morph"))
+@pytest.mark.parametrize("blank", (None, "", " ", "\t", "\n", "\u00a0", "\u2007", "\u202f"))
+def test_optional_blank_sparse_token_values_are_omitted(field_name: str, blank: str | None) -> None:
+    blank_value = {field_name: blank}
+    plan = FlowPlan(
+        language="en-US",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment(
+                        "x y z",
+                        "en-US",
+                        tokens=(
+                            TokenView(0, 1, lemma="x", morph="Number=Sing"),
+                            TokenView(2, 3, **blank_value),
+                            TokenView(4, 5, lemma="z", morph="Tense=Past"),
+                        ),
+                    ),
+                )
+            ),
+        ),
+    )
+    bundle = build_source_index(plan).tokens_for((SourceSpan("f000000.s000", 0, 5),))
+
+    assert bundle is not None
+    assert getattr(bundle, field_name) == (
+        (0, "x" if field_name == "lemma" else "Number=Sing"),
+        (2, "z" if field_name == "lemma" else "Tense=Past"),
+    )
+
+
+@pytest.mark.parametrize("field_name", ("lemma", "morph"))
+def test_required_blank_sparse_token_value_fails_with_source_location(field_name: str) -> None:
+    plan = FlowPlan(
+        language="en-US",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment(
+                        "x y z",
+                        "en-US",
+                        tokens=(
+                            TokenView(0, 1, **{field_name: "x"}),
+                            TokenView(2, 3, **{field_name: "\u00a0"}),
+                            TokenView(4, 5, **{field_name: "z"}),
+                        ),
+                    ),
+                )
+            ),
+        ),
+    )
+    index = build_source_index(plan)
+
+    with pytest.raises(
+        RenderPlanProjectionError, match=f"required token field '{field_name}' is unavailable"
+    ) as error:
+        index.tokens_for((SourceSpan("f000000.s000", 0, 5),), required_fields=(field_name,))
+
+    assert error.value.code == "renderplan.token.required"
+    assert error.value.locator == "f000000.s000"
+    assert error.value.token_index == 1
+
+
+@pytest.mark.parametrize(
+    "lemma", ("be", "I", "T", "armoredHostile1", "ß", " leading ", "trailing ")
+)
+def test_nonblank_sparse_lemma_is_preserved_exactly(lemma: str) -> None:
+    plan = FlowPlan(
+        language="en-US",
+        flow=(FlowUnit((FlowSegment("x", "en-US", tokens=(TokenView(0, 1, lemma=lemma),)),)),),
+    )
+
+    bundle = build_source_index(plan).tokens_for((SourceSpan("f000000.s000", 0, 1),))
+
+    assert bundle is not None
+    assert bundle.lemma == ((0, lemma),)
+
+
+def test_partial_dense_pos_and_tag_columns_are_omitted_without_padding() -> None:
+    plan = FlowPlan(
+        language="en-US",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment(
+                        "one two",
+                        "en-US",
+                        tokens=(
+                            TokenView(0, 3, pos="DET", tag="DT"),
+                            TokenView(4, 7, pos=None, tag=" \u00a0"),
+                        ),
+                    ),
+                )
+            ),
+        ),
+    )
+    index = build_source_index(plan)
+    source = (SourceSpan("f000000.s000", 0, 7),)
+
+    bundle = index.tokens_for(source)
+
+    assert bundle is not None
+    assert bundle.pos == ()
+    assert bundle.tag == ()
+    for field_name in ("pos", "tag"):
+        with pytest.raises(
+            RenderPlanProjectionError,
+            match=f"required token field '{field_name}' is unavailable",
+        ) as error:
+            index.tokens_for(source, required_fields=(field_name,))
+        assert error.value.code == "renderplan.token.required"
+        assert error.value.token_index == 1
+
+
 def test_partial_token_slice_and_missing_required_field_fail_with_locator() -> None:
     index = build_source_index(_projection_plan())
 

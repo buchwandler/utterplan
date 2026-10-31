@@ -168,6 +168,13 @@ class SourceSegmentIndex:
                         token_index=token_index,
                     )
 
+        pos_complete = all(
+            token.pos is not None and bool(token.pos.strip()) for token, _, _ in projected
+        )
+        tag_complete = all(
+            token.tag is not None and bool(token.tag.strip()) for token, _, _ in projected
+        )
+
         spans: list[tuple[int, int]] = []
         pos: list[str] = []
         tag: list[str] = []
@@ -176,34 +183,24 @@ class SourceSegmentIndex:
         request_offset = 0
         token_index = 0
         for ref, start, end in slices:
-            for local_index, token in enumerate(ref.segment.tokens):
+            for token in ref.segment.tokens:
                 if token.end <= start or token.start >= end:
                     continue
                 spans.append(
                     (request_offset + token.start - start, request_offset + token.end - start)
                 )
-                if any(item.pos is not None for item, _, _ in projected):
-                    pos.append(token.pos or "")
-                if any(item.tag is not None for item, _, _ in projected):
-                    tag.append(token.tag or "")
-                if token.lemma is not None:
-                    if not token.lemma:
-                        raise RenderPlanProjectionError(
-                            "empty lemma cannot be represented by RenderPlan",
-                            code="renderplan.token.value",
-                            locator=ref.locator,
-                            token_index=local_index,
-                        )
-                    lemma.append((token_index, token.lemma))
-                if token.morph is not None:
-                    if not token.morph:
-                        raise RenderPlanProjectionError(
-                            "empty morph cannot be represented by RenderPlan",
-                            code="renderplan.token.value",
-                            locator=ref.locator,
-                            token_index=local_index,
-                        )
-                    morph.append((token_index, token.morph))
+                if pos_complete:
+                    assert token.pos is not None
+                    pos.append(token.pos)
+                if tag_complete:
+                    assert token.tag is not None
+                    tag.append(token.tag)
+                lemma_value = token.lemma
+                if lemma_value is not None and lemma_value.strip():
+                    lemma.append((token_index, lemma_value))
+                morph_value = token.morph
+                if morph_value is not None and morph_value.strip():
+                    morph.append((token_index, morph_value))
                 token_index += 1
             request_offset += end - start
 

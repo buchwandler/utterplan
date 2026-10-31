@@ -11,8 +11,10 @@ from utterplan import (
     PlannerConfig,
     UtterancePlan,
 )
+from utterplan.flow_projection import project_compiler_plan
 from utterplan.language import LanguageRun
 from utterplan.linguistics import LinguisticResourcePool, analyze_run_analyses
+from utterplan.toml_codec import dumps_toml, loads_toml, to_toml_data
 
 
 class FakeProviderDoc(list):
@@ -518,3 +520,76 @@ def test_changed_spokenform_still_analyzes_prepared_text(monkeypatch: pytest.Mon
 
     assert plan.texts.spoken == "Doctor Smith lives here."
     assert calls == [source, plan.texts.spoken]
+
+
+def test_spacy_whitespace_lemma_is_normalized_before_v7_roundtrip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    text = "that\u00a0…"
+
+    class Pipeline:
+        def __call__(self, value):
+            tokens = (
+                (0, "that", "SCONJ", "IN", "that"),
+                (4, "\u00a0", "SPACE", "_SP", "\u00a0"),
+                (5, "…", "PUNCT", "NFP", "…"),
+            )
+            return FakeProviderDoc(
+                value,
+                [
+                    SimpleNamespace(
+                        idx=start,
+                        text=surface,
+                        pos_=pos,
+                        tag_=tag,
+                        lemma_=lemma,
+                        morph="",
+                    )
+                    for start, surface, pos, tag, lemma in tokens
+                ],
+            )
+
+    monkeypatch.setitem(sys.modules, "spacy", SimpleNamespace(__version__="3.7.0"))
+    monkeypatch.setattr(
+        LinguisticResourcePool, "pipeline", lambda self, model, require=False: Pipeline()
+    )
+    compiler_plan = UtterancePlanner(
+        PlannerConfig(
+            language="en-us",
+            text_preparation="identity",
+            linguistics=LinguisticsConfig(
+                use_spacy=True, spacy_model="fake_model", require_spacy=True
+            ),
+        )
+    ).plan(text)
+    flow_plan = project_compiler_plan(compiler_plan)
+    segments = [segment for unit in flow_plan.flow for segment in unit.segments]
+    segment, space_token = next(
+        (segment, token)
+        for segment in segments
+        for token in segment.tokens
+        if token.surface(segment.text) == "\u00a0"
+    )
+
+    assert space_token.pos == "SPACE"
+    assert space_token.tag == "_SP"
+    assert space_token.lemma is None
+    space_index = segment.tokens.index(space_token)
+    wire = to_toml_data(flow_plan)
+    wire_segment = next(
+        wire_segment
+        for unit in wire["flow"]
+        for wire_segment in unit["segment"]
+        if wire_segment["text"] == segment.text
+    )
+    assert [space_index, ""] in wire_segment["token"]["lemma"]
+
+    restored = loads_toml(dumps_toml(flow_plan))
+    restored_space = next(
+        token
+        for unit in restored.flow
+        for restored_segment in unit.segments
+        for token in restored_segment.tokens
+        if token.surface(restored_segment.text) == "\u00a0"
+    )
+    assert restored_space.lemma is None

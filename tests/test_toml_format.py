@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 import tomlkit
+from renderplan import SourceSpan
 
 from utterplan import (
     DocumentInfo,
@@ -26,6 +27,7 @@ from utterplan.codecs.v4_toml import decode_v4_toml_data
 from utterplan.exceptions import PlanFormatError, PlanMigrationError, UnsupportedSchemaError
 from utterplan.hashing import FLOW_HASH_SCHEMA
 from utterplan.migrations import migrate_v4_to_v5
+from utterplan.renderplan_projection import build_source_index
 from utterplan.toml_codec import dumps_toml, from_toml_data, loads_toml, to_toml_data
 
 ROOT = Path(__file__).resolve().parent
@@ -155,6 +157,32 @@ def test_ordinary_casefold_lemma_remains_implicit_in_v7_toml() -> None:
 
     assert wire["flow"][0]["segment"][0]["token"].get("lemma", []) == []
     assert restored.flow[0].segments[0].tokens[0].lemma == "the"
+
+
+def test_legacy_whitespace_lemma_roundtrip_preserves_identity_and_projects_sparse_values() -> None:
+    text = "that\u00a0…"
+    segment = FlowSegment(
+        text,
+        "en-US",
+        tokens=(
+            TokenView(0, 4, lemma="that", pos="PRON", tag="DT"),
+            TokenView(4, 5, lemma="\u00a0", pos="SPACE", tag="_SP"),
+            TokenView(5, 6, lemma="…", pos="PUNCT", tag="NFP"),
+        ),
+    )
+    plan = FlowPlan(language="en-US", flow=(FlowUnit((segment,)),))
+
+    serialized = dumps_toml(plan)
+    restored = loads_toml(serialized)
+    restored_segment = restored.flow[0].segments[0]
+
+    assert restored.plan_id == plan.plan_id
+    assert restored.flow[0].content_hash == plan.flow[0].content_hash
+    assert restored_segment.tokens[1].lemma == "\u00a0"
+    bundle = build_source_index(restored).tokens_for((SourceSpan("f000000.s000", 0, 6),))
+
+    assert bundle is not None
+    assert bundle.lemma == ((0, "that"), (2, "…"))
 
 
 def test_freeform_document_semantics_preserve_null_through_the_toml_sentinel() -> None:

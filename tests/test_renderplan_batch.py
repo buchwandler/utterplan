@@ -13,6 +13,7 @@ from renderplan import (
     RenderPlanSetError,
     RenderProfile,
     RoleProfile,
+    SpeechItem,
     load_renderplan_set,
     renderplan_set_from_dict,
     renderplan_set_to_dict,
@@ -332,3 +333,51 @@ def test_renderplan_set_rejects_renderplan_paths_outside_variant(unsafe_path: st
 def test_renderplan_set_requires_canonical_profile_snapshot_path() -> None:
     with pytest.raises(RenderPlanSetError, match="canonical"):
         replace(_set(), snapshot="../outside.renderprofile.toml")
+
+
+def test_render_batch_omits_nbsp_lemma_and_writes_valid_renderplan(tmp_path: Path) -> None:
+    profile = _profile()
+    initial = replace(_set(profile), chapters=())
+    set_path = tmp_path / "renderplan" / "narration" / "renderplan-set.toml"
+    report_path = set_path.parent / "render-report.toml"
+    save_renderplan_set(set_path, initial)
+    request = _request(tmp_path, 16)
+    text = "that\u00a0…"
+    FlowPlan(
+        language="en-US",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment(
+                        text,
+                        "en-US",
+                        tokens=(
+                            TokenView(0, 4, lemma="that", pos="SCONJ", tag="IN"),
+                            TokenView(4, 5, lemma="\u00a0", pos="SPACE", tag="_SP"),
+                            TokenView(5, 6, lemma="…", pos="PUNCT", tag="NFP"),
+                        ),
+                        boundary_after=("sentence",),
+                    ),
+                )
+            ),
+        ),
+    ).save(request.source_plan)
+
+    outcomes = render_to_files(
+        [request],
+        profile=profile,
+        renderplan_set=initial,
+        set_path=set_path,
+        report_path=report_path,
+    )
+
+    assert outcomes[0].status == "written"
+    assert outcomes[0].stage != "projection"
+    assert request.output.is_file()
+    saved = renderplan_codec.load_plan(request.output)
+    speech = next(item for item in saved.flow if isinstance(item, SpeechItem))
+    assert speech.text == text
+    assert speech.tokens is not None
+    assert speech.tokens.span == ((0, 4), (4, 5), (5, 6))
+    assert speech.tokens.lemma == ((0, "that"), (2, "…"))
+    assert all(value.strip() for _index, value in speech.tokens.lemma)

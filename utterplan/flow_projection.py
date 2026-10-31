@@ -129,6 +129,12 @@ def _portable_lemma(segment: Any, *, surface: str, lemma: str | None) -> str | N
     return lemma
 
 
+def _optional_nonblank_token_value(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    return value
+
+
 def _tokens_for_segment(
     plan: UtterancePlan,
     segment: Any,
@@ -186,6 +192,7 @@ def _tokens_for_segment(
         ):
             lemma = surface.casefold()
         lemma = _portable_lemma(segment, surface=surface, lemma=lemma)
+        lemma = _optional_nonblank_token_value(lemma)
         result.append(
             TokenView(
                 start=start - segment.spoken_start,
