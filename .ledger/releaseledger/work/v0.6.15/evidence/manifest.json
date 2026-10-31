@@ -1,0 +1,35 @@
+{
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "additions": 258,
+      "deletions": 12,
+      "patch_file": "68f26be.patch",
+      "patch_sha256": "4288b7c89d8ff714c5aa2c88c93f65bb540d5c3335582b86d1c237d140ceba90",
+      "paths": [
+        "tests/migration/test_semantic_migration_regressions.py",
+        "tests/test_consumer_readiness.py",
+        "tests/test_coordinates.py",
+        "tests/test_explain.py",
+        "tests/test_flow_compilation.py",
+        "tests/test_golden.py",
+        "tests/test_preparation.py",
+        "tests/test_renderplan_export.py",
+        "tests/test_ssmd_09_parser.py",
+        "tests/test_ssmd_substitution_preparation.py",
+        "utterplan/parsers.py"
+      ],
+      "sha": "68f26be7623d8c7c86c9b6611f02f3768e5619ff",
+      "short_sha": "68f26be",
+      "source_ref": "git:68f26be7623d8c7c86c9b6611f02f3768e5619ff"
+    }
+  ],
+  "git_base_ref": "64bf6c838ae9eb24acd96f41fde29147b6798aac",
+  "git_base_sha": "64bf6c838ae9eb24acd96f41fde29147b6798aac",
+  "git_head_ref": "68f26be7623d8c7c86c9b6611f02f3768e5619ff",
+  "git_head_sha": "68f26be7623d8c7c86c9b6611f02f3768e5619ff",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "v0.6.15",
+  "schema_version": 1
+}

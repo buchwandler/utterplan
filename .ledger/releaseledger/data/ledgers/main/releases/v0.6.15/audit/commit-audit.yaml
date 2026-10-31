@@ -1,0 +1,55 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: v0.6.15
+git_base_ref: v0.6.14
+git_base_sha: 64bf6c838ae9eb24acd96f41fde29147b6798aac
+git_head_ref: HEAD
+git_head_sha: 68f26be7623d8c7c86c9b6611f02f3768e5619ff
+git_range: 64bf6c838ae9eb24acd96f41fde29147b6798aac..68f26be7623d8c7c86c9b6611f02f3768e5619ff
+commit_count: 1
+rows:
+  - sha: 68f26be7623d8c7c86c9b6611f02f3768e5619ff
+    source_ref: git:68f26be7623d8c7c86c9b6611f02f3768e5619ff
+    short_sha: 68f26be
+    changed_paths:
+      - tests/migration/test_semantic_migration_regressions.py
+      - tests/test_consumer_readiness.py
+      - tests/test_coordinates.py
+      - tests/test_explain.py
+      - tests/test_flow_compilation.py
+      - tests/test_golden.py
+      - tests/test_preparation.py
+      - tests/test_renderplan_export.py
+      - tests/test_ssmd_09_parser.py
+      - tests/test_ssmd_substitution_preparation.py
+      - utterplan/parsers.py
+    stats:
+      files_changed: 11
+      insertions: 258
+      deletions: 12
+    inspected: true
+    inspected_paths:
+      - tests/migration/test_semantic_migration_regressions.py
+      - tests/test_consumer_readiness.py
+      - tests/test_coordinates.py
+      - tests/test_explain.py
+      - tests/test_flow_compilation.py
+      - tests/test_golden.py
+      - tests/test_preparation.py
+      - tests/test_renderplan_export.py
+      - tests/test_ssmd_09_parser.py
+      - tests/test_ssmd_substitution_preparation.py
+      - utterplan/parsers.py
+    observed_behavior:
+      Preserves authored whitespace during SSMD parsing and semantic
+      substitution, keeping separators around punctuation-leading replacements while
+      anchoring structural controls consistently.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "fix: ssmd convert with spaces"
+    target_entry_id: entry-0001
+    notes: ""
