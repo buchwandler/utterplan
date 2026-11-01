@@ -1,0 +1,17 @@
+rows:
+  - sha: ab9257c3f8d6ac6572e9e261b3aab574260238b1
+    inspected: true
+    inspected_paths:
+      - tests/test_linguistics.py
+      - tests/test_renderplan_batch.py
+      - tests/test_renderplan_v7_contract.py
+      - tests/test_toml_format.py
+      - utterplan/flow_projection.py
+      - utterplan/renderplan_projection.py
+    observed_behavior: "Normalized blank optional token metadata before RenderPlan projection, preserving valid token spans and sparse lemma and morphology values across v7 round trips and batch rendering"
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false

@@ -1,0 +1,29 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.6.16
+git_base_ref: 2e55a1eba9ed51a9488025808a9041351d9986cd
+git_base_sha: 2e55a1eba9ed51a9488025808a9041351d9986cd
+git_head_ref: ab9257c3f8d6ac6572e9e261b3aab574260238b1
+git_head_sha: ab9257c3f8d6ac6572e9e261b3aab574260238b1
+include_merges: nontrivial
+entries:
+  - kind: fixed
+    summary: "Fixed RenderPlan token projection to omit blank optional metadata while preserving valid sparse values"
+    status: accepted
+    source_refs:
+      - git:ab9257c3f8d6ac6572e9e261b3aab574260238b1
+    paths:
+      - tests/test_linguistics.py
+      - tests/test_renderplan_batch.py
+      - tests/test_renderplan_v7_contract.py
+      - tests/test_toml_format.py
+      - utterplan/flow_projection.py
+      - utterplan/renderplan_projection.py
+    sources:
+      - git:ab9257c3f8d6ac6572e9e261b3aab574260238b1
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

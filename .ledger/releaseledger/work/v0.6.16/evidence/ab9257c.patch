@@ -1,0 +1,432 @@
+ tests/test_linguistics.py            |  75 +++++++++++++++++++++++
+ tests/test_renderplan_batch.py       |  49 +++++++++++++++
+ tests/test_renderplan_v7_contract.py | 114 +++++++++++++++++++++++++++++++++++
+ tests/test_toml_format.py            |  28 +++++++++
+ utterplan/flow_projection.py         |   7 +++
+ utterplan/renderplan_projection.py   |  43 ++++++-------
+ 6 files changed, 293 insertions(+), 23 deletions(-)
+
+diff --git a/tests/test_linguistics.py b/tests/test_linguistics.py
+index 5e2cd71..a8dc590 100644
+--- a/tests/test_linguistics.py
++++ b/tests/test_linguistics.py
+@@ -11,8 +11,10 @@ from utterplan import (
+     PlannerConfig,
+     UtterancePlan,
+ )
++from utterplan.flow_projection import project_compiler_plan
+ from utterplan.language import LanguageRun
+ from utterplan.linguistics import LinguisticResourcePool, analyze_run_analyses
++from utterplan.toml_codec import dumps_toml, loads_toml, to_toml_data
+
+
+ class FakeProviderDoc(list):
+@@ -518,3 +520,76 @@ def test_changed_spokenform_still_analyzes_prepared_text(monkeypatch: pytest.Mon
+
+     assert plan.texts.spoken == "Doctor Smith lives here."
+     assert calls == [source, plan.texts.spoken]
++
++
++def test_spacy_whitespace_lemma_is_normalized_before_v7_roundtrip(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    text = "that\u00a0…"
++
++    class Pipeline:
++        def __call__(self, value):
++            tokens = (
++                (0, "that", "SCONJ", "IN", "that"),
++                (4, "\u00a0", "SPACE", "_SP", "\u00a0"),
++                (5, "…", "PUNCT", "NFP", "…"),
++            )
++            return FakeProviderDoc(
++                value,
++                [
++                    SimpleNamespace(
++                        idx=start,
++                        text=surface,
++                        pos_=pos,
++                        tag_=tag,
++                        lemma_=lemma,
++                        morph="",
++                    )
++                    for start, surface, pos, tag, lemma in tokens
++                ],
++            )
++
++    monkeypatch.setitem(sys.modules, "spacy", SimpleNamespace(__version__="3.7.0"))
++    monkeypatch.setattr(
++        LinguisticResourcePool, "pipeline", lambda self, model, require=False: Pipeline()
++    )
++    compiler_plan = UtterancePlanner(
++        PlannerConfig(
++            language="en-us",
++            text_preparation="identity",
++            linguistics=LinguisticsConfig(
++                use_spacy=True, spacy_model="fake_model", require_spacy=True
++            ),
++        )
++    ).plan(text)
++    flow_plan = project_compiler_plan(compiler_plan)
++    segments = [segment for unit in flow_plan.flow for segment in unit.segments]
++    segment, space_token = next(
++        (segment, token)
++        for segment in segments
++        for token in segment.tokens
++        if token.surface(segment.text) == "\u00a0"
++    )
++
++    assert space_token.pos == "SPACE"
++    assert space_token.tag == "_SP"
++    assert space_token.lemma is None
++    space_index = segment.tokens.index(space_token)
++    wire = to_toml_data(flow_plan)
++    wire_segment = next(
++        wire_segment
++        for unit in wire["flow"]
++        for wire_segment in unit["segment"]
++        if wire_segment["text"] == segment.text
++    )
++    assert [space_index, ""] in wire_segment["token"]["lemma"]
++
++    restored = loads_toml(dumps_toml(flow_plan))
++    restored_space = next(
++        token
++        for unit in restored.flow
++        for restored_segment in unit.segments
++        for token in restored_segment.tokens
++        if token.surface(restored_segment.text) == "\u00a0"
++    )
++    assert restored_space.lemma is None
+diff --git a/tests/test_renderplan_batch.py b/tests/test_renderplan_batch.py
+index 1322a28..c885232 100644
+--- a/tests/test_renderplan_batch.py
++++ b/tests/test_renderplan_batch.py
+@@ -13,6 +13,7 @@ from renderplan import (
+     RenderPlanSetError,
+     RenderProfile,
+     RoleProfile,
++    SpeechItem,
+     load_renderplan_set,
+     renderplan_set_from_dict,
+     renderplan_set_to_dict,
+@@ -332,3 +333,51 @@ def test_renderplan_set_rejects_renderplan_paths_outside_variant(unsafe_path: st
+ def test_renderplan_set_requires_canonical_profile_snapshot_path() -> None:
+     with pytest.raises(RenderPlanSetError, match="canonical"):
+         replace(_set(), snapshot="../outside.renderprofile.toml")
++
++
++def test_render_batch_omits_nbsp_lemma_and_writes_valid_renderplan(tmp_path: Path) -> None:
++    profile = _profile()
++    initial = replace(_set(profile), chapters=())
++    set_path = tmp_path / "renderplan" / "narration" / "renderplan-set.toml"
++    report_path = set_path.parent / "render-report.toml"
++    save_renderplan_set(set_path, initial)
++    request = _request(tmp_path, 16)
++    text = "that\u00a0…"
++    FlowPlan(
++        language="en-US",
++        flow=(
++            FlowUnit(
++                (
++                    FlowSegment(
++                        text,
++                        "en-US",
++                        tokens=(
++                            TokenView(0, 4, lemma="that", pos="SCONJ", tag="IN"),
++                            TokenView(4, 5, lemma="\u00a0", pos="SPACE", tag="_SP"),
++                            TokenView(5, 6, lemma="…", pos="PUNCT", tag="NFP"),
++                        ),
++                        boundary_after=("sentence",),
++                    ),
++                )
++            ),
++        ),
++    ).save(request.source_plan)
++
++    outcomes = render_to_files(
++        [request],
++        profile=profile,
++        renderplan_set=initial,
++        set_path=set_path,
++        report_path=report_path,
++    )
++
++    assert outcomes[0].status == "written"
++    assert outcomes[0].stage != "projection"
++    assert request.output.is_file()
++    saved = renderplan_codec.load_plan(request.output)
++    speech = next(item for item in saved.flow if isinstance(item, SpeechItem))
++    assert speech.text == text
++    assert speech.tokens is not None
++    assert speech.tokens.span == ((0, 4), (4, 5), (5, 6))
++    assert speech.tokens.lemma == ((0, "that"), (2, "…"))
++    assert all(value.strip() for _index, value in speech.tokens.lemma)
+diff --git a/tests/test_renderplan_v7_contract.py b/tests/test_renderplan_v7_contract.py
+index bd6037c..b7286ba 100644
+--- a/tests/test_renderplan_v7_contract.py
++++ b/tests/test_renderplan_v7_contract.py
+@@ -165,6 +165,120 @@ def test_sparse_optional_morphology_is_preserved_but_required_morph_fails() -> N
+     assert error.value.token_index == 1
+
+
++@pytest.mark.parametrize("field_name", ("lemma", "morph"))
++@pytest.mark.parametrize("blank", (None, "", " ", "\t", "\n", "\u00a0", "\u2007", "\u202f"))
++def test_optional_blank_sparse_token_values_are_omitted(field_name: str, blank: str | None) -> None:
++    blank_value = {field_name: blank}
++    plan = FlowPlan(
++        language="en-US",
++        flow=(
++            FlowUnit(
++                (
++                    FlowSegment(
++                        "x y z",
++                        "en-US",
++                        tokens=(
++                            TokenView(0, 1, lemma="x", morph="Number=Sing"),
++                            TokenView(2, 3, **blank_value),
++                            TokenView(4, 5, lemma="z", morph="Tense=Past"),
++                        ),
++                    ),
++                )
++            ),
++        ),
++    )
++    bundle = build_source_index(plan).tokens_for((SourceSpan("f000000.s000", 0, 5),))
++
++    assert bundle is not None
++    assert getattr(bundle, field_name) == (
++        (0, "x" if field_name == "lemma" else "Number=Sing"),
++        (2, "z" if field_name == "lemma" else "Tense=Past"),
++    )
++
++
++@pytest.mark.parametrize("field_name", ("lemma", "morph"))
++def test_required_blank_sparse_token_value_fails_with_source_location(field_name: str) -> None:
++    plan = FlowPlan(
++        language="en-US",
++        flow=(
++            FlowUnit(
++                (
++                    FlowSegment(
++                        "x y z",
++                        "en-US",
++                        tokens=(
++                            TokenView(0, 1, **{field_name: "x"}),
++                            TokenView(2, 3, **{field_name: "\u00a0"}),
++                            TokenView(4, 5, **{field_name: "z"}),
++                        ),
++                    ),
++                )
++            ),
++        ),
++    )
++    index = build_source_index(plan)
++
++    with pytest.raises(
++        RenderPlanProjectionError, match=f"required token field '{field_name}' is unavailable"
++    ) as error:
++        index.tokens_for((SourceSpan("f000000.s000", 0, 5),), required_fields=(field_name,))
++
++    assert error.value.code == "renderplan.token.required"
++    assert error.value.locator == "f000000.s000"
++    assert error.value.token_index == 1
++
++
++@pytest.mark.parametrize(
++    "lemma", ("be", "I", "T", "armoredHostile1", "ß", " leading ", "trailing ")
++)
++def test_nonblank_sparse_lemma_is_preserved_exactly(lemma: str) -> None:
++    plan = FlowPlan(
++        language="en-US",
++        flow=(FlowUnit((FlowSegment("x", "en-US", tokens=(TokenView(0, 1, lemma=lemma),)),)),),
++    )
++
++    bundle = build_source_index(plan).tokens_for((SourceSpan("f000000.s000", 0, 1),))
++
++    assert bundle is not None
++    assert bundle.lemma == ((0, lemma),)
++
++
++def test_partial_dense_pos_and_tag_columns_are_omitted_without_padding() -> None:
++    plan = FlowPlan(
++        language="en-US",
++        flow=(
++            FlowUnit(
++                (
++                    FlowSegment(
++                        "one two",
++                        "en-US",
++                        tokens=(
++                            TokenView(0, 3, pos="DET", tag="DT"),
++                            TokenView(4, 7, pos=None, tag=" \u00a0"),
++                        ),
++                    ),
++                )
++            ),
++        ),
++    )
++    index = build_source_index(plan)
++    source = (SourceSpan("f000000.s000", 0, 7),)
++
++    bundle = index.tokens_for(source)
++
++    assert bundle is not None
++    assert bundle.pos == ()
++    assert bundle.tag == ()
++    for field_name in ("pos", "tag"):
++        with pytest.raises(
++            RenderPlanProjectionError,
++            match=f"required token field '{field_name}' is unavailable",
++        ) as error:
++            index.tokens_for(source, required_fields=(field_name,))
++        assert error.value.code == "renderplan.token.required"
++        assert error.value.token_index == 1
++
++
+ def test_partial_token_slice_and_missing_required_field_fail_with_locator() -> None:
+     index = build_source_index(_projection_plan())
+
+diff --git a/tests/test_toml_format.py b/tests/test_toml_format.py
+index f6989ca..9e53fd2 100644
+--- a/tests/test_toml_format.py
++++ b/tests/test_toml_format.py
+@@ -8,6 +8,7 @@ from typing import Any
+
+ import pytest
+ import tomlkit
++from renderplan import SourceSpan
+
+ from utterplan import (
+     DocumentInfo,
+@@ -26,6 +27,7 @@ from utterplan.codecs.v4_toml import decode_v4_toml_data
+ from utterplan.exceptions import PlanFormatError, PlanMigrationError, UnsupportedSchemaError
+ from utterplan.hashing import FLOW_HASH_SCHEMA
+ from utterplan.migrations import migrate_v4_to_v5
++from utterplan.renderplan_projection import build_source_index
+ from utterplan.toml_codec import dumps_toml, from_toml_data, loads_toml, to_toml_data
+
+ ROOT = Path(__file__).resolve().parent
+@@ -157,6 +159,32 @@ def test_ordinary_casefold_lemma_remains_implicit_in_v7_toml() -> None:
+     assert restored.flow[0].segments[0].tokens[0].lemma == "the"
+
+
++def test_legacy_whitespace_lemma_roundtrip_preserves_identity_and_projects_sparse_values() -> None:
++    text = "that\u00a0…"
++    segment = FlowSegment(
++        text,
++        "en-US",
++        tokens=(
++            TokenView(0, 4, lemma="that", pos="PRON", tag="DT"),
++            TokenView(4, 5, lemma="\u00a0", pos="SPACE", tag="_SP"),
++            TokenView(5, 6, lemma="…", pos="PUNCT", tag="NFP"),
++        ),
++    )
++    plan = FlowPlan(language="en-US", flow=(FlowUnit((segment,)),))
++
++    serialized = dumps_toml(plan)
++    restored = loads_toml(serialized)
++    restored_segment = restored.flow[0].segments[0]
++
++    assert restored.plan_id == plan.plan_id
++    assert restored.flow[0].content_hash == plan.flow[0].content_hash
++    assert restored_segment.tokens[1].lemma == "\u00a0"
++    bundle = build_source_index(restored).tokens_for((SourceSpan("f000000.s000", 0, 6),))
++
++    assert bundle is not None
++    assert bundle.lemma == ((0, "that"), (2, "…"))
++
++
+ def test_freeform_document_semantics_preserve_null_through_the_toml_sentinel() -> None:
+     plan = _plan()
+     updated = replace(
+diff --git a/utterplan/flow_projection.py b/utterplan/flow_projection.py
+index 8e7a9a4..ff07d86 100644
+--- a/utterplan/flow_projection.py
++++ b/utterplan/flow_projection.py
+@@ -129,6 +129,12 @@ def _portable_lemma(segment: Any, *, surface: str, lemma: str | None) -> str | N
+     return lemma
+
+
++def _optional_nonblank_token_value(value: str | None) -> str | None:
++    if value is None or not value.strip():
++        return None
++    return value
++
++
+ def _tokens_for_segment(
+     plan: UtterancePlan,
+     segment: Any,
+@@ -186,6 +192,7 @@ def _tokens_for_segment(
+         ):
+             lemma = surface.casefold()
+         lemma = _portable_lemma(segment, surface=surface, lemma=lemma)
++        lemma = _optional_nonblank_token_value(lemma)
+         result.append(
+             TokenView(
+                 start=start - segment.spoken_start,
+diff --git a/utterplan/renderplan_projection.py b/utterplan/renderplan_projection.py
+index cd1180c..4ea5e5c 100644
+--- a/utterplan/renderplan_projection.py
++++ b/utterplan/renderplan_projection.py
+@@ -168,6 +168,13 @@ class SourceSegmentIndex:
+                         token_index=token_index,
+                     )
+
++        pos_complete = all(
++            token.pos is not None and bool(token.pos.strip()) for token, _, _ in projected
++        )
++        tag_complete = all(
++            token.tag is not None and bool(token.tag.strip()) for token, _, _ in projected
++        )
++
+         spans: list[tuple[int, int]] = []
+         pos: list[str] = []
+         tag: list[str] = []
+@@ -176,34 +183,24 @@ class SourceSegmentIndex:
+         request_offset = 0
+         token_index = 0
+         for ref, start, end in slices:
+-            for local_index, token in enumerate(ref.segment.tokens):
++            for token in ref.segment.tokens:
+                 if token.end <= start or token.start >= end:
+                     continue
+                 spans.append(
+                     (request_offset + token.start - start, request_offset + token.end - start)
+                 )
+-                if any(item.pos is not None for item, _, _ in projected):
+-                    pos.append(token.pos or "")
+-                if any(item.tag is not None for item, _, _ in projected):
+-                    tag.append(token.tag or "")
+-                if token.lemma is not None:
+-                    if not token.lemma:
+-                        raise RenderPlanProjectionError(
+-                            "empty lemma cannot be represented by RenderPlan",
+-                            code="renderplan.token.value",
+-                            locator=ref.locator,
+-                            token_index=local_index,
+-                        )
+-                    lemma.append((token_index, token.lemma))
+-                if token.morph is not None:
+-                    if not token.morph:
+-                        raise RenderPlanProjectionError(
+-                            "empty morph cannot be represented by RenderPlan",
+-                            code="renderplan.token.value",
+-                            locator=ref.locator,
+-                            token_index=local_index,
+-                        )
+-                    morph.append((token_index, token.morph))
++                if pos_complete:
++                    assert token.pos is not None
++                    pos.append(token.pos)
++                if tag_complete:
++                    assert token.tag is not None
++                    tag.append(token.tag)
++                lemma_value = token.lemma
++                if lemma_value is not None and lemma_value.strip():
++                    lemma.append((token_index, lemma_value))
++                morph_value = token.morph
++                if morph_value is not None and morph_value.strip():
++                    morph.append((token_index, morph_value))
+                 token_index += 1
+             request_offset += end - start

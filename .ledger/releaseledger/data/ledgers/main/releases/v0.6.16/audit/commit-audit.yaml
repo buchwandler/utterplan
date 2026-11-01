@@ -1,0 +1,45 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: v0.6.16
+git_base_ref: v0.6.15
+git_base_sha: 2e55a1eba9ed51a9488025808a9041351d9986cd
+git_head_ref: HEAD
+git_head_sha: ab9257c3f8d6ac6572e9e261b3aab574260238b1
+git_range: 2e55a1eba9ed51a9488025808a9041351d9986cd..ab9257c3f8d6ac6572e9e261b3aab574260238b1
+commit_count: 1
+rows:
+  - sha: ab9257c3f8d6ac6572e9e261b3aab574260238b1
+    source_ref: git:ab9257c3f8d6ac6572e9e261b3aab574260238b1
+    short_sha: ab9257c
+    changed_paths:
+      - tests/test_linguistics.py
+      - tests/test_renderplan_batch.py
+      - tests/test_renderplan_v7_contract.py
+      - tests/test_toml_format.py
+      - utterplan/flow_projection.py
+      - utterplan/renderplan_projection.py
+    stats:
+      files_changed: 6
+      insertions: 293
+      deletions: 23
+    inspected: true
+    inspected_paths:
+      - tests/test_linguistics.py
+      - tests/test_renderplan_batch.py
+      - tests/test_renderplan_v7_contract.py
+      - tests/test_toml_format.py
+      - utterplan/flow_projection.py
+      - utterplan/renderplan_projection.py
+    observed_behavior:
+      Normalized blank optional token metadata before RenderPlan projection,
+      preserving valid token spans and sparse lemma and morphology values across v7
+      round trips and batch rendering
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "fix: lemma correction"
+    target_entry_id: entry-0001
+    notes: ""
