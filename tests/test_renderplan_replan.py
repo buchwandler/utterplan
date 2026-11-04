@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 
 import pytest
@@ -184,11 +185,14 @@ def test_replan_replaces_only_failed_occurrence_and_preserves_later_id() -> None
 
 
 def test_replan_preserves_parenthetical_semantic_end_on_last_clause_child() -> None:
+    head = "The preceding host has enough words "
+    tail = "before the aside begins "
+    aside = "(this aside includes enough words)"
     plan = _plan(
-        FlowSegment("A ", "en-US", boundary_after=("clause",)),
-        FlowSegment("B ", "en-US", boundary_after=("parenthetical",)),
+        FlowSegment(head, "en-US", boundary_after=("clause",)),
+        FlowSegment(tail, "en-US", boundary_after=("parenthetical",)),
         FlowSegment(
-            "(x)",
+            aside,
             "en-US",
             boundary_before=("parenthetical",),
             boundary_after=("sentence",),
@@ -204,13 +208,13 @@ def test_replan_preserves_parenthetical_semantic_end_on_last_clause_child() -> N
     )
     index, profile, previous = _build_previous(plan, profile)
     failed = previous.speech[0]
-    assert failed.text == "A B "
+    assert failed.text == head + tail
     assert failed.semantic_end == "parenthetical"
 
     flow = replan_flow(index, profile, previous, _preflight(previous, profile, (failed,)))
     speech = _speech_text(flow)
 
-    assert [item.text for item in speech] == ["A ", "B ", "(x)"]
+    assert [item.text for item in speech] == [head, tail, aside]
     assert [item.semantic_end for item in speech] == ["clause", "parenthetical", "sentence"]
     assert [item.reason for item in flow if isinstance(item, PauseItem)] == [
         "capacity",
@@ -436,3 +440,62 @@ def test_stale_preflight_wrong_previous_and_stale_source_are_rejected() -> None:
     with pytest.raises(RenderPlanProjectionError) as stale_source:
         replan_flow(index, profile, stale_previous, stale_request)
     assert stale_source.value.code == "renderplan.replan.source_stale"
+
+
+def _space_tokens(text: str) -> tuple[TokenView, ...]:
+    return tuple(TokenView(match.start(), match.end()) for match in re.finditer(r"\S+", text))
+
+
+def test_failed_parenthetical_request_replans_without_closing_parenthetical_pause() -> None:
+    host = "The host group already contains enough words "
+    aside = "(this aside contains enough lexical words)"
+    continuation = " and this continuation has many words for a safe token split."
+    plan = _plan(
+        FlowSegment(
+            host,
+            "en-US",
+            tokens=_space_tokens(host),
+            boundary_after=("parenthetical",),
+        ),
+        FlowSegment(
+            aside,
+            "en-US",
+            tokens=_space_tokens(aside),
+            boundary_before=("parenthetical",),
+            boundary_after=("parenthetical",),
+        ),
+        FlowSegment(
+            continuation,
+            "en-US",
+            tokens=_space_tokens(continuation),
+            boundary_before=("parenthetical",),
+            boundary_after=("sentence",),
+        ),
+    )
+    profile = replace(
+        _profile(fallback=("token",)),
+        pauses=PausePolicy(
+            mode="manual",
+            durations_ms={"clause": 180, "parenthetical": 180, "sentence": 500},
+        ),
+        profile_id=None,
+    )
+    index, profile, previous = _build_previous(plan, profile)
+    assert [item.text for item in previous.speech] == [host, aside + continuation]
+    failed = previous.speech[1]
+
+    flow = replan_flow(index, profile, previous, _preflight(previous, profile, (failed,)))
+    rebuilt = RenderPlan(
+        source_plan_id=previous.source_plan_id,
+        render_profile_id=previous.render_profile_id,
+        flow=flow,
+    ).with_identity()
+    rebuilt.validate_against_profile(profile)
+
+    assert len(_speech_text(flow)) > len(previous.speech)
+    assert [item.reason for item in flow if isinstance(item, PauseItem)] == [
+        "parenthetical",
+        "capacity",
+        "sentence",
+    ]
+    assert sum(item.reason == "parenthetical" for item in flow if isinstance(item, PauseItem)) == 1

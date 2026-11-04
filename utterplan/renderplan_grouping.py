@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Iterable, Sequence
 from dataclasses import replace
-from typing import Any, TypeAlias
+from typing import Any, Literal, TypeAlias
 
 from renderplan import (
     AudioItem,
@@ -16,7 +17,7 @@ from renderplan import (
     SpeechItem,
 )
 
-from .model import FlowSegment, PauseIntent
+from .model import FlowSegment, PauseIntent, TokenView
 from .renderplan_pause_timing import (
     PauseTimingConfig,
     PauseTimingContext,
@@ -30,6 +31,15 @@ _TIMED_PAUSE = re.compile(r"^(0|[1-9][0-9]*)ms$")
 _STRUCTURAL_BOUNDARY_PRIORITY = {"clause": 1, "sentence": 2, "paragraph": 3, "voice_change": 4}
 _ADAPTIVE_BOUNDARIES = frozenset({"clause", "sentence", "paragraph"})
 _AUTHORED_PAUSES = frozenset({"timed", "x-weak", "weak", "medium", "strong", "x-strong"})
+
+
+ParentheticalPhase: TypeAlias = Literal["open", "close", "ambiguous"]
+
+_MIN_PARENTHETICAL_HOST_LEXICAL_TOKENS = 4
+_MIN_PARENTHETICAL_ASIDE_LEXICAL_TOKENS = 4
+_PARENTHETICAL_WORD_PATTERN = re.compile(r"[^\W_]+(?:['’][^\W_]+)*", re.UNICODE)
+_PARENTHETICAL_OPEN_SURFACES = frozenset("([{")
+_PARENTHETICAL_CLOSE_SURFACES = frozenset(")]}")
 
 
 def group_initial_plan(
@@ -126,8 +136,14 @@ def group_initial_plan(
             )
             parenthetical_policy_break = (
                 "parenthetical" in edge_kinds
-                and _parenthetical_pause_enabled(profile)
-                and not authored_none_only
+                and _parenthetical_policy_splits(
+                    index=index,
+                    profile=profile,
+                    group_source=tuple(group_source),
+                    left=left,
+                    right=segment,
+                    authored_none_only=authored_none_only,
+                )
             )
             should_close = (
                 policy_split
@@ -140,7 +156,7 @@ def group_initial_plan(
                     semantic_boundary = "voice_change"
                 elif policy_split:
                     semantic_boundary = boundary
-                elif parenthetical_policy_break:
+                elif parenthetical_policy_break and hard_reason is None:
                     semantic_boundary = "parenthetical"
                 else:
                     semantic_boundary = None
@@ -274,6 +290,126 @@ def _terminal_boundary(segment: FlowSegment) -> str:
 
 def _parenthetical_pause_enabled(profile: RenderProfile) -> bool:
     return profile.pauses.mode == "manual" and "parenthetical" in profile.pauses.durations_ms
+
+
+def _parenthetical_phase(left: FlowSegment, right: FlowSegment) -> ParentheticalPhase | None:
+    """Classify a stored parenthetical edge from its local persisted token facts."""
+    if "parenthetical" not in _boundary_kinds(left, right):
+        return None
+    if _first_punctuation_phase(right, leading=True) == "open":
+        return "open"
+    if _last_punctuation_phase(left) == "close":
+        return "close"
+    return "ambiguous"
+
+
+def _first_punctuation_phase(segment: FlowSegment, *, leading: bool) -> ParentheticalPhase | None:
+    tokens = segment.tokens if leading else reversed(segment.tokens)
+    for token in tokens:
+        surface = token.surface(segment.text)
+        if _is_punctuation_token(token, surface):
+            return _phase_from_token(token, surface, leading=leading)
+
+    surface = segment.text.lstrip() if leading else segment.text.rstrip()
+    if not surface:
+        return None
+    bracket = surface[0] if leading else surface[-1]
+    if bracket in _PARENTHETICAL_OPEN_SURFACES:
+        return "open"
+    if bracket in _PARENTHETICAL_CLOSE_SURFACES:
+        return "close"
+    return None
+
+
+def _last_punctuation_phase(segment: FlowSegment) -> ParentheticalPhase | None:
+    return _first_punctuation_phase(segment, leading=False)
+
+
+def _is_punctuation_token(token: TokenView, surface: str) -> bool:
+    morph = token.morph or ""
+    if token.tag in {"-LRB-", "-RRB-"} or "PunctSide=Ini" in morph or "PunctSide=Fin" in morph:
+        return True
+    if token.pos is not None and token.pos.strip() == "PUNCT":
+        return True
+    value = surface.strip()
+    if not value:
+        return False
+    if value[0] in _PARENTHETICAL_OPEN_SURFACES or value[-1] in _PARENTHETICAL_CLOSE_SURFACES:
+        return True
+    return all(unicodedata.category(character).startswith("P") for character in value)
+
+
+def _phase_from_token(
+    token: TokenView, surface: str, *, leading: bool
+) -> ParentheticalPhase | None:
+    signals: set[str] = set()
+    morph = token.morph or ""
+    if token.tag == "-LRB-" or "PunctSide=Ini" in morph:
+        signals.add("open")
+    if token.tag == "-RRB-" or "PunctSide=Fin" in morph:
+        signals.add("close")
+    if signals == {"open"}:
+        return "open"
+    if signals == {"close"}:
+        return "close"
+    if len(signals) > 1:
+        return "ambiguous"
+
+    value = surface.strip()
+    if not value:
+        return None
+    bracket = value[0] if leading else value[-1]
+    if bracket in _PARENTHETICAL_OPEN_SURFACES:
+        return "open"
+    if bracket in _PARENTHETICAL_CLOSE_SURFACES:
+        return "close"
+    return None
+
+
+def _lexical_token_count(text: str, tokens: Sequence[TokenView]) -> int:
+    if not tokens:
+        return len(_PARENTHETICAL_WORD_PATTERN.findall(text))
+
+    count = 0
+    for token in tokens:
+        surface = token.surface(text)
+        if token.pos is not None and token.pos.strip():
+            if token.pos.strip() != "PUNCT":
+                count += 1
+        else:
+            count += len(_PARENTHETICAL_WORD_PATTERN.findall(surface))
+    return count
+
+
+def _group_lexical_token_count(index: SourceSegmentIndex, source: Sequence[SourceSpan]) -> int:
+    count = 0
+    for ref, start, end in index.ordered_slices(source):
+        text = ref.segment.text[start:end]
+        tokens = tuple(
+            replace(token, start=token.start - start, end=token.end - start)
+            for token in ref.segment.tokens
+            if token.start >= start and token.end <= end
+        )
+        count += _lexical_token_count(text, tokens)
+    return count
+
+
+def _parenthetical_policy_splits(
+    *,
+    index: SourceSegmentIndex,
+    profile: RenderProfile,
+    group_source: Sequence[SourceSpan],
+    left: FlowSegment,
+    right: FlowSegment,
+    authored_none_only: bool,
+) -> bool:
+    if not _parenthetical_pause_enabled(profile) or authored_none_only:
+        return False
+    if _parenthetical_phase(left, right) != "open":
+        return False
+    if _group_lexical_token_count(index, group_source) < _MIN_PARENTHETICAL_HOST_LEXICAL_TOKENS:
+        return False
+    return _lexical_token_count(right.text, right.tokens) >= _MIN_PARENTHETICAL_ASIDE_LEXICAL_TOKENS
 
 
 def _policy_splits(policy: str, boundary: str) -> bool:

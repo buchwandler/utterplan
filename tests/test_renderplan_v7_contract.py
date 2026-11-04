@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 
 import pytest
@@ -333,10 +334,86 @@ def _group(plan: FlowPlan, profile: RenderProfile):
     return group_initial_plan(build_source_index(plan), profile)
 
 
+_TOKEN_PATTERN = re.compile(r"[^\W_]+(?:['’][^\W_]+)*|[()\[\]{}.,;:!?]", re.UNICODE)
+
+
+def _token_views(
+    text: str, *, include_pos: bool = True, bracket_metadata: bool = True
+) -> tuple[TokenView, ...]:
+    tokens: list[TokenView] = []
+    for match in _TOKEN_PATTERN.finditer(text):
+        surface = match.group()
+        is_word = bool(re.fullmatch(r"[^\W_]+(?:['’][^\W_]+)*", surface, re.UNICODE))
+        is_open = surface in {"(", "[", "{"}
+        is_close = surface in {")", "]", "}"}
+        tokens.append(
+            TokenView(
+                match.start(),
+                match.end(),
+                lemma=surface.casefold() if is_word else None,
+                pos=("NOUN" if is_word else "PUNCT") if include_pos else None,
+                tag=("NN" if is_word else "-LRB-" if is_open else "-RRB-" if is_close else surface)
+                if include_pos or (bracket_metadata and (is_open or is_close))
+                else None,
+                morph=("PunctSide=Ini" if is_open else "PunctSide=Fin" if is_close else None)
+                if bracket_metadata
+                else None,
+            )
+        )
+    return tuple(tokens)
+
+
 def _parenthetical_plan(
     *,
     entry_pause: PauseIntent | None = None,
     exit_pause: PauseIntent | None = None,
+) -> FlowPlan:
+    host = "Before "
+    aside = "(aside)"
+    continuation = " after."
+    return FlowPlan(
+        language="en-US",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment(
+                        host,
+                        "en-US",
+                        tokens=_token_views(host),
+                        pause_after=entry_pause,
+                        boundary_after=("parenthetical",),
+                    ),
+                    FlowSegment(
+                        aside,
+                        "en-US",
+                        directives=SegmentDirectives(emphasis=EmphasisDirective("strong")),
+                        tokens=_token_views(aside),
+                        pause_after=exit_pause,
+                        boundary_before=("parenthetical",),
+                        boundary_after=("parenthetical",),
+                    ),
+                    FlowSegment(
+                        continuation,
+                        "en-US",
+                        tokens=_token_views(continuation),
+                        boundary_before=("parenthetical",),
+                        boundary_after=("sentence",),
+                    ),
+                )
+            ),
+        ),
+    )
+
+
+def _inline_parenthetical_plan(
+    host: str,
+    aside: str,
+    continuation: str,
+    *,
+    entry_pause: PauseIntent | None = None,
+    exit_pause: PauseIntent | None = None,
+    include_pos: bool = True,
+    bracket_metadata: bool = True,
 ) -> FlowPlan:
     return FlowPlan(
         language="en-US",
@@ -344,25 +421,84 @@ def _parenthetical_plan(
             FlowUnit(
                 (
                     FlowSegment(
-                        "Before ",
+                        host,
                         "en-US",
-                        tokens=(TokenView(0, 6),),
+                        tokens=_token_views(
+                            host, include_pos=include_pos, bracket_metadata=bracket_metadata
+                        ),
                         pause_after=entry_pause,
                         boundary_after=("parenthetical",),
                     ),
                     FlowSegment(
-                        "(aside)",
+                        aside,
                         "en-US",
-                        directives=SegmentDirectives(emphasis=EmphasisDirective("strong")),
-                        tokens=(TokenView(1, 6),),
-                        boundary_before=("parenthetical",),
+                        tokens=_token_views(
+                            aside, include_pos=include_pos, bracket_metadata=bracket_metadata
+                        ),
                         pause_after=exit_pause,
+                        boundary_before=("parenthetical",),
                         boundary_after=("parenthetical",),
                     ),
                     FlowSegment(
-                        " after.",
+                        continuation,
                         "en-US",
-                        tokens=(TokenView(1, 6),),
+                        tokens=_token_views(
+                            continuation, include_pos=include_pos, bracket_metadata=bracket_metadata
+                        ),
+                        boundary_before=("parenthetical",),
+                        boundary_after=("sentence",),
+                    ),
+                )
+            ),
+        ),
+    )
+
+
+def _target_parenthetical_plan() -> FlowPlan:
+    segments = (
+        "The cameras spotted more human activity on a platform two levels above us, ",
+        "a scramble of workers ",
+        "(probably the real workers)",
+        " trying to get to a lift tube and a few workers ",
+        "(the security humans pretending to be workers)",
+        " holding them back.",
+    )
+    return FlowPlan(
+        language="en-US",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment(
+                        segments[0],
+                        "en-US",
+                        tokens=_token_views(segments[0]),
+                        boundary_after=("clause",),
+                    ),
+                    FlowSegment(segments[1], "en-US", tokens=_token_views(segments[1])),
+                    FlowSegment(
+                        segments[2],
+                        "en-US",
+                        directives=SegmentDirectives(emphasis=EmphasisDirective("strong")),
+                        tokens=_token_views(segments[2]),
+                        boundary_before=("parenthetical",),
+                    ),
+                    FlowSegment(
+                        segments[3],
+                        "en-US",
+                        tokens=_token_views(segments[3]),
+                        boundary_before=("parenthetical",),
+                    ),
+                    FlowSegment(
+                        segments[4],
+                        "en-US",
+                        directives=SegmentDirectives(emphasis=EmphasisDirective("strong")),
+                        tokens=_token_views(segments[4]),
+                        boundary_before=("parenthetical",),
+                    ),
+                    FlowSegment(
+                        segments[5],
+                        "en-US",
+                        tokens=_token_views(segments[5]),
                         boundary_before=("parenthetical",),
                         boundary_after=("sentence",),
                     ),
@@ -410,7 +546,7 @@ def test_parenthetical_boundaries_remain_joined_when_pause_policy_is_unset() -> 
 
 
 @pytest.mark.parametrize("duration", (180, 0))
-def test_configured_parenthetical_edges_split_once_and_preserve_request_fidelity(
+def test_short_parenthetical_edges_remain_joined_and_preserve_request_fidelity(
     duration: int,
 ) -> None:
     plan = _parenthetical_plan()
@@ -420,73 +556,409 @@ def test_configured_parenthetical_edges_split_once_and_preserve_request_fidelity
     speech = [item for item in flow if isinstance(item, SpeechItem)]
     pauses = [item for item in flow if isinstance(item, PauseItem)]
 
-    assert [type(item) for item in flow] == [
-        SpeechItem,
-        PauseItem,
-        SpeechItem,
-        PauseItem,
-        SpeechItem,
-        PauseItem,
+    assert [item.text for item in speech] == ["Before (aside) after."]
+    assert [item.semantic_end for item in speech] == ["sentence"]
+    assert [(item.duration_ms, item.reason) for item in pauses] == [(500, "sentence")]
+    assert speech[0].source == (
+        SourceSpan("f000000.s000", 0, 7),
+        SourceSpan("f000000.s001", 0, 7),
+        SourceSpan("f000000.s002", 0, 7),
+    )
+    assert speech[0].text == build_source_index(plan).text_for(speech[0].source)
+    assert all(
+        0 <= start < end <= len(speech[0].text)
+        for start, end in speech[0].tokens.span  # type: ignore[union-attr]
+    )
+    assert [(control.start, control.end, control.name) for control in speech[0].controls] == [
+        (7, 14, "emphasis")
     ]
-    assert [item.text for item in speech] == ["Before ", "(aside)", " after."]
+    assert _group(plan, profile) == flow
+
+
+def test_exact_problem_sentence_keeps_both_host_continuations_in_request() -> None:
+    plan = _target_parenthetical_plan()
+    profile = _profile(pauses={"parenthetical": 180, "sentence": 500})
+
+    flow = _group(plan, profile)
+    render_plan = build_render_plan(plan, profile)
+    render_plan.validate_against_profile(profile)
+    assert render_plan.flow == flow
+    speech = [item for item in flow if isinstance(item, SpeechItem)]
+    pauses = [item for item in flow if isinstance(item, PauseItem)]
+    expected = [
+        "The cameras spotted more human activity on a platform two levels above us, "
+        "a scramble of workers ",
+        "(probably the real workers) trying to get to a lift tube and a few workers ",
+        "(the security humans pretending to be workers) holding them back.",
+    ]
+
+    assert [item.text for item in speech] == expected
+    assert len(speech) == 3
     assert [item.semantic_end for item in speech] == [
         "parenthetical",
         "parenthetical",
         "sentence",
     ]
     assert [(item.duration_ms, item.reason) for item in pauses] == [
-        (duration, "parenthetical"),
-        (duration, "parenthetical"),
+        (180, "parenthetical"),
+        (180, "parenthetical"),
         (500, "sentence"),
     ]
-    assert "".join(item.text for item in speech) == "Before (aside) after."
-    assert [item.source for item in speech] == [
-        (SourceSpan("f000000.s000", 0, 7),),
-        (SourceSpan("f000000.s001", 0, 7),),
-        (SourceSpan("f000000.s002", 0, 7),),
-    ]
-    assert [item.tokens.span if item.tokens is not None else None for item in speech] == [
-        ((0, 6),),
-        ((1, 6),),
-        ((1, 6),),
-    ]
+    assert not any(item.text.startswith(" trying") for item in speech)
+    assert not any(item.text.startswith(" holding them back") for item in speech)
+    index = build_source_index(plan)
+    assert all(item.text == index.text_for(item.source) for item in speech)
+    assert all(
+        item.tokens is not None
+        and all(0 <= start < end <= len(item.text) for start, end in item.tokens.span)
+        for item in speech
+    )
     assert [
         [(control.start, control.end, control.name) for control in item.controls] for item in speech
-    ] == [[], [(0, 7, "emphasis")], []]
-    assert _group(plan, profile) == flow
+    ] == [
+        [],
+        [(0, len("(probably the real workers)"), "emphasis")],
+        [(0, len("(the security humans pretending to be workers)"), "emphasis")],
+    ]
+
+
+@pytest.mark.parametrize("aside", ("(art)", "(surprise)", "(one)", "(two)"))
+def test_short_inline_asides_are_not_automatically_isolated(aside: str) -> None:
+    plan = _inline_parenthetical_plan(
+        "Because this person really did ", aside, " think the intel was wrong."
+    )
+    flow = _group(plan, _profile(pauses={"parenthetical": 180, "sentence": 500}))
+
+    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
+        f"Because this person really did {aside} think the intel was wrong."
+    ]
+    assert [item.reason for item in flow if isinstance(item, PauseItem)] == ["sentence"]
+
+
+def test_short_host_does_not_trigger_substantial_aside_split() -> None:
+    plan = _inline_parenthetical_plan("I ", "(probably the real worker)", " will finish the job.")
+    flow = _group(plan, _profile(pauses={"parenthetical": 180, "sentence": 500}))
+
+    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
+        "I (probably the real worker) will finish the job."
+    ]
+    assert [item.reason for item in flow if isinstance(item, PauseItem)] == ["sentence"]
+
+
+def test_substantial_open_edge_splits_once_and_close_edge_joins_continuation() -> None:
+    plan = _inline_parenthetical_plan(
+        "The host group has enough words ",
+        "(this aside has enough words)",
+        " continues the sentence.",
+    )
+    flow = _group(plan, _profile(pauses={"parenthetical": 180, "sentence": 500}))
+    speech = [item for item in flow if isinstance(item, SpeechItem)]
+
+    assert [item.text for item in speech] == [
+        "The host group has enough words ",
+        "(this aside has enough words) continues the sentence.",
+    ]
+    assert [item.reason for item in flow if isinstance(item, PauseItem)] == [
+        "parenthetical",
+        "sentence",
+    ]
+
+
+def test_lexical_count_fallback_uses_token_surfaces_without_pos() -> None:
+    plan = _inline_parenthetical_plan(
+        "A host group contains enough words ",
+        "(this aside has enough words)",
+        " continues the sentence.",
+        include_pos=False,
+        bracket_metadata=False,
+    )
+    flow = _group(plan, _profile(pauses={"parenthetical": 180, "sentence": 500}))
+
+    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
+        "A host group contains enough words ",
+        "(this aside has enough words) continues the sentence.",
+    ]
+
+
+def test_ambiguous_parenthetical_orientation_is_not_split_automatically() -> None:
+    plan = _inline_parenthetical_plan(
+        "The host group has enough words ",
+        "this aside has enough words",
+        " continues the sentence.",
+    )
+    flow = _group(plan, _profile(pauses={"parenthetical": 180, "sentence": 500}))
+
+    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
+        "The host group has enough words this aside has enough words continues the sentence."
+    ]
+    assert [item.reason for item in flow if isinstance(item, PauseItem)] == ["sentence"]
+
+
+def test_adjacent_parenthetical_open_wins_over_previous_close() -> None:
+    plan = FlowPlan(
+        language="en-US",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment(
+                        "The initial host has enough words ",
+                        "en-US",
+                        tokens=_token_views("The initial host has enough words "),
+                        boundary_after=("parenthetical",),
+                    ),
+                    FlowSegment(
+                        "(alpha beta gamma delta)",
+                        "en-US",
+                        tokens=_token_views("(alpha beta gamma delta)"),
+                        boundary_before=("parenthetical",),
+                        boundary_after=("parenthetical",),
+                    ),
+                    FlowSegment(
+                        "(epsilon zeta eta theta)",
+                        "en-US",
+                        tokens=_token_views("(epsilon zeta eta theta)"),
+                        boundary_before=("parenthetical",),
+                        boundary_after=("parenthetical",),
+                    ),
+                    FlowSegment(
+                        " continues the sentence.",
+                        "en-US",
+                        tokens=_token_views(" continues the sentence."),
+                        boundary_before=("parenthetical",),
+                        boundary_after=("sentence",),
+                    ),
+                )
+            ),
+        ),
+    )
+    flow = _group(plan, _profile(pauses={"parenthetical": 180, "sentence": 500}))
+
+    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
+        "The initial host has enough words ",
+        "(alpha beta gamma delta)",
+        "(epsilon zeta eta theta) continues the sentence.",
+    ]
+    assert [item.reason for item in flow if isinstance(item, PauseItem)] == [
+        "parenthetical",
+        "parenthetical",
+        "sentence",
+    ]
 
 
 def test_parenthetical_policy_is_disabled_by_none_mode() -> None:
-    plan = _parenthetical_plan()
-    profile = _profile()
+    plan = _inline_parenthetical_plan(
+        "The host group has enough words ",
+        "(this aside has enough words)",
+        " continues the sentence.",
+    )
     profile = replace(
-        profile,
-        pauses=PausePolicy(mode="none", durations_ms={"parenthetical": 180}),
+        _profile(pauses={"parenthetical": 180, "sentence": 500}),
+        pauses=PausePolicy(mode="none", durations_ms={"parenthetical": 180, "sentence": 500}),
         profile_id=None,
     )
 
     flow = _group(plan, profile)
 
-    assert [item.text for item in flow if isinstance(item, SpeechItem)] == ["Before (aside) after."]
+    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
+        "The host group has enough words (this aside has enough words) continues the sentence."
+    ]
     assert not any(isinstance(item, PauseItem) and item.reason == "parenthetical" for item in flow)
 
 
-def test_authored_none_suppresses_only_parenthetical_policy_splits() -> None:
-    plan = _parenthetical_plan(
+def test_authored_none_suppresses_eligible_automatic_open_split() -> None:
+    plan = _inline_parenthetical_plan(
+        "The host group has enough words ",
+        "(this aside has enough words)",
+        " continues the sentence.",
         entry_pause=PauseIntent("none"),
-        exit_pause=PauseIntent("none"),
     )
-    profile = _profile(pauses={"parenthetical": 180, "sentence": 500})
+    flow = _group(plan, _profile(pauses={"parenthetical": 180, "sentence": 500}))
 
-    flow = _group(plan, profile)
+    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
+        "The host group has enough words (this aside has enough words) continues the sentence."
+    ]
+    assert [item.reason for item in flow if isinstance(item, PauseItem)] == ["sentence"]
 
-    assert [item.text for item in flow if isinstance(item, SpeechItem)] == ["Before (aside) after."]
+
+def test_authored_breaks_still_split_parenthetical_entry_or_close() -> None:
+    plan = _inline_parenthetical_plan(
+        "The host group has enough words ",
+        "(this aside has enough words)",
+        " continues the sentence.",
+        exit_pause=PauseIntent("timed", "350ms"),
+    )
+    flow = _group(plan, _profile(pauses={"parenthetical": 180, "sentence": 500}))
+
+    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
+        "The host group has enough words ",
+        "(this aside has enough words)",
+        " continues the sentence.",
+    ]
     assert [(item.duration_ms, item.reason) for item in flow if isinstance(item, PauseItem)] == [
-        (500, "sentence")
+        (180, "parenthetical"),
+        (350, "timed"),
+        (500, "sentence"),
     ]
 
 
-def test_authored_none_resolves_coincident_sentence_parenthetical_edge() -> None:
+def test_authored_timed_pause_on_close_splits_despite_automatic_close_suppression() -> None:
+    plan = _inline_parenthetical_plan(
+        "The host group has enough words ",
+        "(this aside has enough words)",
+        " continues the sentence.",
+        exit_pause=PauseIntent("strong"),
+    )
+    flow = _group(
+        plan,
+        _profile(pauses={"parenthetical": 180, "sentence": 500, "strong": 420}),
+    )
+
+    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
+        "The host group has enough words ",
+        "(this aside has enough words)",
+        " continues the sentence.",
+    ]
+    assert [(item.duration_ms, item.reason) for item in flow if isinstance(item, PauseItem)] == [
+        (180, "parenthetical"),
+        (420, "strong"),
+        (500, "sentence"),
+    ]
+
+
+def test_parenthetical_zero_duration_still_splits_eligible_open_edge() -> None:
+    plan = _inline_parenthetical_plan(
+        "The host group has enough words ",
+        "(this aside has enough words)",
+        " continues the sentence.",
+    )
+    flow = _group(plan, _profile(pauses={"parenthetical": 0, "sentence": 500}))
+
+    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
+        "The host group has enough words ",
+        "(this aside has enough words) continues the sentence.",
+    ]
+    assert [(item.duration_ms, item.reason) for item in flow if isinstance(item, PauseItem)] == [
+        (0, "parenthetical"),
+        (500, "sentence"),
+    ]
+
+
+def test_authored_timed_pause_on_eligible_open_keeps_exact_duration() -> None:
+    plan = _inline_parenthetical_plan(
+        "The host group has enough words ",
+        "(this aside has enough words)",
+        " continues the sentence.",
+        entry_pause=PauseIntent("timed", "350ms"),
+    )
+    flow = _group(plan, _profile(pauses={"parenthetical": 180, "sentence": 500}))
+
+    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
+        "The host group has enough words ",
+        "(this aside has enough words) continues the sentence.",
+    ]
+    assert [(item.duration_ms, item.reason) for item in flow if isinstance(item, PauseItem)] == [
+        (350, "timed"),
+        (500, "sentence"),
+    ]
+
+
+def test_coincident_paragraph_and_parenthetical_edge_resolves_once() -> None:
+    edge = ("paragraph", "parenthetical")
+    plan = FlowPlan(
+        language="en-US",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment(
+                        "The host group has enough words ",
+                        "en-US",
+                        tokens=_token_views("The host group has enough words "),
+                        boundary_after=edge,
+                    ),
+                    FlowSegment(
+                        "(this aside has enough words)",
+                        "en-US",
+                        tokens=_token_views("(this aside has enough words)"),
+                        boundary_before=edge,
+                    ),
+                )
+            ),
+        ),
+    )
+    flow = _group(plan, _profile(pauses={"paragraph": 800, "parenthetical": 180}))
+
+    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
+        "The host group has enough words ",
+        "(this aside has enough words)",
+    ]
+    assert [item.semantic_end for item in flow if isinstance(item, SpeechItem)] == [
+        "paragraph",
+        "none",
+    ]
+    assert [(item.duration_ms, item.reason) for item in flow if isinstance(item, PauseItem)] == [
+        (800, "paragraph")
+    ]
+
+
+def test_voice_change_owns_coincident_parenthetical_entry_boundary() -> None:
+    host = "The host group has enough words "
+    aside = "(this aside has enough words)"
+    continuation = " continues the sentence."
+    plan = FlowPlan(
+        language="en-US",
+        flow=(
+            FlowUnit(
+                (
+                    FlowSegment(
+                        host,
+                        "en-US",
+                        tokens=_token_views(host),
+                        boundary_after=("parenthetical",),
+                    ),
+                    FlowSegment(
+                        aside,
+                        "en-US",
+                        directives=SegmentDirectives(voice=VoiceDirective(reference="guest")),
+                        tokens=_token_views(aside),
+                        boundary_before=("parenthetical",),
+                        boundary_after=("parenthetical",),
+                    ),
+                    FlowSegment(
+                        continuation,
+                        "en-US",
+                        directives=SegmentDirectives(voice=VoiceDirective(reference="guest")),
+                        tokens=_token_views(continuation),
+                        boundary_before=("parenthetical",),
+                        boundary_after=("sentence",),
+                    ),
+                )
+            ),
+        ),
+    )
+    profile = _profile(
+        roles={
+            "narrator": RoleProfile(language="en-US", binding={"engine": "fixture"}),
+            "guest": RoleProfile(language="en-US", binding={"engine": "guest"}),
+        },
+        pauses={"parenthetical": 180, "voice_change": 260, "sentence": 500},
+    )
+    flow = _group(plan, profile)
+
+    assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
+        host,
+        aside + continuation,
+    ]
+    assert [item.semantic_end for item in flow if isinstance(item, SpeechItem)] == [
+        "voice_change",
+        "sentence",
+    ]
+    assert [item.reason for item in flow if isinstance(item, PauseItem)] == [
+        "voice_change",
+        "sentence",
+    ]
+
+
+def test_authored_none_resolves_coincident_sentence_parenthetical_edge_once() -> None:
     edge = ("sentence", "parenthetical")
     plan = FlowPlan(
         language="en-US",
@@ -494,57 +966,32 @@ def test_authored_none_resolves_coincident_sentence_parenthetical_edge() -> None
             FlowUnit(
                 (
                     FlowSegment(
-                        "Before ",
+                        "The host group has enough words ",
                         "en-US",
+                        tokens=_token_views("The host group has enough words "),
                         pause_after=PauseIntent("none"),
                         boundary_after=edge,
                     ),
                     FlowSegment(
-                        "(aside)",
+                        "(this aside has enough words)",
                         "en-US",
+                        tokens=_token_views("(this aside has enough words)"),
                         boundary_before=edge,
-                        boundary_after=("sentence",),
                     ),
                 )
             ),
         ),
     )
-    profile = _profile(pauses={"parenthetical": 180, "sentence": 500})
-
-    flow = _group(plan, profile)
+    flow = _group(plan, _profile(pauses={"parenthetical": 180, "sentence": 500}))
     speech = [item for item in flow if isinstance(item, SpeechItem)]
     pauses = [item for item in flow if isinstance(item, PauseItem)]
 
-    assert [item.text for item in speech] == ["Before ", "(aside)"]
-    assert speech[0].semantic_end == "sentence"
-    assert [(item.duration_ms, item.reason) for item in pauses] == [
-        (0, "authored_none"),
-        (500, "sentence"),
+    assert [item.text for item in speech] == [
+        "The host group has enough words ",
+        "(this aside has enough words)",
     ]
-
-
-@pytest.mark.parametrize(
-    ("intent", "extra_pause", "expected"),
-    (
-        (PauseIntent("timed", "350ms"), {}, (350, "timed")),
-        (PauseIntent("strong"), {"strong": 400}, (400, "strong")),
-    ),
-)
-def test_authored_timed_and_named_pauses_win_at_parenthetical_edges(
-    intent: PauseIntent,
-    extra_pause: dict[str, int],
-    expected: tuple[int, str],
-) -> None:
-    plan = _parenthetical_plan(entry_pause=intent)
-    profile = _profile(pauses={"parenthetical": 180, **extra_pause})
-
-    flow = _group(plan, profile)
-
-    assert [
-        (item.duration_ms, item.reason)
-        for item in flow
-        if isinstance(item, PauseItem) and item.reason != "sentence"
-    ] == [expected, (180, "parenthetical")]
+    assert speech[0].semantic_end == "sentence"
+    assert [(item.duration_ms, item.reason) for item in pauses] == [(0, "authored_none")]
 
 
 def test_parenthetical_policy_uses_boundaries_not_surface_punctuation() -> None:
@@ -566,7 +1013,7 @@ def test_parenthetical_policy_uses_boundaries_not_surface_punctuation() -> None:
     assert [item.reason for item in flow if isinstance(item, PauseItem)] == ["sentence"]
 
 
-def test_nested_parenthetical_edges_emit_one_pause_per_adjacency() -> None:
+def test_nested_parenthetical_edges_do_not_force_symmetric_splits() -> None:
     plan = FlowPlan(
         language="en-US",
         flow=(
@@ -601,24 +1048,12 @@ def test_nested_parenthetical_edges_emit_one_pause_per_adjacency() -> None:
             ),
         ),
     )
-    profile = _profile(pauses={"parenthetical": 180, "sentence": 500})
-
-    flow = _group(plan, profile)
+    flow = _group(plan, _profile(pauses={"parenthetical": 180, "sentence": 500}))
 
     assert [item.text for item in flow if isinstance(item, SpeechItem)] == [
-        "outer ",
-        "(inside ",
-        "(nested)",
-        " again)",
-        " end.",
+        "outer (inside (nested) again) end."
     ]
-    assert [(item.duration_ms, item.reason) for item in flow if isinstance(item, PauseItem)] == [
-        (180, "parenthetical"),
-        (180, "parenthetical"),
-        (180, "parenthetical"),
-        (180, "parenthetical"),
-        (500, "sentence"),
-    ]
+    assert [item.reason for item in flow if isinstance(item, PauseItem)] == ["sentence"]
 
 
 def test_clause_and_paragraph_grouping_follow_topology_not_punctuation() -> None:
