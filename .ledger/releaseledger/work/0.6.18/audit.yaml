@@ -1,0 +1,34 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.6.18
+git_base_ref: v0.6.17
+git_base_sha: b68b48df5deb879b5b7f5d04664cd24a4f17f630
+git_head_ref: HEAD
+git_head_sha: 2f84aa1e376b7f887a19ca8782adedce5637aabc
+git_range: b68b48df5deb879b5b7f5d04664cd24a4f17f630..2f84aa1e376b7f887a19ca8782adedce5637aabc
+commit_count: 1
+rows:
+  - sha: 2f84aa1e376b7f887a19ca8782adedce5637aabc
+    source_ref: git:2f84aa1e376b7f887a19ca8782adedce5637aabc
+    short_sha: 2f84aa1
+    changed_paths:
+      - tests/test_bundle_book_services.py
+      - tests/test_bundle_services.py
+      - utterplan/__init__.py
+      - utterplan/batch.py
+      - utterplan/bundle_inspection.py
+      - utterplan/config.py
+    stats:
+      files_changed: 6
+      insertions: 882
+      deletions: 5
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: update api for readio"

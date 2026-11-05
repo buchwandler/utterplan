@@ -1,0 +1,26 @@
+rows:
+  - sha: b68b48df5deb879b5b7f5d04664cd24a4f17f630
+    inspected: true
+    inspected_paths:
+      - docs/architecture.md
+      - docs/changelog.md
+      - docs/consumer-guide.md
+      - docs/format.md
+      - tests/test_renderplan_replan.py
+      - tests/test_renderplan_v7_contract.py
+      - utterplan/renderplan_grouping.py
+    observed_behavior: >-
+      RenderPlan parenthetical projection now preserves resumed host syntax by
+      treating eligible opening asides as selective request boundaries while
+      keeping closing edges joined; stored token facts and local bracket
+      fallback drive the decision, authored pause intents retain precedence,
+      and FlowPlan text and schema remain unchanged. Regression tests cover
+      grouping and failed-request replanning behavior.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: entry-0001
+    notes: >-
+      Reviewed the implementation, public documentation, and regression tests;
+      the existing fixed entry describes the user-visible behavior.
+    stale: false

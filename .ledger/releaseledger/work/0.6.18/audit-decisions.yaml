@@ -1,0 +1,26 @@
+rows:
+  - sha: 2f84aa1e376b7f887a19ca8782adedce5637aabc
+    inspected: true
+    inspected_paths:
+      - tests/test_bundle_book_services.py
+      - tests/test_bundle_services.py
+      - utterplan/__init__.py
+      - utterplan/batch.py
+      - utterplan/bundle_inspection.py
+      - utterplan/config.py
+    observed_behavior: >-
+      Added public read-only bundle freshness inspectors for compilation and
+      RenderPlan projection, including deterministic selectors for incomplete or
+      stale work, profile-identity mismatch reporting, and safe no-write
+      inspection. Compiled plans now carry a stable planner-configuration
+      fingerprint so configuration drift is detected. Public exports and
+      regression tests cover incremental convergence, stale inputs, alternate
+      profiles, and unchanged workspace contents.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: >-
+      Reviewed implementation, public exports, and regression tests; this is a
+      user-visible API addition with compatibility-preserving plan metadata.
+    stale: false

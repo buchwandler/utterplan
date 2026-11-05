@@ -1,0 +1,29 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.6.18
+git_base_ref: b68b48df5deb879b5b7f5d04664cd24a4f17f630
+git_base_sha: b68b48df5deb879b5b7f5d04664cd24a4f17f630
+git_head_ref: 2f84aa1e376b7f887a19ca8782adedce5637aabc
+git_head_sha: 2f84aa1e376b7f887a19ca8782adedce5637aabc
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: "Added read-only bundle freshness inspection with incremental selectors and profile/config drift diagnostics"
+    status: accepted
+    source_refs:
+      - git:2f84aa1e376b7f887a19ca8782adedce5637aabc
+    paths:
+      - tests/test_bundle_book_services.py
+      - tests/test_bundle_services.py
+      - utterplan/__init__.py
+      - utterplan/batch.py
+      - utterplan/bundle_inspection.py
+      - utterplan/config.py
+    sources:
+      - git:2f84aa1e376b7f887a19ca8782adedce5637aabc
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

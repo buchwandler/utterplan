@@ -1,0 +1,30 @@
+{
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "additions": 882,
+      "deletions": 5,
+      "patch_file": "2f84aa1.patch",
+      "patch_sha256": "bcbd4db4eb22574757fe4c37cba44fb1cb57b5650fa4dbd52c723c05b084216c",
+      "paths": [
+        "tests/test_bundle_book_services.py",
+        "tests/test_bundle_services.py",
+        "utterplan/__init__.py",
+        "utterplan/batch.py",
+        "utterplan/bundle_inspection.py",
+        "utterplan/config.py"
+      ],
+      "sha": "2f84aa1e376b7f887a19ca8782adedce5637aabc",
+      "short_sha": "2f84aa1",
+      "source_ref": "git:2f84aa1e376b7f887a19ca8782adedce5637aabc"
+    }
+  ],
+  "git_base_ref": "b68b48df5deb879b5b7f5d04664cd24a4f17f630",
+  "git_base_sha": "b68b48df5deb879b5b7f5d04664cd24a4f17f630",
+  "git_head_ref": "2f84aa1e376b7f887a19ca8782adedce5637aabc",
+  "git_head_sha": "2f84aa1e376b7f887a19ca8782adedce5637aabc",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.6.18",
+  "schema_version": 1
+}
