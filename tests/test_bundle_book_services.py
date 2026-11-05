@@ -75,6 +75,10 @@ def test_package_root_exports_unified_bundle_services_not_split_services() -> No
     assert callable(utterplan.compile_bundle)
     assert callable(utterplan.render_bundle)
     assert callable(utterplan.replan_bundle)
+    assert callable(utterplan.inspect_bundle_compile)
+    assert callable(utterplan.inspect_bundle_projection)
+    assert hasattr(utterplan, "BundleCompileInspection")
+    assert hasattr(utterplan, "BundleProjectionInspection")
     for name in ("compile_book", "render_book", "replan_book"):
         assert not hasattr(utterplan, name)
 

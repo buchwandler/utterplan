@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from renderplan import codec as renderplan_codec
 
 from utterplan._book_service import BookServiceError, compile_book, render_book
 from utterplan.bundle import BundleServiceError, compile_bundle, render_bundle
+from utterplan.bundle_inspection import inspect_bundle_compile, inspect_bundle_projection
 from utterplan.bundle_role_inventory import load_bundle_role_inventory, sha256_file
 from utterplan.config import LinguisticsConfig, PlannerConfig
 from utterplan.model import FlowPlan
@@ -67,9 +69,11 @@ def _planner_config() -> PlannerConfig:
     )
 
 
-def _profile(path: Path) -> RenderProfile:
+def _profile(path: Path, *, voice: str = "test") -> RenderProfile:
     profile = RenderProfile(
-        roles={"narrator": RoleProfile(language="en-US", binding={"engine": "test"})},
+        roles={
+            "narrator": RoleProfile(language="en-US", binding={"engine": "test", "voice": voice})
+        },
         default_role="narrator",
         planning=PlanningPolicy(split="sentence", capacity_fallback=("token",)),
         pauses=PausePolicy(mode="manual", durations_ms={"sentence": 250}),
@@ -243,3 +247,143 @@ def test_render_bundle_dispatches_book_and_document_with_uniform_outputs(
         assert starts[0].kind == kind
         assert starts[0].output_paths == result.outputs
         assert starts[0].report_path == result.report_path
+
+
+def _tree_snapshot(root: Path) -> dict[str, bytes | None]:
+    return {
+        path.relative_to(root).as_posix(): None if path.is_dir() else path.read_bytes()
+        for path in sorted(root.rglob("*"))
+    }
+
+
+def test_compile_inspector_tracks_source_and_planner_config_without_writes(tmp_path: Path) -> None:
+    root = _book(tmp_path / "inspect.ssmd-bundle")
+    config = _planner_config()
+    before = _tree_snapshot(root)
+    fresh = inspect_bundle_compile(root, planner_config=config)
+    assert fresh.state == "not_started"
+    assert fresh.recommended_selector == "5-6"
+    assert _tree_snapshot(root) == before
+
+    compile_bundle(root, chapters="5", planner_config=config)
+    partial = inspect_bundle_compile(root, planner_config=config)
+    assert [item.state for item in partial.items] == ["complete", "not_started"]
+    assert partial.recommended_selector == "6"
+    assert not partial.force_required
+    assert partial.replacement_safe
+
+    source = root / "chapters/chapter-0005.ssmd.md"
+    source.write_text(
+        '---\nssmd_version: "0.9"\nlanguage: en-US\n---\nEdited chapter 5.\n',
+        encoding="utf-8",
+    )
+    stale = inspect_bundle_compile(root, planner_config=config)
+    assert [item.state for item in stale.items] == ["stale", "not_started"]
+    assert stale.recommended_selector == "5-6"
+    assert stale.force_required
+    assert stale.replacement_safe
+
+    compile_bundle(root, chapters="5", planner_config=config, force=True)
+    assert inspect_bundle_compile(root, chapters="5", planner_config=config).state == "complete"
+    changed_config = replace(config, overlap_mode="strict")
+    config_stale = inspect_bundle_compile(root, planner_config=changed_config)
+    assert config_stale.items[0].state == "stale"
+    assert config_stale.recommended_selector == "5-6"
+    assert config_stale.force_required
+    assert config_stale.replacement_safe
+    before = _tree_snapshot(root)
+    inspect_bundle_compile(root, planner_config=config)
+    assert _tree_snapshot(root) == before
+
+
+def test_projection_inspector_supports_incremental_extension_and_safe_rebuild(
+    tmp_path: Path,
+) -> None:
+    root = _book(tmp_path / "projection.ssmd-bundle")
+    config = _planner_config()
+    compile_bundle(root, planner_config=config)
+    profile_path = root / "narration.renderprofile.toml"
+    profile = _profile(profile_path)
+    before = _tree_snapshot(root)
+
+    initial = inspect_bundle_projection(root, profile=profile_path)
+    assert initial.state == "not_started"
+    assert initial.profile_id == profile.computed_id()
+    assert initial.missing_chapters == ("chapter-0005", "chapter-0006")
+    assert initial.recommended_selector == "5-6"
+    assert not initial.force_required
+    assert initial.replacement_safe
+    assert _tree_snapshot(root) == before
+
+    render_bundle(root, profile=profile_path, chapters="5")
+    first = inspect_bundle_projection(root, profile=profile_path)
+    assert first.state == "partial"
+    assert first.chapters_in_set == ("chapter-0005",)
+    assert first.missing_chapters == ("chapter-0006",)
+    assert first.recommended_selector == "6"
+    assert not first.force_required
+    assert first.replacement_safe
+    first_projection_bytes = first.items[0].renderplan_path.read_bytes()
+
+    render_bundle(root, profile=profile_path, chapters="6")
+    complete = inspect_bundle_projection(root, profile=profile_path)
+    assert complete.state == "complete"
+    assert complete.items[0].renderplan_path.read_bytes() == first_projection_bytes
+    assert complete.recommended_selector is None
+    first_renderplan = complete.items[0].renderplan_path.read_bytes()
+    second_renderplan = complete.items[1].renderplan_path.read_bytes()
+
+    source = root / "chapters/chapter-0005.ssmd.md"
+    source.write_text(
+        '---\nssmd_version: "0.9"\nlanguage: en-US\n---\nEdited chapter 5.\n',
+        encoding="utf-8",
+    )
+    compile_bundle(root, chapters="5", planner_config=config, force=True)
+    stale = inspect_bundle_projection(root, profile=profile_path)
+    assert stale.stale_chapters == ("chapter-0005",)
+    assert stale.recommended_selector == "5"
+    assert stale.force_required
+    before = _tree_snapshot(root)
+    inspect_bundle_projection(root, profile=profile_path)
+    assert _tree_snapshot(root) == before
+
+    render_bundle(root, profile=profile_path, chapters="5", force=True)
+    rebuilt = inspect_bundle_projection(root, profile=profile_path)
+    assert rebuilt.state == "complete"
+    assert rebuilt.items[1].renderplan_path.read_bytes() == second_renderplan
+    assert rebuilt.items[0].renderplan_path.read_bytes() != first_renderplan
+
+    profile_b_path = root / "alternate.renderprofile.toml"
+    profile_b = _profile(profile_b_path, voice="sarah")
+    before_alternate_inspect = _tree_snapshot(root)
+    alternate = inspect_bundle_projection(root, profile=profile_b_path)
+    assert alternate.profile_id == profile_b.computed_id()
+    assert alternate.variant != complete.variant
+    assert alternate.state == "not_started"
+    assert _tree_snapshot(root) == before_alternate_inspect
+    shutil.copyfile(profile_b_path, complete.items[0].renderplan_path.parent / "renderprofile.toml")
+    mismatch = inspect_bundle_projection(root, profile=profile_path)
+    assert profile_b.computed_id() != profile.computed_id()
+    assert mismatch.profile_snapshot_mismatch
+    assert mismatch.state == "profile_mismatch"
+    assert mismatch.recommended_selector is None
+
+
+def test_document_bundle_inspectors_report_single_item_convergence(tmp_path: Path) -> None:
+    root = _document(tmp_path / "story.ssmd-bundle")
+    config = _planner_config()
+    compile_bundle(root, planner_config=config)
+    compiled = inspect_bundle_compile(root, planner_config=config)
+    assert compiled.state == "complete"
+    assert compiled.recommended_selector is None
+
+    profile_path = root / "document.renderprofile.toml"
+    _profile(profile_path)
+    missing = inspect_bundle_projection(root, profile=profile_path)
+    assert missing.state == "not_started"
+    assert missing.recommended_selector == "all"
+    render_bundle(root, profile=profile_path)
+    projected = inspect_bundle_projection(root, profile=profile_path)
+    assert projected.state == "complete"
+    assert projected.recommended_selector is None
+    assert projected.items[0].render_plan_id is not None

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Generator, Iterable, Sized
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -11,7 +11,7 @@ import tomlkit
 
 from .atomic_io import atomic_write_text
 from .compiler import InputFormat, compile_document
-from .config import PlannerConfig
+from .config import PlannerConfig, semantic_config_fingerprint
 from .exceptions import (
     PlanFormatError,
     PlanRenderabilityError,
@@ -194,7 +194,19 @@ def _compile_one(
     except UtterPlanError as error:
         return _compile_failure(request, index, total, error, stage="compile")
 
-    plan = result.plan
+    effective_config = (
+        replace(config, language=request.fallback_language)
+        if request.fallback_language is not None
+        else config
+    )
+    effective_config = replace(effective_config, document_format=input_format)
+    plan = replace(
+        result.plan,
+        producer={
+            **result.plan.producer,
+            "planner_config_sha256": semantic_config_fingerprint(effective_config),
+        },
+    )
     try:
         plan.validate()
     except PlanValidationError as error:

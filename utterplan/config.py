@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Literal
@@ -100,9 +102,21 @@ def semantic_config(config: PlannerConfig | Mapping[str, object]) -> dict[str, o
     return value
 
 
+def semantic_config_fingerprint(config: PlannerConfig | Mapping[str, object]) -> str:
+    """Return a stable identity for every planning-relevant configuration field."""
+    payload = json.dumps(
+        semantic_config(config),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
 __all__ = [
     "LinguisticsConfig",
     "PlannerConfig",
     "SSMDConfig",
     "semantic_config",
+    "semantic_config_fingerprint",
 ]
