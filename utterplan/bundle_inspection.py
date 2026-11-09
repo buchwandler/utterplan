@@ -309,11 +309,11 @@ def inspect_bundle_projection(
             index.kind == "document"
             and variant_dir.exists()
             and next(variant_dir.iterdir(), None) is not None
+            and not snapshot_path.is_file()
         ):
-            if not snapshot_path.is_file():
-                raise BundleInspectionError(
-                    f"refusing to inspect non-empty RenderPlan variant without a profile snapshot: {variant_dir}"
-                )
+            raise BundleInspectionError(
+                f"refusing to inspect non-empty RenderPlan variant without a profile snapshot: {variant_dir}"
+            )
     except BundleInspectionError as exc:
         global_error = str(exc)
     except (OSError, RenderPlanSetError, ValueError, TypeError, RuntimeError) as exc:
