@@ -460,14 +460,13 @@ def render_book(
                 label,
                 profile_id,
                 profile_path,
-                index.root,
                 utterplan_dir,
                 variant_dir,
                 manifest_path,
             )
     else:
         renderplan_set = _new_book_renderplan_set(
-            label, profile_id, profile_path, index.root, utterplan_dir, variant_dir, manifest_path
+            label, profile_id, profile_path, utterplan_dir, variant_dir, manifest_path
         )
 
     # Validate readable source plans and aggregate role coverage before creating collection state.
@@ -562,19 +561,11 @@ def _new_book_renderplan_set(
     label: str,
     profile_id: str,
     profile_path: Path,
-    book_root: Path,
     utterplan_dir: Path,
     variant_dir: Path,
     manifest_path: Path,
 ) -> RenderPlanSet:
-    profile_in_workspace = _path_is_within(profile_path, book_root) or _path_is_within(
-        profile_path, variant_dir.parent
-    )
-    profile_reference = (
-        _relative_path_reference(profile_path, variant_dir)
-        if profile_in_workspace
-        else str(profile_path)
-    )
+    profile_reference = _relative_path_reference(profile_path, variant_dir)
     return new_renderplan_set(
         variant=label,
         profile_id=profile_id,

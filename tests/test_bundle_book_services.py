@@ -145,6 +145,33 @@ def test_public_book_services_return_artifact_paths_and_progress(tmp_path: Path)
     assert render_report["written"] == 3
 
 
+def test_render_book_supports_external_sibling_profile(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    root = _book(project / "book.ssmd-bundle", (5,))
+    compile_book(
+        root,
+        planner_config=PlannerConfig(
+            language="en-US",
+            text_preparation="identity",
+            linguistics=LinguisticsConfig(use_spacy=False),
+        ),
+    )
+
+    profile_path = project / "narrator.renderprofile.toml"
+    profile = _profile(profile_path)
+    rendered = render_book(root, profile=profile_path, chapters="all")
+
+    assert rendered.exit_code == 0
+    assert rendered.failed == 0
+    assert rendered.profile_id == profile.profile_id
+    renderplan_set = load_renderplan_set(rendered.set_path)
+    source_profile = renderplan_set.source_profile
+    assert not Path(source_profile).is_absolute()
+    assert "\\" not in source_profile
+    assert (rendered.variant_dir / source_profile).resolve() == profile_path.resolve()
+    assert renderplan_set.profile_id == profile.profile_id
+
+
 @pytest.mark.parametrize(
     ("selector", "expected"),
     [
