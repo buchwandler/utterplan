@@ -1,0 +1,30 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.6.19
+git_base_ref: v0.6.18
+git_base_sha: 2a83b882a517bbd50587bc1ad2e9c712ef6ad0ea
+git_head_ref: HEAD
+git_head_sha: 4f6f5c908019d5e24b60748974c1d62619fd6342
+git_range: 2a83b882a517bbd50587bc1ad2e9c712ef6ad0ea..4f6f5c908019d5e24b60748974c1d62619fd6342
+commit_count: 1
+rows:
+  - sha: 4f6f5c908019d5e24b60748974c1d62619fd6342
+    source_ref: git:4f6f5c908019d5e24b60748974c1d62619fd6342
+    short_sha: 4f6f5c9
+    changed_paths:
+      - tests/test_bundle_book_services.py
+      - utterplan/_book_service.py
+    stats:
+      files_changed: 2
+      insertions: 29
+      deletions: 11
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: fix book service"

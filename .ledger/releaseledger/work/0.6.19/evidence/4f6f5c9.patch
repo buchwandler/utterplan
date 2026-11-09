@@ -1,0 +1,83 @@
+ tests/test_bundle_book_services.py | 27 +++++++++++++++++++++++++++
+ utterplan/_book_service.py         | 13 ++-----------
+ 2 files changed, 29 insertions(+), 11 deletions(-)
+
+diff --git a/tests/test_bundle_book_services.py b/tests/test_bundle_book_services.py
+index 250c973..aed1594 100644
+--- a/tests/test_bundle_book_services.py
++++ b/tests/test_bundle_book_services.py
+@@ -145,6 +145,33 @@ def test_public_book_services_return_artifact_paths_and_progress(tmp_path: Path)
+     assert render_report["written"] == 3
+
+
++def test_render_book_supports_external_sibling_profile(tmp_path: Path) -> None:
++    project = tmp_path / "project"
++    root = _book(project / "book.ssmd-bundle", (5,))
++    compile_book(
++        root,
++        planner_config=PlannerConfig(
++            language="en-US",
++            text_preparation="identity",
++            linguistics=LinguisticsConfig(use_spacy=False),
++        ),
++    )
++
++    profile_path = project / "narrator.renderprofile.toml"
++    profile = _profile(profile_path)
++    rendered = render_book(root, profile=profile_path, chapters="all")
++
++    assert rendered.exit_code == 0
++    assert rendered.failed == 0
++    assert rendered.profile_id == profile.profile_id
++    renderplan_set = load_renderplan_set(rendered.set_path)
++    source_profile = renderplan_set.source_profile
++    assert not Path(source_profile).is_absolute()
++    assert "\\" not in source_profile
++    assert (rendered.variant_dir / source_profile).resolve() == profile_path.resolve()
++    assert renderplan_set.profile_id == profile.profile_id
++
++
+ @pytest.mark.parametrize(
+     ("selector", "expected"),
+     [
+diff --git a/utterplan/_book_service.py b/utterplan/_book_service.py
+index 6058aa1..35e199b 100644
+--- a/utterplan/_book_service.py
++++ b/utterplan/_book_service.py
+@@ -460,14 +460,13 @@ def render_book(
+                 label,
+                 profile_id,
+                 profile_path,
+-                index.root,
+                 utterplan_dir,
+                 variant_dir,
+                 manifest_path,
+             )
+     else:
+         renderplan_set = _new_book_renderplan_set(
+-            label, profile_id, profile_path, index.root, utterplan_dir, variant_dir, manifest_path
++            label, profile_id, profile_path, utterplan_dir, variant_dir, manifest_path
+         )
+
+     # Validate readable source plans and aggregate role coverage before creating collection state.
+@@ -562,19 +561,11 @@ def _new_book_renderplan_set(
+     label: str,
+     profile_id: str,
+     profile_path: Path,
+-    book_root: Path,
+     utterplan_dir: Path,
+     variant_dir: Path,
+     manifest_path: Path,
+ ) -> RenderPlanSet:
+-    profile_in_workspace = _path_is_within(profile_path, book_root) or _path_is_within(
+-        profile_path, variant_dir.parent
+-    )
+-    profile_reference = (
+-        _relative_path_reference(profile_path, variant_dir)
+-        if profile_in_workspace
+-        else str(profile_path)
+-    )
++    profile_reference = _relative_path_reference(profile_path, variant_dir)
+     return new_renderplan_set(
+         variant=label,
+         profile_id=profile_id,

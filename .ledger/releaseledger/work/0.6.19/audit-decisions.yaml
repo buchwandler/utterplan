@@ -1,0 +1,13 @@
+rows:
+  - sha: 4f6f5c908019d5e24b60748974c1d62619fd6342
+    inspected: true
+    inspected_paths:
+      - tests/test_bundle_book_services.py
+      - utterplan/_book_service.py
+    observed_behavior: "Book rendering now stores the RenderProfile reference relative to the RenderPlan variant, including profiles outside the bundle; the new test confirms the relative path resolves to the original sibling profile."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false

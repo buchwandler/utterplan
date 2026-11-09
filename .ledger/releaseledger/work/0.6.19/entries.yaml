@@ -1,0 +1,25 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.6.19
+git_base_ref: 2a83b882a517bbd50587bc1ad2e9c712ef6ad0ea
+git_base_sha: 2a83b882a517bbd50587bc1ad2e9c712ef6ad0ea
+git_head_ref: 4f6f5c908019d5e24b60748974c1d62619fd6342
+git_head_sha: 4f6f5c908019d5e24b60748974c1d62619fd6342
+include_merges: nontrivial
+entries:
+  - kind: fixed
+    summary: "Fixed book RenderPlan sets to store portable references to external sibling RenderProfiles"
+    status: accepted
+    source_refs:
+      - git:4f6f5c908019d5e24b60748974c1d62619fd6342
+    paths:
+      - tests/test_bundle_book_services.py
+      - utterplan/_book_service.py
+    sources:
+      - git:4f6f5c908019d5e24b60748974c1d62619fd6342
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
